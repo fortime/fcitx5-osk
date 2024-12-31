@@ -5,13 +5,14 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.94"
-clap = { version = "4.5.23", features = ["derive"] }
+clap = { version = "4.5.23", features = ["cargo", "derive"] }
 dark-light = "1.1.1"
 figment = { version = "0.10.19", features = ["toml"] }
 getset = "0.1.3"
-iced = { version = "0.13.1" }
+iced = { version = "0.13.1", features = ["tokio"] }
+pin-project = "1.1.7"
 serde = { version = "1.0.216", features = ["derive"] }
-tokio = { version = "1.42", features = ["fs", "macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1.42", features = ["fs", "macros", "rt-multi-thread"] }
 toml = "0.8.19"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

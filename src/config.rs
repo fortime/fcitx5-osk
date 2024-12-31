@@ -1,4 +1,4 @@
-use std::{future::Future, path::PathBuf, sync::Arc};
+use std::{future::Future, path::PathBuf};
 
 use anyhow::Result;
 use figment::{
@@ -6,14 +6,9 @@ use figment::{
     Figment,
 };
 use getset::{CopyGetters, Getters, Setters};
+use iced::futures::{channel::mpsc::{self, UnboundedSender}, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio::{
-    fs,
-    sync::{
-        mpsc::{self, error::{TryRecvError, TrySendError}, Sender},
-        Mutex,
-    },
-};
+use tokio::fs;
 
 #[derive(Deserialize, Serialize, CopyGetters, Getters, Setters, Default, Clone)]
 pub struct Config {
@@ -38,7 +33,7 @@ pub struct Config {
 pub struct ConfigManager {
     _path: PathBuf,
     config: Config,
-    writer: Sender<String>,
+    writer: UnboundedSender<String>,
 }
 
 impl ConfigManager {
@@ -48,7 +43,7 @@ impl ConfigManager {
         } else {
             Default::default()
         };
-        let (tx, mut rx) = mpsc::channel(10);
+        let (tx, mut rx) = mpsc::unbounded();
         let res = Self {
             _path: path.clone(),
             config,
@@ -57,16 +52,18 @@ impl ConfigManager {
         let path = path.clone();
         let bg = async move {
             loop {
-                let mut latest = if let Some(c) = rx.recv().await {
+                let mut latest = if let Some(c) = rx.next().await {
                     c
                 } else {
                     break;
                 };
                 let closed = loop {
-                    match rx.try_recv() {
-                        Ok(c) => latest = c,
-                        Err(TryRecvError::Empty) => break false,
-                        Err(TryRecvError::Disconnected) => break true,
+                    match rx.try_next() {
+                        Ok(Some(c)) => latest = c,
+                        // closed
+                        Ok(None) => break true,
+                        // no message
+                        Err(_) => break false,
                     }
                 };
 
@@ -89,13 +86,10 @@ impl ConfigManager {
             Err(e) => {
                 tracing::error!("failed to serialize config: {e}");
                 return false;
-            },
-        };
-        if let Err(e) = self.writer.try_send(content) {
-            match e {
-                TrySendError::Full(_) => tracing::warn!("failed to write config, channel is full"),
-                TrySendError::Closed(_) => tracing::warn!("failed to write config, channel is closed"),
             }
+        };
+        if let Err(_) = self.writer.unbounded_send(content) {
+            tracing::warn!("failed to write config, channel is closed");
             false
         } else {
             true

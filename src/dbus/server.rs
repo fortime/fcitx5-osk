@@ -1,4 +1,8 @@
+use iced::futures::channel::mpsc::UnboundedSender;
+use tracing::instrument;
 use zbus::{fdo::Error, interface, Connection};
+
+use crate::keyboard::Message;
 
 ///According to codes in fcitx5:src/ui/virtualkeyboard/virtualkeyboard.cpp
 ///
@@ -34,42 +38,59 @@ use zbus::{fdo::Error, interface, Connection};
 ///     VirtualKeyboardName, "/org/fcitx/virtualkeyboard/impanel",
 ///     VirtualKeyboardInterfaceName, "NotifyIMListChanged");
 #[derive(Clone)]
-pub struct VirtualkeyboardImPanelService {}
+pub struct Fcitx5VirtualkeyboardImPanelService {
+    tx: UnboundedSender<Message>,
+}
 
-impl VirtualkeyboardImPanelService {
+impl Fcitx5VirtualkeyboardImPanelService {
+    pub fn new(tx: UnboundedSender<Message>) -> Self {
+        Self { tx }
+    }
+
     pub async fn start(self) -> Result<Connection, Error> {
         let conn = Connection::session().await?;
         conn.object_server().at(Self::OBJECT_PATH, self).await?;
         conn.request_name(Self::SERVICE_NAME).await?;
         Ok(conn)
     }
+
+    fn send(&self, state: Fcitx5VirtualkeyboardImPanelState) -> Result<(), Error> {
+        self.tx.unbounded_send(state.into()).map_err(|_| {
+            Error::Failed("the channel has been closed, unable to handle the request".to_string())
+        })
+    }
 }
 
 #[interface(name = "org.fcitx.Fcitx5.VirtualKeyboard1")]
-impl VirtualkeyboardImPanelService {
+impl Fcitx5VirtualkeyboardImPanelService {
     const SERVICE_NAME: &'static str = "org.fcitx.Fcitx5.VirtualKeyboard";
     const OBJECT_PATH: &'static str = "/org/fcitx/virtualkeyboard/impanel";
 
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn show_virtual_keyboard(&self) -> Result<(), Error> {
-        tracing::error!("show");
-        Ok(())
+        self.send(Fcitx5VirtualkeyboardImPanelState::ShowVirtualKeyboard)
     }
 
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn hide_virtual_keyboard(&self) -> Result<(), Error> {
-        tracing::error!("hide");
-        Ok(())
+        self.send(Fcitx5VirtualkeyboardImPanelState::HideVirtualKeyboard)
     }
 
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn update_preedit_caret(&self, preedit_cursor: i32) -> Result<(), Error> {
-        tracing::error!("cursor: {}", preedit_cursor);
-        Ok(())
+        self.send(Fcitx5VirtualkeyboardImPanelState::UpdatePreeditCaret(
+            preedit_cursor,
+        ))
     }
 
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn update_preedit_area(&self, preedit_text: String) -> Result<(), Error> {
-        tracing::error!("text: {}", preedit_text);
-        Ok(())
+        self.send(Fcitx5VirtualkeyboardImPanelState::UpdatePreeditArea(
+            preedit_text,
+        ))
     }
 
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn update_candidate_area(
         &self,
         candidate_text_list: Vec<String>,
@@ -78,22 +99,51 @@ impl VirtualkeyboardImPanelService {
         page_index: i32,
         global_cursor_index: i32,
     ) -> Result<(), Error> {
-        tracing::error!("text list: {:?}", candidate_text_list);
-        Ok(())
+        self.send(Fcitx5VirtualkeyboardImPanelState::UpdateCandidateArea {
+            candidate_text_list,
+            has_prev,
+            has_next,
+            page_index,
+            global_cursor_index,
+        })
     }
 
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_activated(&self, im: String) -> Result<(), Error> {
-        tracing::error!("activated im: {}", im);
-        Ok(())
+        self.send(Fcitx5VirtualkeyboardImPanelState::NotifyImActivated(im))
     }
 
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_deactivated(&self, im: String) -> Result<(), Error> {
-        tracing::error!("deactivated im: {}", im);
-        Ok(())
+        self.send(Fcitx5VirtualkeyboardImPanelState::NotifyImDeactivated(im))
     }
 
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_list_changed(&self) -> Result<(), Error> {
-        tracing::error!("im list changed");
-        Ok(())
+        self.send(Fcitx5VirtualkeyboardImPanelState::NotifyImListChanged)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum Fcitx5VirtualkeyboardImPanelState {
+    ShowVirtualKeyboard,
+    HideVirtualKeyboard,
+    UpdatePreeditCaret(i32),
+    UpdatePreeditArea(String),
+    UpdateCandidateArea {
+        candidate_text_list: Vec<String>,
+        has_prev: bool,
+        has_next: bool,
+        page_index: i32,
+        global_cursor_index: i32,
+    },
+    NotifyImActivated(String),
+    NotifyImDeactivated(String),
+    NotifyImListChanged,
+}
+
+impl From<Fcitx5VirtualkeyboardImPanelState> for Message {
+    fn from(value: Fcitx5VirtualkeyboardImPanelState) -> Self {
+        Self::Fcitx5VirtualkeyboardImPanel(value)
     }
 }

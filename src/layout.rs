@@ -1,7 +1,7 @@
 //! In this layout, the unit of length is not pixel or meter. It is 1/8 of a normal
 //! key's width.
 
-use getset::Getters;
+use getset::{CopyGetters, Getters};
 use iced::{
     alignment::{Horizontal, Vertical},
     widget::{Column, Row, Space},
@@ -28,7 +28,7 @@ pub trait KeyManager {
     ) -> Element<'a, Self::Message>;
 }
 
-#[derive(Deserialize, Getters)]
+#[derive(Deserialize, CopyGetters, Getters)]
 pub struct KeyAreaLayout {
     path: Option<PathBuf>,
     #[getset(get = "pub")]
@@ -40,10 +40,10 @@ pub struct KeyAreaLayout {
     #[getset(get = "pub")]
     key_mappings: HashMap<String, KeyId>,
     #[serde(default = "KeyAreaLayout::default_primary_text_size")]
-    #[getset(get = "pub")]
+    #[getset(get_copy = "pub")]
     primary_text_size: u16,
     #[serde(default = "KeyAreaLayout::default_secondary_text_size")]
-    #[getset(get = "pub")]
+    #[getset(get_copy = "pub")]
     secondary_text_size: u16,
 }
 

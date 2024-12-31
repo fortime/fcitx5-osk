@@ -7,8 +7,8 @@ use figment::{
     providers::{Format, Toml},
     Figment,
 };
-use iced::{window::Position, Size, Theme};
-use keyboard::Keyboard;
+use iced::{window::Position, Size, Task, Theme};
+use keyboard::{Keyboard, Message};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 mod config;
@@ -41,17 +41,14 @@ fn init_log(config: &Config) -> Result<()> {
     Ok(())
 }
 
-async fn run(args: Args) -> Result<()> {
-    let (config_manager, write_bg) = ConfigManager::new(&args.config)?;
+fn run(args: Args) -> Result<()> {
+    let (config_manager, config_write_bg) = ConfigManager::new(&args.config)?;
 
     init_log(config_manager.as_ref())?;
 
-    let s = dbus::server::VirtualkeyboardImPanelService {};
-    let _conn = s.start().await?;
+    let mut keyboard = Keyboard::new(config_manager)?;
 
-    let keyboard = Keyboard::new(config_manager).await?;
-
-    iced::application("Keyboard", Keyboard::update, Keyboard::view)
+    iced::application(clap::crate_name!(), Keyboard::update, Keyboard::view)
         .decorations(false)
         .position(Position::Specific((10.0, 10.0).into()))
         .window_size(keyboard.window_size())
@@ -61,7 +58,10 @@ async fn run(args: Args) -> Result<()> {
             (
                 keyboard,
                 // calculate size
-                ().into(),
+                Task::future(async move {
+                    tokio::spawn(config_write_bg);
+                    Message::Nothing
+                }),
             )
         })?;
     Ok(())
@@ -73,10 +73,9 @@ async fn run(args: Args) -> Result<()> {
 ///
 /// show & hide:
 /// show when user focus on a input box and hide after the user left the input box.
-#[tokio::main]
-async fn main() {
+pub fn main() {
     let args = Args::parse();
-    if let Err(e) = run(args).await {
+    if let Err(e) = run(args) {
         eprintln!("run command failed: {e}");
         process::exit(1);
     }
