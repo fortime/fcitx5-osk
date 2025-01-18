@@ -60,28 +60,17 @@ impl KeyAreaLayout {
         1
     }
 
-    fn width(&self) -> u16 {
+    pub fn width(&self) -> u16 {
         self.elements.iter().map(KeyRow::width).max().unwrap_or(0)
     }
 
-    fn height(&self) -> u16 {
+    pub fn height(&self) -> u16 {
         if self.elements.is_empty() {
             return 0;
         }
         let mut height = self.spacing * (self.elements.len() as u16 - 1);
         height += self.elements.iter().map(KeyRow::height).sum::<u16>();
         height
-    }
-
-    pub fn unit_within(&self, width_p: u16) -> u16 {
-        let width = self.width();
-
-        let mut unit = width_p / width;
-        if unit < 1 {
-            tracing::warn!("width: {width_p} are too small");
-            unit = 1;
-        }
-        unit
     }
 
     pub fn size_p(&self, unit: u16) -> (u16, u16) {

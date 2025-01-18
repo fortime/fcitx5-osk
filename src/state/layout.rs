@@ -1,13 +1,19 @@
 use std::{mem, rc::Rc};
 
 use anyhow::Result;
-use iced::{alignment::Horizontal, widget::{Column, Text}, Padding, Size};
+use iced::{
+    alignment::Horizontal,
+    widget::{Column, Text},
+    Padding, Size,
+};
 
 use crate::layout::{KeyAreaLayout, KeyManager};
 
 pub struct LayoutState {
     size_p: (u16, u16),
+    scale_factor: f32,
     unit: u16,
+    //fit: bool,
     padding: Padding,
     toolbar_layout: (),
     key_area_layout: Rc<KeyAreaLayout>,
@@ -16,13 +22,12 @@ pub struct LayoutState {
 impl LayoutState {
     const MIN_P: u16 = 640;
 
-    const MIN_PADDING_P: u16 = 5;
-
     const TOOLBAR_HEIGHT: u16 = 6;
 
     pub fn new(width_p: u16, key_area_layout: Rc<KeyAreaLayout>) -> Result<Self> {
         let mut res = Self {
             size_p: (width_p, 0),
+            scale_factor: 1.0,
             unit: Default::default(),
             padding: Default::default(),
             toolbar_layout: Default::default(),
@@ -32,30 +37,46 @@ impl LayoutState {
         Ok(res)
     }
 
-    fn calculate_size(&mut self) -> Result<()> {
-        let mut width_p = self.size_p.0;
-        // when width or height mod 4 = 1, the size of this layout is not the same as the size of
-        // window. So, when width or height mod 4 = 1, width or height will be increased by 1.
-        if width_p % 4 == 1 {
-            width_p += 1;
+    fn unit_within(&self, width_p: u16) -> u16 {
+        // plus two units of padding
+        let width = self.key_area_layout.width() + 2;
+
+        let mut unit = width_p / width;
+        if unit < 1 {
+            tracing::warn!("width: {width_p} are too small");
+            unit = 1;
         }
+
+        while (unit as f32 * self.scale_factor).fract() != 0.0 {
+            tracing::warn!(
+                "physical size of unit has fraction, increase it: {} / {}",
+                unit,
+                self.scale_factor
+            );
+            unit += 1;
+        }
+
+        unit
+    }
+
+    fn calculate_size(&mut self) -> Result<()> {
+        // because of scaling issue, the actual window size is different from the one calculated in
+        // this method.
+        let width_p = self.size_p.0;
         if width_p < Self::MIN_P {
             anyhow::bail!("width is too small: {}", width_p);
         }
-        let trimmed_width_p = width_p - Self::MIN_PADDING_P * 2;
-        let unit = self.key_area_layout.unit_within(trimmed_width_p);
+        let unit = self.unit_within(width_p);
         let key_area_size_p = self.key_area_layout.size_p(unit);
 
         self.unit = unit;
-        let height_p_without_padding = key_area_size_p.1 + 4 + (Self::TOOLBAR_HEIGHT + 1) * unit;
-        let mut height_p = height_p_without_padding + Self::MIN_PADDING_P * 2;
-        if height_p % 4 == 1 {
-            height_p += 1;
-        }
+        let width_p = key_area_size_p.0 + 2 * unit;
+        // one padding is between toolbar and key_area, two paddings are of the keyboard.
+        let height_p = key_area_size_p.1 + (Self::TOOLBAR_HEIGHT + 3) * unit;
         self.size_p = (width_p, height_p);
         self.padding = Padding::from([
-            (height_p - height_p_without_padding) as f32 / 2.0,
-            (width_p - key_area_size_p.0) as f32 / 2.0,
+            (2 * unit) as f32 / 2.0,
+            (2 * unit) as f32 / 2.0,
         ]);
         tracing::debug!(
             "unit: {}, keyboard size: {:?}, key area size: {:?} padding: {:?}",
@@ -71,8 +92,9 @@ impl LayoutState {
         Size::from((self.size_p.0 as f32, self.size_p.1 as f32))
     }
 
-    pub fn update_width(&mut self, mut width_p: u16) -> bool {
+    pub fn update_width(&mut self, mut width_p: u16, scale_factor: f32) -> bool {
         mem::swap(&mut self.size_p.0, &mut width_p);
+        self.scale_factor = scale_factor;
         if let Err(e) = self.calculate_size() {
             tracing::debug!("failed to update width: {e}, recovering.");
             // recover
@@ -83,7 +105,10 @@ impl LayoutState {
         }
     }
 
-    pub(super) fn update_key_area_layout(&mut self, mut key_area_layout: Rc<KeyAreaLayout>) -> bool {
+    pub fn update_key_area_layout(
+        &mut self,
+        mut key_area_layout: Rc<KeyAreaLayout>,
+    ) -> bool {
         mem::swap(&mut self.key_area_layout, &mut key_area_layout);
         if let Err(e) = self.calculate_size() {
             tracing::debug!(

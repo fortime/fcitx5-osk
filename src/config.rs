@@ -28,6 +28,10 @@ pub struct Config {
 
     #[getset(get = "pub", set = "pub")]
     theme: String,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    placement: Placement,
 }
 
 pub struct ConfigManager {
@@ -107,4 +111,11 @@ impl AsMut<Config> for ConfigManager {
     fn as_mut(&mut self) -> &mut Config {
         &mut self.config
     }
+}
+
+#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+pub enum Placement {
+    #[default]
+    Dock,
+    Float,
 }

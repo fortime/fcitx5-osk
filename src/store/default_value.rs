@@ -94,7 +94,7 @@ k59 = "k_print"
 k60 = "k_right_ctrl"
 "#;
 
-pub const DEFAULT_KEY_SET_TOML: &str = r#"
+pub const DEFAULT_KEY_SET_TOML: &str = r##"
 name = "default"
 
 [keys.k_grave_accent]
@@ -114,33 +114,53 @@ c = "@"
 
 [keys.k_three]
 p = {c = "3"}
+[[keys.k_three.s]]
+c = "#"
 
 [keys.k_four]
 p = {c = "4"}
+[[keys.k_four.s]]
+c = "$"
 
 [keys.k_five]
 p = {c = "5"}
+[[keys.k_five.s]]
+c = "%"
 
 [keys.k_six]
 p = {c = "6"}
+[[keys.k_six.s]]
+c = "^"
 
 [keys.k_seven]
 p = {c = "7"}
+[[keys.k_seven.s]]
+c = "&"
 
 [keys.k_eight]
 p = {c = "8"}
+[[keys.k_eight.s]]
+c = "*"
 
 [keys.k_nine]
 p = {c = "9"}
+[[keys.k_nine.s]]
+c = "("
 
 [keys.k_zero]
 p = {c = "0"}
+[[keys.k_zero.s]]
+c = ")"
 
 [keys.k_hyphen]
 p = {c = "-"}
+[[keys.k_hyphen.s]]
+c = "_"
 
 [keys.k_equals]
 p = {c = "="}
+[[keys.k_equals.s]]
+c = "+"
 
 [keys.k_backspace]
 p = {ks = 0xff08}
@@ -150,42 +170,68 @@ p = {ks = 0xff09}
 
 [keys.k_q]
 p = {c = "q"}
+[[keys.k_q.s]]
+c = "Q"
 
 [keys.k_w]
 p = {c = "w"}
+[[keys.k_w.s]]
+c = "W"
 
 [keys.k_e]
 p = {c = "e"}
+[[keys.k_e.s]]
+c = "E"
 
 [keys.k_r]
 p = {c = "r"}
+[[keys.k_r.s]]
+c = "R"
 
 [keys.k_t]
 p = {c = "t"}
+[[keys.k_t.s]]
+c = "T"
 
 [keys.k_y]
 p = {c = "y"}
+[[keys.k_y.s]]
+c = "Y"
 
 [keys.k_u]
 p = {c = "u"}
+[[keys.k_u.s]]
+c = "U"
 
 [keys.k_i]
 p = {c = "i"}
+[[keys.k_i.s]]
+c = "I"
 
 [keys.k_o]
 p = {c = "o"}
+[[keys.k_o.s]]
+c = "O"
 
 [keys.k_p]
 p = {c = "p"}
+[[keys.k_p.s]]
+c = "P"
 
 [keys.k_open_bracket]
 p = {c = "["}
+[[keys.k_open_bracket.s]]
+c = "{"
 
 [keys.k_close_bracket]
 p = {c = "]"}
+[[keys.k_close_bracket.s]]
+c = "}"
 
 [keys.k_backslash]
 p = {c = "\\"}
+[[keys.k_backslash.s]]
+c = "|"
 
 [keys.k_caps_lock]
 p = {ks = 0xffe5}
@@ -195,36 +241,58 @@ p = {ks = 0xff1b}
 
 [keys.k_a]
 p = {c = "a"}
+[[keys.k_a.s]]
+c = "A"
 
 [keys.k_s]
 p = {c = "s"}
+[[keys.k_s.s]]
+c = "S"
 
 [keys.k_d]
 p = {c = "d"}
+[[keys.k_d.s]]
+c = "D"
 
 [keys.k_f]
 p = {c = "f"}
+[[keys.k_f.s]]
+c = "F"
 
 [keys.k_g]
 p = {c = "g"}
+[[keys.k_g.s]]
+c = "G"
 
 [keys.k_h]
 p = {c = "h"}
+[[keys.k_h.s]]
+c = "H"
 
 [keys.k_j]
 p = {c = "j"}
+[[keys.k_j.s]]
+c = "J"
 
 [keys.k_k]
 p = {c = "k"}
+[[keys.k_k.s]]
+c = "K"
 
 [keys.k_l]
 p = {c = "l"}
+[[keys.k_l.s]]
+c = "L"
 
 [keys.k_semicolon]
 p = {c = ";"}
+[[keys.k_semicolon.s]]
+c = ":"
 
 [keys.k_apostrophe]
 p = {c = "'"}
+[[keys.k_apostrophe.s]]
+c = "\""
 
 [keys.k_enter]
 p = {ks = 0xff0a}
@@ -234,33 +302,53 @@ p = {ks = 0xffe1}
 
 [keys.k_z]
 p = {c = "z"}
+[[keys.k_z.s]]
+c = "Z"
 
 [keys.k_x]
 p = {c = "x"}
+[[keys.k_x.s]]
+c = "X"
 
 [keys.k_c]
 p = {c = "c"}
+[[keys.k_c.s]]
+c = "C"
 
 [keys.k_v]
 p = {c = "v"}
+[[keys.k_v.s]]
+c = "V"
 
 [keys.k_b]
 p = {c = "b"}
+[[keys.k_b.s]]
+c = "B"
 
 [keys.k_n]
 p = {c = "n"}
+[[keys.k_n.s]]
+c = "N"
 
 [keys.k_m]
 p = {c = "m"}
+[[keys.k_m.s]]
+c = "M"
 
 [keys.k_comma]
 p = {c = ","}
+[[keys.k_comma.s]]
+c = "<"
 
 [keys.k_dot]
 p = {c = "."}
+[[keys.k_dot.s]]
+c = ">"
 
 [keys.k_slash]
 p = {c = "/"}
+[[keys.k_slash.s]]
+c = "?"
 
 [keys.k_right_shift]
 p = {ks = 0xffe2}
@@ -288,4 +376,4 @@ p = {ks = 0xff61}
 
 [keys.k_right_ctrl]
 p = {ks = 0xffe4}
-"#;
+"##;

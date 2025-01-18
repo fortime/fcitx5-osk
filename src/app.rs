@@ -13,42 +13,93 @@ use iced::{
         Stream, StreamExt,
     },
     widget,
-    window::{self, Id, Settings},
-    Color, Element, Size, Subscription, Task, Theme,
+    window::{self, Event as IcedWindowEvent, Id, Settings},
+    Color, Element, Event as IcedEvent, Size, Subscription, Task, Theme,
 };
+use iced_futures::event;
 use pin_project::pin_project;
 use xkeysym::Keysym;
 
 use crate::{
-    config::ConfigManager,
-    dbus::{client::InputMethodInfo, server::Fcitx5VirtualkeyboardImPanelState},
+    config::{ConfigManager, Placement},
+    dbus::{client::InputMethodInfo, server::Fcitx5VirtualkeyboardImPanelEvent},
     state::{
-        KeyboardState, LayoutState, StartDbusServiceState, StartedState, State, WindowStateSnapshot,
+        HideOpSource, KeyboardState, LayoutState, StartDbusServiceEvent, StartedEvent, State,
+        WindowEvent, WindowStateSnapshot,
     },
     store::Store,
+    window::{WindowManager, WindowSettings},
 };
+
+pub mod wayland;
+pub mod x11;
 
 #[derive(Clone, Debug)]
 pub enum Message {
     Nothing,
-    Started(StartedState),
-    StartDbusService(StartDbusServiceState),
+    Started(StartedEvent),
+    NewSubscription(UnboundedSender<Message>),
+    StartDbusService(StartDbusServiceEvent),
     Error(KeyboardError),
     AfterError,
     KeyPressed(u8, String, Keysym),
     KeyReleased(u8, String, Keysym),
-    Resize(Id, u16),
+    Window(WindowEvent),
     UpdateKeyAreaLayout(String),
-    HideWindow(WindowStateSnapshot),
-    Fcitx5VirtualkeyboardImPanel(Fcitx5VirtualkeyboardImPanelState),
+    Fcitx5VirtualkeyboardImPanel(Fcitx5VirtualkeyboardImPanelEvent),
     UpdateImList(Vec<InputMethodInfo>),
     UpdateCurrentIm(String),
+}
+
+trait MapTask<T> {
+    fn map_task(self) -> Task<T>;
+}
+
+impl<T> MapTask<T> for Task<Message>
+where
+    T: From<Message> + 'static + Send,
+{
+    fn map_task(self) -> Task<T> {
+        self.map(|t| t.into())
+    }
+}
+
+trait ErrorDialogContent {
+    fn err_msg(&self) -> String;
+
+    fn button_text(&self) -> String;
 }
 
 #[derive(Clone, Debug)]
 pub enum KeyboardError {
     Error(Arc<Error>),
     Fatal(Arc<Error>),
+}
+
+impl ErrorDialogContent for &KeyboardError {
+    fn err_msg(&self) -> String {
+        match self {
+            KeyboardError::Error(e) => format!("Error: {e}"),
+            KeyboardError::Fatal(e) => format!("Fatal error: {e}"),
+        }
+    }
+
+    fn button_text(&self) -> String {
+        match self {
+            KeyboardError::Error(_) => "Close".to_string(),
+            KeyboardError::Fatal(_) => "Exit".to_string(),
+        }
+    }
+}
+
+impl<'a> ErrorDialogContent for &'a str {
+    fn err_msg(&self) -> String {
+        self.to_string()
+    }
+
+    fn button_text(&self) -> String {
+        "Close".to_string()
+    }
 }
 
 impl From<KeyboardError> for Message {
@@ -59,23 +110,27 @@ impl From<KeyboardError> for Message {
 
 impl KeyboardError {
     fn is_priority_over(&self, other: &Self) -> bool {
-        match (self, other) {
-            (KeyboardError::Error(_), KeyboardError::Error(_)) => true,
-            (KeyboardError::Error(_), KeyboardError::Fatal(_)) => false,
-            (KeyboardError::Fatal(_), KeyboardError::Error(_)) => true,
-            (KeyboardError::Fatal(_), KeyboardError::Fatal(_)) => true,
+        if let KeyboardError::Fatal(_) = self {
+            return true;
         }
+        if let KeyboardError::Fatal(_) = other {
+            return false;
+        }
+        true
     }
 }
 
-pub struct Keyboard {
+pub struct Keyboard<WM> {
     config_manager: ConfigManager,
     store: Store,
-    state: State,
+    state: State<WM>,
     error: Option<KeyboardError>,
 }
 
-impl Keyboard {
+impl<WM> Keyboard<WM>
+where
+    WM: Default,
+{
     pub fn new(config_manager: ConfigManager) -> Result<Self> {
         let config = config_manager.as_ref();
         let store = Store::new(config)?;
@@ -93,16 +148,14 @@ impl Keyboard {
     }
 }
 
-impl Keyboard {
+impl<WM> Keyboard<WM> {
     pub fn start(&mut self) -> Task<Message> {
         self.state.start()
     }
 
-    pub fn error_dialog(&self, e: &KeyboardError) -> Element<Message> {
-        let (err_msg, button_text) = match e {
-            KeyboardError::Error(e) => (format!("Error: {e}"), "Close"),
-            KeyboardError::Fatal(e) => (format!("Fatal error: {e}"), "Exit"),
-        };
+    fn error_dialog<T: ErrorDialogContent>(&self, e: T) -> Element<Message> {
+        let err_msg = e.err_msg();
+        let button_text = e.button_text();
         widget::container(
             widget::column![
                 widget::text(err_msg),
@@ -134,29 +187,59 @@ impl Keyboard {
     }
 }
 
-impl Keyboard {
-    pub fn view(&self, _window_id: Id) -> Element<Message> {
+impl<WM> Keyboard<WM>
+where
+    WM: WindowManager,
+    WM::Message: From<Message> + 'static + Send + Sync,
+{
+    pub fn view(&self, _window_id: Id) -> Element<WM::Message> {
         let base = self
             .state
             .layout()
             .to_element(self.state.keyboard().input(), self.state.keyboard())
             .into();
-        if let Some(e) = &self.error {
+        let res = if let Some(e) = &self.error {
             modal(base, self.error_dialog(e), Message::AfterError)
+        } else if !self.state.window().wm_inited() {
+            modal(
+                base,
+                self.error_dialog("Keyboard window is Initializing!"),
+                Message::AfterError,
+            )
         } else {
             base
-        }
+        };
+        res.map(|m| m.into())
     }
 
-    pub fn subscription(&self) -> Subscription<Message> {
-        Subscription::run(move || {
-            let (tx, rx) = mpsc::unbounded();
+    pub fn subscription(&self) -> Subscription<WM::Message> {
+        Subscription::batch(vec![
+            event::listen_with(|event, status, id| {
+                tracing::trace!("event: {}, {:?}, {:?}", id, status, event);
+                match event {
+                    IcedEvent::Window(IcedWindowEvent::Opened {
+                        position: _position,
+                        size,
+                    }) => {
+                        // ignore position, position isn't supported in wayland
+                        Some(WindowEvent::WmInited(id, size).into())
+                    }
+                    IcedEvent::Window(IcedWindowEvent::Closed) => {
+                        Some(WindowEvent::Hidden(id).into())
+                    }
+                    _ => None,
+                }
+            }),
+            Subscription::run(move || {
+                let (tx, rx) = mpsc::unbounded();
 
-            MessageStream { tx: Some(tx), rx }
-        })
+                MessageStream { tx: Some(tx), rx }
+            }),
+        ])
+        .map(|m| m.into())
     }
 
-    pub fn update(&mut self, message: Message) -> Task<Message> {
+    pub fn update(&mut self, message: Message) -> Task<WM::Message> {
         match message {
             Message::Error(e) => self.handle_error_message(e),
             Message::AfterError => {
@@ -166,67 +249,101 @@ impl Keyboard {
                     });
                 }
             }
-            Message::Started(state) => match state {
-                StartedState::StartedDbusClients(services) => {
+            Message::Started(event) => match event {
+                StartedEvent::StartedDbusClients(services) => {
                     self.state.set_dbus_clients(services);
                     return self
                         .state
                         .im()
                         .sync_input_methods()
                         .chain(self.state.im().sync_current_input_method())
-                        .chain(self.state.window().show());
+                        // TODO show after im is updated
+                        .chain(self.state.window().show())
+                        .map_task();
                 }
             },
-            Message::StartDbusService(state) => match state {
-                StartDbusServiceState::New(tx) => {
-                    return self.state.keyboard_mut().start_dbus_service(tx);
-                }
-                StartDbusServiceState::Started(dbus_service_token, connection) => {
+            Message::NewSubscription(tx) => {
+                return self.state.keyboard_mut().start_dbus_service(tx).map_task();
+            }
+            Message::StartDbusService(event) => match event {
+                StartDbusServiceEvent::Started(dbus_service_token, connection) => {
                     self.state
                         .keyboard_mut()
                         .set_dbus_service_connection(dbus_service_token, connection);
                     // make sure keyboard is started after dbus service is created.
-                    return self.start();
+                    return self.start().map_task();
                 }
             },
             Message::KeyPressed(state_id, s, keysym) => {
-                return self.state.keyboard_mut().press_key(state_id, &s, keysym);
+                return self
+                    .state
+                    .keyboard_mut()
+                    .press_key(state_id, &s, keysym)
+                    .map_task();
             }
             Message::KeyReleased(state_id, s, keysym) => {
-                return self.state.keyboard_mut().release_key(state_id, &s, keysym);
+                return self
+                    .state
+                    .keyboard_mut()
+                    .release_key(state_id, &s, keysym)
+                    .map_task();
             }
-            Message::Resize(id, width_p) => {
-                // window::get_latest().map
-                if self.state.layout_mut().update_width(width_p) {
-                    self.config_manager.as_mut().set_width(width_p);
-                    self.config_manager.try_write();
-                    return window::resize(id, self.window_size());
-                }
-            }
-            Message::Fcitx5VirtualkeyboardImPanel(state) => {
-                match state {
-                    Fcitx5VirtualkeyboardImPanelState::ShowVirtualKeyboard => {
-                        let mut settings = Settings::default();
-                        settings.size = self.window_size();
-                        settings.decorations = false;
-                        return self.state.window_mut().show_local(settings);
+            Message::Window(event) => match event {
+                WindowEvent::Resize(id, scale_factor, width_p) => {
+                    tracing::debug!("scale_factor: {}", scale_factor);
+                    if self.state.layout_mut().update_width(width_p, scale_factor) {
+                        self.config_manager.as_mut().set_width(width_p);
+                        self.config_manager.try_write();
+                        let size = self.window_size();
+                        if !self.state.window().wm_inited() {
+                            self.state.window_mut().set_wm_inited(id)
+                        }
+                        return self.state.window_mut().resize(size);
                     }
-                    Fcitx5VirtualkeyboardImPanelState::HideVirtualKeyboard => {
+                }
+                WindowEvent::WmInited(id, size) => {
+                    if has_fraction(size.width) || has_fraction(size.height) {
+                        let width_p = self.config_manager.as_ref().width();
+                        return window::get_scale_factor(id).map(move |scale_factor| {
+                            // calculate a new size without fraction
+                            Message::from(WindowEvent::Resize(id, scale_factor, width_p)).into()
+                        });
+                    }
+                    self.state.window_mut().set_wm_inited(id)
+                }
+                WindowEvent::HideWindow(snapshot, source) => {
+                    if let Some(snapshot) = snapshot {
+                        return self.state.window_mut().hide_local_checked(snapshot, source);
+                    } else {
+                        return self.state.window_mut().hide_local(source);
+                    }
+                }
+                WindowEvent::Hidden(id) => {
+                    return self.set_hidden(id);
+                }
+            },
+            Message::Fcitx5VirtualkeyboardImPanel(event) => {
+                match event {
+                    Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
+                        return self.show();
+                    }
+                    Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard => {
                         return self
                             .state
                             .window_mut()
-                            .hide_local_with_delay(Duration::from_millis(1000));
+                            .hide_local_with_delay(
+                                Duration::from_millis(1000),
+                                HideOpSource::Fcitx5,
+                            )
+                            .map_task();
                     }
-                    Fcitx5VirtualkeyboardImPanelState::NotifyImListChanged => {
-                        return self.state.im().sync_input_methods();
+                    Fcitx5VirtualkeyboardImPanelEvent::NotifyImListChanged => {
+                        return self.state.im().sync_input_methods().map_task();
                     }
                     _ => {
                         // TODO
                     }
                 }
-            }
-            Message::HideWindow(snapshot) => {
-                return self.state.window_mut().hide_local_checked(snapshot);
             }
             Message::UpdateImList(list) => {
                 self.state.im_mut().update_ims(list);
@@ -243,13 +360,33 @@ impl Keyboard {
         self.state.layout().size()
     }
 
-    pub fn theme(&self, _window_id: Id) -> Theme {
+    pub fn theme_multi_dummy(&self, _window_id: Id) -> Theme {
+        self.theme()
+    }
+
+    pub fn theme(&self) -> Theme {
         if let Some(t) = self.store.theme(&self.config_manager.as_ref().theme()) {
             t.clone()
         } else {
             match dark_light::detect() {
                 Mode::Dark => Theme::Dark.clone(),
                 Mode::Light | Mode::Default => Theme::Light.clone(),
+            }
+        }
+    }
+
+    fn show(&mut self) -> Task<WM::Message> {
+        let settings =
+            WindowSettings::new(self.window_size(), self.config_manager.as_ref().placement());
+        return self.state.window_mut().show_local(settings);
+    }
+
+    fn set_hidden(&mut self, window_id: Id) -> Task<WM::Message> {
+        match self.state.window_mut().set_hidden(window_id) {
+            None | Some(HideOpSource::Fcitx5) => Task::none(),
+            Some(HideOpSource::External) => {
+                // call fcitx5 to hide if it is caused by external user action.
+                self.state.window().hide().map_task()
             }
         }
     }
@@ -266,7 +403,7 @@ impl Stream for MessageStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if let Some(tx) = self.tx.take() {
-            return Poll::Ready(Some(StartDbusServiceState::New(tx).into()));
+            return Poll::Ready(Some(Message::NewSubscription(tx)));
         }
         self.project().rx.poll_next_unpin(cx)
     }
@@ -296,4 +433,8 @@ fn modal<'a>(
         )
     ]
     .into()
+}
+
+fn has_fraction(f: f32) -> bool {
+    f != f.trunc()
 }

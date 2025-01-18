@@ -47,14 +47,13 @@ impl Fcitx5VirtualkeyboardImPanelService {
         Self { tx }
     }
 
-    pub async fn start(self) -> Result<Connection, Error> {
-        let conn = Connection::session().await?;
+    pub async fn start(self, conn: &Connection) -> Result<(), Error> {
         conn.object_server().at(Self::OBJECT_PATH, self).await?;
         conn.request_name(Self::SERVICE_NAME).await?;
-        Ok(conn)
+        Ok(())
     }
 
-    fn send(&self, state: Fcitx5VirtualkeyboardImPanelState) -> Result<(), Error> {
+    fn send(&self, state: Fcitx5VirtualkeyboardImPanelEvent) -> Result<(), Error> {
         self.tx.unbounded_send(state.into()).map_err(|_| {
             Error::Failed("the channel has been closed, unable to handle the request".to_string())
         })
@@ -68,24 +67,24 @@ impl Fcitx5VirtualkeyboardImPanelService {
 
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn show_virtual_keyboard(&self) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelState::ShowVirtualKeyboard)
+        self.send(Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard)
     }
 
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn hide_virtual_keyboard(&self) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelState::HideVirtualKeyboard)
+        self.send(Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard)
     }
 
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn update_preedit_caret(&self, preedit_cursor: i32) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelState::UpdatePreeditCaret(
+        self.send(Fcitx5VirtualkeyboardImPanelEvent::UpdatePreeditCaret(
             preedit_cursor,
         ))
     }
 
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn update_preedit_area(&self, preedit_text: String) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelState::UpdatePreeditArea(
+        self.send(Fcitx5VirtualkeyboardImPanelEvent::UpdatePreeditArea(
             preedit_text,
         ))
     }
@@ -99,7 +98,7 @@ impl Fcitx5VirtualkeyboardImPanelService {
         page_index: i32,
         global_cursor_index: i32,
     ) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelState::UpdateCandidateArea {
+        self.send(Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea {
             candidate_text_list,
             has_prev,
             has_next,
@@ -110,22 +109,22 @@ impl Fcitx5VirtualkeyboardImPanelService {
 
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_activated(&self, im: String) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelState::NotifyImActivated(im))
+        self.send(Fcitx5VirtualkeyboardImPanelEvent::NotifyImActivated(im))
     }
 
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_deactivated(&self, im: String) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelState::NotifyImDeactivated(im))
+        self.send(Fcitx5VirtualkeyboardImPanelEvent::NotifyImDeactivated(im))
     }
 
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_list_changed(&self) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelState::NotifyImListChanged)
+        self.send(Fcitx5VirtualkeyboardImPanelEvent::NotifyImListChanged)
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum Fcitx5VirtualkeyboardImPanelState {
+pub enum Fcitx5VirtualkeyboardImPanelEvent {
     ShowVirtualKeyboard,
     HideVirtualKeyboard,
     UpdatePreeditCaret(i32),
@@ -142,8 +141,8 @@ pub enum Fcitx5VirtualkeyboardImPanelState {
     NotifyImListChanged,
 }
 
-impl From<Fcitx5VirtualkeyboardImPanelState> for Message {
-    fn from(value: Fcitx5VirtualkeyboardImPanelState) -> Self {
+impl From<Fcitx5VirtualkeyboardImPanelEvent> for Message {
+    fn from(value: Fcitx5VirtualkeyboardImPanelEvent) -> Self {
         Self::Fcitx5VirtualkeyboardImPanel(value)
     }
 }

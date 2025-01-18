@@ -109,12 +109,15 @@ impl KeyboardState {
         Task::perform(
             async move {
                 tracing::debug!("start dbus service: {}", new_dbus_service_token);
+                let conn = Connection::session().await?;
                 let s = Fcitx5VirtualkeyboardImPanelService::new(tx);
-                let connection = s.start().await.context("failed to start dbus service")?;
-                Ok((new_dbus_service_token, connection))
+                s.start(&conn)
+                    .await
+                    .context("failed to start dbus service")?;
+                Ok((new_dbus_service_token, conn))
             },
             |res: Result<_>| match res {
-                Ok((id, connection)) => StartDbusServiceState::Started(id, connection).into(),
+                Ok((id, connection)) => StartDbusServiceEvent::Started(id, connection).into(),
                 Err(e) => super::fatal(e),
             },
         )
@@ -273,13 +276,12 @@ impl KeyManager for KeyboardState {
 }
 
 #[derive(Clone, Debug)]
-pub enum StartDbusServiceState {
-    New(UnboundedSender<Message>),
+pub enum StartDbusServiceEvent {
     Started(u8, Connection),
 }
 
-impl From<StartDbusServiceState> for Message {
-    fn from(value: StartDbusServiceState) -> Self {
+impl From<StartDbusServiceEvent> for Message {
+    fn from(value: StartDbusServiceEvent) -> Self {
         Self::StartDbusService(value)
     }
 }

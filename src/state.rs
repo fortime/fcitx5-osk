@@ -18,12 +18,12 @@ mod layout;
 mod window;
 
 pub use im::ImState;
-pub use keyboard::{KeyboardState, ModifierState, StartDbusServiceState};
+pub use keyboard::{KeyboardState, ModifierState, StartDbusServiceEvent};
 pub use layout::LayoutState;
-pub use window::{WindowState, WindowStateSnapshot};
+pub use window::{HideOpSource, WindowEvent, WindowState, WindowStateSnapshot};
 
 #[derive(Getters, MutGetters)]
-pub struct State {
+pub struct State<WM> {
     #[getset(get = "pub", get_mut = "pub")]
     layout: LayoutState,
     #[getset(get = "pub", get_mut = "pub")]
@@ -31,11 +31,14 @@ pub struct State {
     #[getset(get = "pub", get_mut = "pub")]
     im: ImState,
     #[getset(get = "pub", get_mut = "pub")]
-    window: WindowState,
+    window: WindowState<WM>,
     has_fcitx5_services: bool,
 }
 
-impl State {
+impl<WM> State<WM>
+where
+    WM: Default,
+{
     pub fn new(keyboard: KeyboardState, layout: LayoutState) -> Self {
         Self {
             layout,
@@ -45,7 +48,9 @@ impl State {
             has_fcitx5_services: false,
         }
     }
+}
 
+impl<WM> State<WM> {
     pub fn update_key_area_layout(
         &mut self,
         key_area_layout: Rc<KeyAreaLayout>,
@@ -61,7 +66,7 @@ impl State {
             Task::none()
         } else {
             Task::perform(Fcitx5Services::new(), |res: ZbusResult<_>| match res {
-                Ok(services) => StartedState::StartedDbusClients(services).into(),
+                Ok(services) => StartedEvent::StartedDbusClients(services).into(),
                 Err(e) => fatal_with_context(e, "failed to create dbus clients"),
             })
         }
@@ -81,12 +86,12 @@ impl State {
 }
 
 #[derive(Clone, Debug)]
-pub enum StartedState {
+pub enum StartedEvent {
     StartedDbusClients(Fcitx5Services),
 }
 
-impl From<StartedState> for Message {
-    fn from(value: StartedState) -> Self {
+impl From<StartedEvent> for Message {
+    fn from(value: StartedEvent) -> Self {
         Self::Started(value)
     }
 }

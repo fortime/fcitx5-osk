@@ -1,15 +1,12 @@
-use std::{path::PathBuf, process};
+use std::{env, path::PathBuf, process};
 
 use anyhow::Result;
+use app::{Keyboard, Message};
 use clap::Parser;
 use config::{Config, ConfigManager};
-use figment::{
-    providers::{Format, Toml},
-    Figment,
-};
-use iced::{window::Position, Size, Task, Theme};
-use app::{Keyboard, Message};
+use iced::Task;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use window::{wayland, x11::{self, X11WindowManager}};
 
 mod app;
 mod config;
@@ -18,6 +15,11 @@ mod key_set;
 mod layout;
 mod state;
 mod store;
+mod window;
+
+pub fn has_text_within_env(k: &str) -> bool {
+    env::var(k).ok().filter(|v| !v.is_empty()).is_some()
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -47,21 +49,27 @@ fn run(args: Args) -> Result<()> {
 
     init_log(config_manager.as_ref())?;
 
-    let keyboard = Keyboard::new(config_manager)?;
+    if wayland::is_available() {
+        app::wayland::start(config_manager, config_write_bg)?;
+    } else if x11::is_available() {
+        let keyboard = Keyboard::<X11WindowManager>::new(config_manager)?;
 
-    iced::daemon(clap::crate_name!(), Keyboard::update, Keyboard::view)
-        .theme(Keyboard::theme)
-        .subscription(Keyboard::subscription)
-        .run_with(move || {
-            (
-                keyboard,
-                // calculate size
-                Task::future(async move {
-                    tokio::spawn(config_write_bg);
-                    Message::Nothing
-                }),
-            )
-        })?;
+        iced::daemon(clap::crate_name!(), Keyboard::update, Keyboard::view)
+            .theme(Keyboard::theme_multi_dummy)
+            .subscription(Keyboard::subscription)
+            .run_with(move || {
+                (
+                    keyboard,
+                    // calculate size
+                    Task::future(async move {
+                        tokio::spawn(config_write_bg);
+                        Message::Nothing
+                    }),
+                )
+            })?;
+    } else {
+        anyhow::bail!("No Wayland or X11 Environment");
+    }
     Ok(())
 }
 
