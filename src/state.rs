@@ -51,14 +51,16 @@ where
 }
 
 impl<WM> State<WM> {
-    pub fn update_key_area_layout(
-        &mut self,
-        key_area_layout: Rc<KeyAreaLayout>,
-        store: &Store,
-    ) -> bool {
-        self.keyboard
-            .update_key_area_layout(&key_area_layout, store);
-        self.layout.update_key_area_layout(key_area_layout)
+    pub fn update_cur_im(&mut self, im_name: &str, store: &Store) -> bool {
+        let key_area_layout = store.key_area_layout_by_im(im_name);
+        let res = self.layout.update_key_area_layout(key_area_layout.clone());
+        if res {
+            self.keyboard
+                .update_key_area_layout(&key_area_layout, store);
+            self.im.update_cur_im(im_name);
+            self.im.update_candidate_font(store.font_by_im(im_name));
+        }
+        res
     }
 
     pub fn start(&mut self) -> Task<Message> {

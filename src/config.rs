@@ -1,4 +1,4 @@
-use std::{future::Future, path::PathBuf};
+use std::{collections::HashMap, future::Future, path::PathBuf};
 
 use anyhow::Result;
 use figment::{
@@ -6,7 +6,10 @@ use figment::{
     Figment,
 };
 use getset::{CopyGetters, Getters, Setters};
-use iced::futures::{channel::mpsc::{self, UnboundedSender}, StreamExt};
+use iced::futures::{
+    channel::mpsc::{self, UnboundedSender},
+    StreamExt,
+};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 
@@ -32,6 +35,24 @@ pub struct Config {
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default)]
     placement: Placement,
+
+    /// default font to be used.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_font: Option<String>,
+
+    /// load fonts by path
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    external_font_paths: Vec<PathBuf>,
+
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    im_layout_mapping: HashMap<String, String>,
+
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    im_font_mapping: HashMap<String, String>,
 }
 
 pub struct ConfigManager {

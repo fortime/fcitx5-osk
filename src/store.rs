@@ -3,6 +3,7 @@ use std::{collections::HashMap, fmt::Display, path::PathBuf, rc::Rc};
 
 use crate::{
     config::Config,
+    font,
     key_set::{Key, KeySet, KeyValue},
     layout::{KeyAreaLayout, KeyId},
 };
@@ -12,7 +13,7 @@ use figment::{
     providers::{Format, Toml},
     Figment,
 };
-use iced::Theme;
+use iced::{Font, Theme};
 use serde::Deserialize;
 
 mod default_value;
@@ -34,6 +35,7 @@ pub struct Store {
     default_key_set: Rc<KeySet>,
     key_sets: HashMap<String, Rc<KeySet>>,
     im_layout_mapping: HashMap<String, String>,
+    im_font_mapping: HashMap<String, Font>,
 }
 
 impl Store {
@@ -47,7 +49,12 @@ impl Store {
         let key_area_layouts = init_confs(&config.key_area_layout_folders())?;
         let default_key_set = Rc::new(init_default(default_value::DEFAULT_KEY_SET_TOML)?);
         let key_sets = init_confs(&config.key_set_folders())?;
-        let im_layout_mapping = HashMap::new();
+        let im_layout_mapping = config.im_layout_mapping().clone();
+        let im_font_mapping = config
+            .im_font_mapping()
+            .iter()
+            .map(|(k, v)| (k.clone(), font::load(&v)))
+            .collect();
         Ok(Self {
             themes,
             default_key_area_layout,
@@ -55,6 +62,7 @@ impl Store {
             default_key_set,
             key_sets,
             im_layout_mapping,
+            im_font_mapping,
         })
     }
 
@@ -84,6 +92,21 @@ impl Store {
             &self.default_key_set
         };
         key_set.keys().get(key_id.key_name())
+    }
+
+    pub fn font_by_im(&self, im_name: &str) -> Font {
+        self.im_font_mapping
+            .get(im_name)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn key_area_layout_by_im(&self, im_name: &str) -> Rc<KeyAreaLayout> {
+        if let Some(layout_name) = self.im_layout_mapping.get(im_name) {
+            self.key_area_layout(&layout_name)
+        } else {
+            self.default_key_area_layout.clone()
+        }
     }
 }
 

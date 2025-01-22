@@ -21,6 +21,8 @@ zbus = { version = "5.2.0", features = ["tokio"], default-features = false }
 zvariant = "5.1.0"
 iced_layershell = "0.13.0"
 iced_futures = "0.13.2"
+iced_graphics = "0.13.0"
 
 [patch.crates-io]
-iced_layershell = { git = 'https://github.com/fortime/exwlshelleventloop.git', branch = 'feat/fcitx5-osk' }
+#iced_layershell = { git = "https://github.com/fortime/exwlshelleventloop.git", branch = "feat/fcitx5-osk" }
+iced_layershell = { path = "../exwlshelleventloop/iced_layershell" }

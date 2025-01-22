@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use getset::{CopyGetters, Getters};
 use iced::futures::channel::mpsc::UnboundedSender;
 use tracing::instrument;
 use zbus::{fdo::Error, interface, Connection};
@@ -98,13 +101,15 @@ impl Fcitx5VirtualkeyboardImPanelService {
         page_index: i32,
         global_cursor_index: i32,
     ) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea {
-            candidate_text_list,
-            has_prev,
-            has_next,
-            page_index,
-            global_cursor_index,
-        })
+        self.send(Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(
+            Arc::new(CandidateAreaState {
+                candidate_text_list,
+                has_prev,
+                has_next,
+                page_index,
+                global_cursor_index,
+            }),
+        ))
     }
 
     #[instrument(level = "debug", skip(self), err, ret)]
@@ -129,13 +134,7 @@ pub enum Fcitx5VirtualkeyboardImPanelEvent {
     HideVirtualKeyboard,
     UpdatePreeditCaret(i32),
     UpdatePreeditArea(String),
-    UpdateCandidateArea {
-        candidate_text_list: Vec<String>,
-        has_prev: bool,
-        has_next: bool,
-        page_index: i32,
-        global_cursor_index: i32,
-    },
+    UpdateCandidateArea(Arc<CandidateAreaState>),
     NotifyImActivated(String),
     NotifyImDeactivated(String),
     NotifyImListChanged,
@@ -145,4 +144,18 @@ impl From<Fcitx5VirtualkeyboardImPanelEvent> for Message {
     fn from(value: Fcitx5VirtualkeyboardImPanelEvent) -> Self {
         Self::Fcitx5VirtualkeyboardImPanel(value)
     }
+}
+
+#[derive(Clone, Debug, Getters, CopyGetters)]
+pub struct CandidateAreaState {
+    #[getset(get = "pub")]
+    candidate_text_list: Vec<String>,
+    #[getset(get_copy = "pub")]
+    has_prev: bool,
+    #[getset(get_copy = "pub")]
+    has_next: bool,
+    #[getset(get_copy = "pub")]
+    page_index: i32,
+    #[getset(get_copy = "pub")]
+    global_cursor_index: i32,
 }

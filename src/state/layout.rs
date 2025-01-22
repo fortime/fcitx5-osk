@@ -4,10 +4,13 @@ use anyhow::Result;
 use iced::{
     alignment::Horizontal,
     widget::{Column, Text},
-    Padding, Size,
+    Font, Padding, Size,
 };
 
-use crate::layout::{KeyAreaLayout, KeyManager};
+use crate::{
+    dbus::server::CandidateAreaState,
+    layout::{KeyAreaLayout, KeyManager},
+};
 
 pub struct LayoutState {
     size_p: (u16, u16),
@@ -74,10 +77,7 @@ impl LayoutState {
         // one padding is between toolbar and key_area, two paddings are of the keyboard.
         let height_p = key_area_size_p.1 + (Self::TOOLBAR_HEIGHT + 3) * unit;
         self.size_p = (width_p, height_p);
-        self.padding = Padding::from([
-            (2 * unit) as f32 / 2.0,
-            (2 * unit) as f32 / 2.0,
-        ]);
+        self.padding = Padding::from([(2 * unit) as f32 / 2.0, (2 * unit) as f32 / 2.0]);
         tracing::debug!(
             "unit: {}, keyboard size: {:?}, key area size: {:?} padding: {:?}",
             self.unit,
@@ -105,10 +105,7 @@ impl LayoutState {
         }
     }
 
-    pub fn update_key_area_layout(
-        &mut self,
-        mut key_area_layout: Rc<KeyAreaLayout>,
-    ) -> bool {
+    pub fn update_key_area_layout(&mut self, mut key_area_layout: Rc<KeyAreaLayout>) -> bool {
         mem::swap(&mut self.key_area_layout, &mut key_area_layout);
         if let Err(e) = self.calculate_size() {
             tracing::debug!(
@@ -123,11 +120,22 @@ impl LayoutState {
         }
     }
 
-    pub fn to_element<'a, 'b, KM, M>(&'a self, input: &'b str, manager: &'b KM) -> Column<'b, M>
+    pub fn to_element<'a, 'b, KM, M>(
+        &'a self,
+        candidate_area_state: Option<&'a CandidateAreaState>,
+        font: Font,
+        manager: &'b KM,
+    ) -> Column<'b, M>
     where
         KM: KeyManager<Message = M>,
         M: 'static,
     {
+        let mut candidates: String = candidate_area_state
+            .into_iter()
+            .flat_map(|s| s.candidate_text_list().iter().enumerate())
+            .map(|(pos, text)| format!("{}. {} | ", pos + 1, text))
+            .collect();
+        candidates = format!("候选：{}", candidates);
         let size = self.size();
         Column::new()
             .align_x(Horizontal::Center)
@@ -135,7 +143,11 @@ impl LayoutState {
             .height(size.height)
             .padding(self.padding)
             .spacing(self.unit)
-            .push(Text::new(input).height(Self::TOOLBAR_HEIGHT * self.unit))
+            .push(
+                Text::new(candidates)
+                    .height(Self::TOOLBAR_HEIGHT * self.unit)
+                    .font(font),
+            )
             .push(self.key_area_layout.to_element(self.unit, manager))
     }
 }

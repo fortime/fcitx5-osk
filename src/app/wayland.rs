@@ -10,7 +10,9 @@ use iced_layershell::{
     to_layer_message,
 };
 
-use crate::{config::ConfigManager, state::WindowEvent, window::wayland::WaylandWindowManager};
+use crate::{
+    config::ConfigManager, font, state::WindowEvent, window::wayland::WaylandWindowManager,
+};
 
 use super::{Keyboard, Message};
 
@@ -83,6 +85,12 @@ pub fn start<BG>(config_manager: ConfigManager, config_write_bg: BG) -> Result<(
 where
     BG: Future<Output = ()> + 'static + Send + Sync,
 {
+    let default_font = if let Some(font) = config_manager.as_ref().default_font() {
+        font::load(&font)
+    } else {
+        Default::default()
+    };
+
     let keyboard = WaylandKeyboard::new(config_manager)?;
 
     build_pattern::daemon(
@@ -98,6 +106,7 @@ where
             start_mode: StartMode::Background,
             ..Default::default()
         },
+        default_font,
         ..Default::default()
     })
     .run_with(move || {

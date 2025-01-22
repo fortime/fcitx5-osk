@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, process};
+use std::{env, fs, path::PathBuf, process};
 
 use anyhow::Result;
 use app::{Keyboard, Message};
@@ -6,11 +6,15 @@ use clap::Parser;
 use config::{Config, ConfigManager};
 use iced::Task;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use window::{wayland, x11::{self, X11WindowManager}};
+use window::{
+    wayland,
+    x11::{self, X11WindowManager},
+};
 
 mod app;
 mod config;
 mod dbus;
+mod font;
 mod key_set;
 mod layout;
 mod state;
@@ -44,10 +48,25 @@ fn init_log(config: &Config) -> Result<()> {
     Ok(())
 }
 
+fn load_external_fonts(config: &Config) -> Result<()> {
+    let mut font_system = iced_graphics::text::font_system()
+        .write()
+        .map_err(|e| anyhow::anyhow!("unable to get font system: {:?}", e))?;
+    tracing::debug!("fonts before loading: {}", font_system.raw().db_mut().len());
+    for font_path in config.external_font_paths() {
+        tracing::debug!("adding external font path: {:?}", font_path);
+        font_system.raw().db_mut().load_font_file(font_path)?;
+    }
+    tracing::debug!("fonts after loaded: {}", font_system.raw().db_mut().len());
+    Ok(())
+}
+
 fn run(args: Args) -> Result<()> {
     let (config_manager, config_write_bg) = ConfigManager::new(&args.config)?;
 
     init_log(config_manager.as_ref())?;
+
+    load_external_fonts(config_manager.as_ref())?;
 
     if wayland::is_available() {
         app::wayland::start(config_manager, config_write_bg)?;

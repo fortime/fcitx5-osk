@@ -1,19 +1,42 @@
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
-use iced::Task;
+use iced::{Font, Task};
 
-use crate::{app::Message, dbus::client::{Fcitx5ControllerServiceProxy, Fcitx5Services, InputMethodInfo}};
+use crate::{
+    app::Message,
+    dbus::{
+        client::{Fcitx5ControllerServiceProxy, Fcitx5Services, InputMethodInfo},
+        server::CandidateAreaState,
+    },
+};
 
 #[derive(Default)]
 pub struct ImState {
     cur_im: Option<Rc<InputMethodInfo>>,
     ims: HashMap<String, Rc<InputMethodInfo>>,
+    font: Font,
+    candidate_area_state: Option<Arc<CandidateAreaState>>,
     fcitx5_services: Option<Fcitx5Services>,
 }
 
 impl ImState {
+    fn reset_candidate_area_state(&mut self) {
+        self.candidate_area_state = None;
+    }
+
+    fn cur_im_unique_name(&self) -> &str {
+        self.cur_im
+            .as_ref()
+            .map(|im| im.unique_name().as_str())
+            .unwrap_or("")
+    }
+
     pub(super) fn set_dbus_clients(&mut self, fcitx5_services: Fcitx5Services) {
         self.fcitx5_services = Some(fcitx5_services);
+    }
+
+    pub fn set_candidate_area_state(&mut self, candidate_area_state: Arc<CandidateAreaState>) {
+        self.candidate_area_state = Some(candidate_area_state);
     }
 
     pub fn update_ims(&mut self, im_list: Vec<InputMethodInfo>) {
@@ -24,12 +47,41 @@ impl ImState {
             .collect();
     }
 
-    pub fn update_cur_im(&mut self, unique_name: &str) {
-        tracing::debug!("current im: {}", unique_name);
+    pub(super) fn update_cur_im(&mut self, unique_name: &str) {
+        let cur_im_unique_name = self.cur_im_unique_name();
+
+        tracing::debug!(
+            "change current im[{}] from im[{}]",
+            unique_name,
+            cur_im_unique_name
+        );
+
+        if unique_name == cur_im_unique_name {
+            return;
+        }
+
         self.cur_im = self.ims.get(unique_name).cloned();
         if self.cur_im.is_none() {
             tracing::warn!("unable to find im: {}", unique_name);
         }
+        self.reset_candidate_area_state();
+    }
+
+    pub(super) fn update_candidate_font(&mut self, font: Font) {
+        self.font = font;
+    }
+
+    pub fn candidate_area_state(&self) -> Option<&CandidateAreaState> {
+        self.candidate_area_state.as_deref()
+    }
+
+    pub fn deactive(&mut self) {
+        self.cur_im = None;
+        self.reset_candidate_area_state();
+    }
+
+    pub fn candidate_font(&self) -> Font {
+        self.font
     }
 }
 

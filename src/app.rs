@@ -134,7 +134,8 @@ where
     pub fn new(config_manager: ConfigManager) -> Result<Self> {
         let config = config_manager.as_ref();
         let store = Store::new(config)?;
-        let key_area_layout = store.key_area_layout("TODO");
+        // key_area_layout will be updated when cur_im is updated.
+        let key_area_layout = store.key_area_layout("");
         let state = State::new(
             KeyboardState::new(&key_area_layout, &store),
             LayoutState::new(config.width(), key_area_layout)?,
@@ -196,7 +197,11 @@ where
         let base = self
             .state
             .layout()
-            .to_element(self.state.keyboard().input(), self.state.keyboard())
+            .to_element(
+                self.state.im().candidate_area_state(),
+                self.state.im().candidate_font(),
+                self.state.keyboard(),
+            )
             .into();
         let res = if let Some(e) = &self.error {
             modal(base, self.error_dialog(e), Message::AfterError)
@@ -292,8 +297,10 @@ where
                 WindowEvent::Resize(id, scale_factor, width_p) => {
                     tracing::debug!("scale_factor: {}", scale_factor);
                     if self.state.layout_mut().update_width(width_p, scale_factor) {
-                        self.config_manager.as_mut().set_width(width_p);
-                        self.config_manager.try_write();
+                        if width_p != self.config_manager.as_ref().width() {
+                            self.config_manager.as_mut().set_width(width_p);
+                            self.config_manager.try_write();
+                        }
                         let size = self.window_size();
                         if !self.state.window().wm_inited() {
                             self.state.window_mut().set_wm_inited(id)
@@ -340,6 +347,16 @@ where
                     Fcitx5VirtualkeyboardImPanelEvent::NotifyImListChanged => {
                         return self.state.im().sync_input_methods().map_task();
                     }
+                    Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(state) => {
+                        self.state.im_mut().set_candidate_area_state(state);
+                    }
+                    Fcitx5VirtualkeyboardImPanelEvent::NotifyImActivated(im) => {
+                        self.state.update_cur_im(&im, &self.store);
+                    }
+                    Fcitx5VirtualkeyboardImPanelEvent::NotifyImDeactivated(_) => {
+                        // TODO? other logic
+                        self.state.im_mut().deactive();
+                    }
                     _ => {
                         // TODO
                     }
@@ -349,7 +366,7 @@ where
                 self.state.im_mut().update_ims(list);
             }
             Message::UpdateCurrentIm(im) => {
-                self.state.im_mut().update_cur_im(&im);
+                self.state.update_cur_im(&im, &self.store);
             }
             _ => {}
         };

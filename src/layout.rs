@@ -45,6 +45,8 @@ pub struct KeyAreaLayout {
     #[serde(default = "KeyAreaLayout::default_secondary_text_size")]
     #[getset(get_copy = "pub")]
     secondary_text_size: u16,
+    #[getset(get = "pub")]
+    font: Option<String>,
 }
 
 impl KeyAreaLayout {

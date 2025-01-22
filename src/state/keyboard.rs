@@ -5,7 +5,7 @@ use iced::{
     alignment::{Horizontal, Vertical},
     futures::channel::mpsc::UnboundedSender,
     widget::{Button, Column, Text},
-    Element, Task,
+    Element, Font, Task,
 };
 use xkeysym::Keysym;
 use zbus::Connection;
@@ -16,6 +16,7 @@ use crate::{
         client::{Fcitx5Services, Fcitx5VirtualKeyboardBackendServiceProxy},
         server::Fcitx5VirtualkeyboardImPanelService,
     },
+    font,
     key_set::Key,
     layout::{KeyAreaLayout, KeyManager},
     store::Store,
@@ -43,10 +44,10 @@ impl ModifierState {
 
 pub struct KeyboardState {
     id: u8,
-    input: String,
     modifiers: u32,
     primary_text_size: u16,
     secondary_text_size: u16,
+    font: Font,
     keys: HashMap<String, Key>,
     /// To avoid capturing the lifetime of this object, we seperate the connection process into
     /// multiple steps. In theory, there would be multiple creations of connection in the same
@@ -60,11 +61,11 @@ impl KeyboardState {
     pub fn new(key_area_layout: &KeyAreaLayout, store: &Store) -> Self {
         let mut res = Self {
             id: 0,
-            input: String::new(),
             // always virtual
             modifiers: Default::default(),
             primary_text_size: Default::default(),
             secondary_text_size: Default::default(),
+            font: Default::default(),
             keys: HashMap::new(),
             dbus_service_token: 0,
             dbus_service_connection: None,
@@ -80,7 +81,6 @@ impl KeyboardState {
 
     pub fn update_key_area_layout(&mut self, key_area_layout: &KeyAreaLayout, store: &Store) {
         self.id = self.id.wrapping_add(1);
-        // self.modifiers = ModifierState::Virtual as u32;
         self.modifiers = 0;
         self.primary_text_size = key_area_layout.primary_text_size();
         self.secondary_text_size = key_area_layout.secondary_text_size();
@@ -89,14 +89,11 @@ impl KeyboardState {
             .iter()
             .filter_map(|(k, v)| store.key(v).map(|key| (k.clone(), key.clone())))
             .collect();
-    }
-
-    pub fn update_input(&mut self, s: String) {
-        self.input.push_str(&s);
-    }
-
-    pub fn input(&self) -> &str {
-        &self.input
+        self.font = key_area_layout
+            .font()
+            .as_ref()
+            .map(|n| font::load(&n))
+            .unwrap_or_default();
     }
 
     pub fn start_dbus_service(&mut self, tx: UnboundedSender<Message>) -> Task<Message> {
@@ -247,6 +244,7 @@ impl KeyManager for KeyboardState {
                 .push(
                     top.width(width_p)
                         .height(secondary_height_p)
+                        .font(self.font)
                         .size((self.secondary_text_size * unit) as f32)
                         .align_y(Vertical::Center)
                         .align_x(Horizontal::Right),
@@ -255,6 +253,7 @@ impl KeyManager for KeyboardState {
                     middle
                         .width(width_p)
                         .height(primary_height_p)
+                        .font(self.font)
                         .size((self.primary_text_size * unit) as f32)
                         .align_y(Vertical::Center)
                         .align_x(Horizontal::Center),
