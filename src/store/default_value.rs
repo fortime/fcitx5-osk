@@ -60,7 +60,8 @@ k25 = "k_p"
 k26 = "k_open_bracket"
 k27 = "k_close_bracket"
 k28 = "k_backslash"
-k29 = "k_escape"
+#k29 = "k_escape"
+k29 = "k_caps_lock"
 k30 = "k_a"
 k31 = "k_s"
 k32 = "k_d"
@@ -163,7 +164,7 @@ p = {c = "="}
 c = "+"
 
 [keys.k_backspace]
-p = {ks = 0xff08}
+p = {ks = 0xff08, s = "Backspace"}
 
 [keys.k_tab]
 p = {ks = 0xff09}
@@ -232,9 +233,22 @@ c = "}"
 p = {c = "\\"}
 [[keys.k_backslash.s]]
 c = "|"
+# TODO clear
+[[keys.k_backslash.s]]
+c = "]"
+[[keys.k_backslash.s]]
+c = "["
+[[keys.k_backslash.s]]
+c = ","
+[[keys.k_backslash.s]]
+c = ";"
+[[keys.k_backslash.s]]
+c = "."
+[[keys.k_backslash.s]]
+c = "k"
 
 [keys.k_caps_lock]
-p = {ks = 0xffe5}
+p = {ks = 0xffe5, s = "CapsLock"}
 
 [keys.k_escape]
 p = {ks = 0xff1b}
@@ -295,10 +309,11 @@ p = {c = "'"}
 c = "\""
 
 [keys.k_enter]
-p = {ks = 0xff0a}
+p = {ks = 0xff0d, s = "Enter"}
+#p = {ks = 0xff0a}
 
 [keys.k_left_shift]
-p = {ks = 0xffe1}
+p = {ks = 0xffe1, s = "Shift"}
 
 [keys.k_z]
 p = {c = "z"}
@@ -351,29 +366,29 @@ p = {c = "/"}
 c = "?"
 
 [keys.k_right_shift]
-p = {ks = 0xffe2}
+p = {ks = 0xffe2, s = "Shift"}
 
 [keys.k_left_ctrl]
-p = {ks = 0xffe3}
+p = {ks = 0xffe3, s = "Ctrl"}
 
 [keys.k_left_super]
-p = {ks = 0xffeb}
+p = {ks = 0xffeb, s = "Super"}
 
 [keys.k_left_alt]
-p = {ks = 0xffe9}
+p = {ks = 0xffe9, s = "Alt"}
 
 [keys.k_space]
-p = {c = " "}
+p = {c = " ", s = "Space"}
 
 [keys.k_right_alt]
-p = {ks = 0xffea}
+p = {ks = 0xffea, s = "Alt"}
 
 [keys.k_right_super]
-p = {ks = 0xffec}
+p = {ks = 0xffec, s = "Super"}
 
 [keys.k_print]
-p = {ks = 0xff61}
+p = {ks = 0xff61, s = "PrtSc"}
 
 [keys.k_right_ctrl]
-p = {ks = 0xffe4}
+p = {ks = 0xffe4, s = "Ctrl"}
 "##;

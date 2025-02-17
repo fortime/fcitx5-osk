@@ -22,6 +22,7 @@ zvariant = "5.1.0"
 iced_layershell = "0.13.0"
 iced_futures = "0.13.2"
 iced_graphics = "0.13.0"
+humantime-serde = "1.1.1"
 
 [patch.crates-io]
 #iced_layershell = { git = "https://github.com/fortime/exwlshelleventloop.git", branch = "feat/fcitx5-osk" }

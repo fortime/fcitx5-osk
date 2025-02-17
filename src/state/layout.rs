@@ -3,8 +3,8 @@ use std::{mem, rc::Rc};
 use anyhow::Result;
 use iced::{
     alignment::Horizontal,
-    widget::{Column, Text},
-    Font, Padding, Size,
+    widget::{self, Column, Text},
+    Element, Font, Padding, Size,
 };
 
 use crate::{
@@ -125,7 +125,7 @@ impl LayoutState {
         candidate_area_state: Option<&'a CandidateAreaState>,
         font: Font,
         manager: &'b KM,
-    ) -> Column<'b, M>
+    ) -> Element<'b, M>
     where
         KM: KeyManager<Message = M>,
         M: 'static,
@@ -137,7 +137,7 @@ impl LayoutState {
             .collect();
         candidates = format!("候选：{}", candidates);
         let size = self.size();
-        Column::new()
+        let keyboard = Column::new()
             .align_x(Horizontal::Center)
             .width(size.width)
             .height(size.height)
@@ -148,6 +148,11 @@ impl LayoutState {
                     .height(Self::TOOLBAR_HEIGHT * self.unit)
                     .font(font),
             )
-            .push(self.key_area_layout.to_element(self.unit, manager))
+            .push(self.key_area_layout.to_element(self.unit, manager));
+        // we let keyboard in a stack even there is no overlay, so the widget tree always has the
+        // same level. Otherwise, the state will be clear if the level is changed.
+        let mut stack = widget::stack![keyboard];
+        stack = stack.push_maybe(manager.popup_overlay(self.unit, self.size_p));
+        stack.into()
     }
 }

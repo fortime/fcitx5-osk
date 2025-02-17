@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future, path::PathBuf};
+use std::{collections::HashMap, future::Future, path::PathBuf, time::Duration};
 
 use anyhow::Result;
 use figment::{
@@ -29,6 +29,10 @@ pub struct Config {
     #[getset(get_copy = "pub", set = "pub")]
     width: u16,
 
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(with = "humantime_serde", default = "default_holding_timeout")]
+    holding_timeout: Duration,
+
     #[getset(get = "pub", set = "pub")]
     theme: String,
 
@@ -53,6 +57,10 @@ pub struct Config {
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
     im_font_mapping: HashMap<String, String>,
+}
+
+fn default_holding_timeout() -> Duration {
+    Duration::from_millis(500)
 }
 
 pub struct ConfigManager {

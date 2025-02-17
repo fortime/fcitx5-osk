@@ -18,7 +18,7 @@ mod layout;
 mod window;
 
 pub use im::ImState;
-pub use keyboard::{KeyboardState, ModifierState, StartDbusServiceEvent};
+pub use keyboard::{KeyEvent, KeyboardState, ModifierState, StartDbusServiceEvent};
 pub use layout::LayoutState;
 pub use window::{HideOpSource, WindowEvent, WindowState, WindowStateSnapshot};
 

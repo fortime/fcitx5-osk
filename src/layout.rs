@@ -12,20 +12,16 @@ use serde::{
     Deserialize, Deserializer,
 };
 
-use std::{collections::HashMap, path::PathBuf, result::Result as StdResult};
+use std::{collections::HashMap, path::PathBuf, result::Result as StdResult, sync::Arc};
 
 use crate::store::IdAndConfigPath;
 
 pub trait KeyManager {
     type Message;
 
-    fn key<'a, 'b>(
-        &'a self,
-        key_name: &'b str,
-        unit: u16,
-        width_p: u16,
-        height_p: u16,
-    ) -> Element<'a, Self::Message>;
+    fn key(&self, key_name: Arc<String>, unit: u16, size_p: (u16, u16)) -> Element<Self::Message>;
+
+    fn popup_overlay(&self, unit: u16, size_p: (u16, u16)) -> Option<Element<Self::Message>>;
 }
 
 #[derive(Deserialize, CopyGetters, Getters)]
@@ -79,7 +75,11 @@ impl KeyAreaLayout {
         (self.width() * unit, self.height() * unit)
     }
 
-    pub fn to_element<'a, 'b, KM, M>(&'a self, unit: u16, manager: &'b KM) -> impl Into<Element<'b, M>>
+    pub fn to_element<'a, 'b, KM, M>(
+        &'a self,
+        unit: u16,
+        manager: &'b KM,
+    ) -> impl Into<Element<'b, M>>
     where
         KM: KeyManager<Message = M>,
         M: 'static,
@@ -188,7 +188,7 @@ pub enum KeyRowElement {
     Key {
         width: u16,
         height: Option<u16>,
-        name: String,
+        name: Arc<String>,
     },
 }
 
@@ -235,7 +235,9 @@ impl KeyRowElement {
                     width * unit,
                     height * unit
                 );
-                manager.key(name, unit, width * unit, height * unit).into()
+                manager
+                    .key(name.clone(), unit, (width * unit, height * unit))
+                    .into()
             }
         }
     }
@@ -283,7 +285,7 @@ impl<'de> Deserialize<'de> for KeyRowElement {
             Ok(KeyRowElement::Key {
                 height,
                 width,
-                name: typ.to_string(),
+                name: Arc::new(typ.to_string()),
             })
         } else {
             Err(Error::invalid_value(

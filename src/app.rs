@@ -24,8 +24,8 @@ use crate::{
     config::{ConfigManager, Placement},
     dbus::{client::InputMethodInfo, server::Fcitx5VirtualkeyboardImPanelEvent},
     state::{
-        HideOpSource, KeyboardState, LayoutState, StartDbusServiceEvent, StartedEvent, State,
-        WindowEvent, WindowStateSnapshot,
+        HideOpSource, KeyEvent, KeyboardState, LayoutState, StartDbusServiceEvent, StartedEvent,
+        State, WindowEvent, WindowStateSnapshot,
     },
     store::Store,
     window::{WindowManager, WindowSettings},
@@ -42,8 +42,7 @@ pub enum Message {
     StartDbusService(StartDbusServiceEvent),
     Error(KeyboardError),
     AfterError,
-    KeyPressed(u8, String, Keysym),
-    KeyReleased(u8, String, Keysym),
+    KeyEvent(KeyEvent),
     Window(WindowEvent),
     UpdateKeyAreaLayout(String),
     Fcitx5VirtualkeyboardImPanel(Fcitx5VirtualkeyboardImPanelEvent),
@@ -137,7 +136,7 @@ where
         // key_area_layout will be updated when cur_im is updated.
         let key_area_layout = store.key_area_layout("");
         let state = State::new(
-            KeyboardState::new(&key_area_layout, &store),
+            KeyboardState::new(config.holding_timeout(), &key_area_layout, &store),
             LayoutState::new(config.width(), key_area_layout)?,
         );
         Ok(Self {
@@ -279,19 +278,8 @@ where
                     return self.start().map_task();
                 }
             },
-            Message::KeyPressed(state_id, s, keysym) => {
-                return self
-                    .state
-                    .keyboard_mut()
-                    .press_key(state_id, &s, keysym)
-                    .map_task();
-            }
-            Message::KeyReleased(state_id, s, keysym) => {
-                return self
-                    .state
-                    .keyboard_mut()
-                    .release_key(state_id, &s, keysym)
-                    .map_task();
+            Message::KeyEvent(event) => {
+                return self.state.keyboard_mut().on_event(event).map_task();
             }
             Message::Window(event) => match event {
                 WindowEvent::Resize(id, scale_factor, width_p) => {

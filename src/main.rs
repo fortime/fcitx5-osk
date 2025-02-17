@@ -19,6 +19,7 @@ mod key_set;
 mod layout;
 mod state;
 mod store;
+mod widget;
 mod window;
 
 pub fn has_text_within_env(k: &str) -> bool {
