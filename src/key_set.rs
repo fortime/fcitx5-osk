@@ -1,7 +1,10 @@
 use std::{collections::HashMap, path::PathBuf, rc::Rc, result::Result as StdResult};
 
 use getset::{CopyGetters, Getters};
-use serde::{de::Error, Deserialize, Deserializer};
+use serde::{
+    de::{Error, Unexpected},
+    Deserialize, Deserializer,
+};
 use xkeysym::Keysym;
 
 use crate::store::IdAndConfigPath;
@@ -14,6 +17,8 @@ struct RawKeyValue {
     keysym: Option<u32>,
     #[serde(alias = "c")]
     character: Option<char>,
+    #[serde(alias = "kc")]
+    keycode: Option<i16>,
 }
 
 #[derive(CopyGetters, Getters)]
@@ -22,6 +27,16 @@ pub struct KeyValue {
     symbol: String,
     #[getset(get_copy = "pub")]
     keysym: Keysym,
+    #[getset(get_copy = "pub")]
+    keycode: Option<i16>,
+}
+
+#[derive(CopyGetters, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThinKeyValue {
+    #[getset(get_copy = "pub")]
+    keysym: Keysym,
+    #[getset(get_copy = "pub")]
+    keycode: Option<i16>,
 }
 
 impl<'de> Deserialize<'de> for KeyValue {
@@ -51,8 +66,30 @@ impl<'de> Deserialize<'de> for KeyValue {
                     .to_string(),
             }
         };
+        if let Some(keycode) = raw.keycode {
+            // check the abs of keycode is smaller than 256.
+            if keycode.abs() >= u8::MAX as i16 || keycode.abs() < 8 {
+                return Err(Error::invalid_value(
+                    Unexpected::Signed(keycode as i64),
+                    &"8<= kc < 256",
+                ));
+            }
+        }
         tracing::debug!("symbol of {:x}: {}", u32::from(keysym), symbol);
-        Ok(Self { symbol, keysym })
+        Ok(Self {
+            symbol,
+            keysym,
+            keycode: raw.keycode,
+        })
+    }
+}
+
+impl KeyValue {
+    pub fn to_thin(&self) -> ThinKeyValue {
+        ThinKeyValue {
+            keysym: self.keysym,
+            keycode: self.keycode,
+        }
     }
 }
 
@@ -82,16 +119,13 @@ impl Key {
         shift ^ caps_lock
     }
 
-    pub fn keysym(&self, shift: bool, caps_lock: bool) -> Keysym {
-        if Self::is_shifted(shift, caps_lock) {
-            self.raw
-                .secondaries
-                .get(0)
-                .unwrap_or(&self.raw.primary)
-                .keysym()
+    pub fn key_value(&self, shift: bool, caps_lock: bool) -> ThinKeyValue {
+        let key_value = if Self::is_shifted(shift, caps_lock) {
+            self.raw.secondaries.get(0).unwrap_or(&self.raw.primary)
         } else {
-            self.raw.primary.keysym()
-        }
+            &self.raw.primary
+        };
+        key_value.to_thin()
     }
 
     pub fn has_secondary(&self) -> bool {

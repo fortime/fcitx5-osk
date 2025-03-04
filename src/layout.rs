@@ -4,9 +4,10 @@
 use getset::{CopyGetters, Getters};
 use iced::{
     alignment::{Horizontal, Vertical},
-    widget::{Column, Row, Space},
-    Element,
+    widget::{button::Style as ButtonStyle, Button, Column, Container, PickList, Row, Space},
+    Color, Element, Font, Length, Theme,
 };
+use iced_font_awesome::{FaIcon, IconFont};
 use serde::{
     de::{Error, Unexpected},
     Deserialize, Deserializer,
@@ -14,7 +15,7 @@ use serde::{
 
 use std::{collections::HashMap, path::PathBuf, result::Result as StdResult, sync::Arc};
 
-use crate::store::IdAndConfigPath;
+use crate::{state::CandidateAreaState, store::IdAndConfigPath};
 
 pub trait KeyManager {
     type Message;
@@ -22,6 +23,24 @@ pub trait KeyManager {
     fn key(&self, key_name: Arc<String>, unit: u16, size_p: (u16, u16)) -> Element<Self::Message>;
 
     fn popup_overlay(&self, unit: u16, size_p: (u16, u16)) -> Option<Element<Self::Message>>;
+}
+
+pub trait KeyboardManager {
+    type Message;
+
+    fn themes(&self) -> &[String];
+
+    fn selected_theme(&self) -> &String;
+
+    fn select_theme(&self, theme: &String) -> Self::Message;
+
+    fn ims(&self) -> &[String];
+
+    fn selected_im(&self) -> Option<&String>;
+
+    fn select_im(&self, im: &String) -> Self::Message;
+
+    fn toggle_setting(&self) -> Self::Message;
 }
 
 #[derive(Deserialize, CopyGetters, Getters)]
@@ -41,6 +60,12 @@ pub struct KeyAreaLayout {
     #[serde(default = "KeyAreaLayout::default_secondary_text_size")]
     #[getset(get_copy = "pub")]
     secondary_text_size: u16,
+    #[serde(default = "KeyAreaLayout::default_popup_key_width")]
+    #[getset(get_copy = "pub")]
+    popup_key_width: u16,
+    #[serde(default = "KeyAreaLayout::default_popup_key_height")]
+    #[getset(get_copy = "pub")]
+    popup_key_height: u16,
     #[getset(get = "pub")]
     font: Option<String>,
 }
@@ -52,6 +77,14 @@ impl KeyAreaLayout {
 
     fn default_primary_text_size() -> u16 {
         2
+    }
+
+    fn default_popup_key_width() -> u16 {
+        4
+    }
+
+    fn default_popup_key_height() -> u16 {
+        4
     }
 
     fn default_secondary_text_size() -> u16 {
@@ -293,5 +326,180 @@ impl<'de> Deserialize<'de> for KeyRowElement {
                 &"it starts with 'p' or 'k'",
             ))
         }
+    }
+}
+
+pub struct ToolbarLayout {
+    height: u16,
+}
+
+impl ToolbarLayout {
+    pub fn new() -> Self {
+        Self { height: 6 }
+    }
+
+    pub fn height(&self) -> u16 {
+        self.height
+    }
+
+    pub fn to_element<'a, 'b, KM, M>(
+        &'a self,
+        keyboard_manager: &'b KM,
+        unit: u16,
+        candidate_area_state: &'b CandidateAreaState,
+        candidate_font: Font,
+        font_size: u16,
+        theme: &'a Theme,
+    ) -> Element<'b, M>
+    where
+        KM: KeyboardManager<Message = M>,
+        M: 'static + Clone,
+    {
+        if candidate_area_state.has_candidate() {
+            self.to_candidate_element(
+                keyboard_manager,
+                unit,
+                candidate_area_state,
+                candidate_font,
+                font_size,
+                theme,
+            )
+        } else {
+            self.to_toolbar_element(keyboard_manager, unit, font_size, theme)
+        }
+    }
+
+    fn to_candidate_element<'a, 'b, KM, M>(
+        &'a self,
+        keyboard_manager: &'b KM,
+        unit: u16,
+        candidate_area_state: &'b CandidateAreaState,
+        candidate_font: Font,
+        font_size: u16,
+        theme: &'a Theme,
+    ) -> Element<'b, M>
+    where
+        KM: KeyboardManager<Message = M>,
+        M: 'static + Clone,
+    {
+        let color = theme.extended_palette().background.weak.text;
+        let mut row = Row::new();
+
+        row = row.push(
+            // caret-right caret-left
+            Button::new(
+                FaIcon::new("caret-left", IconFont::Solid)
+                    .size(font_size * unit)
+                    .color(color),
+            )
+            .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
+            .padding(0)
+            .on_press_with(|| keyboard_manager.toggle_setting()),
+        );
+
+        row = row.push(
+            Row::new()
+                .push(
+                    FaIcon::new("globe", IconFont::Solid)
+                        .size(font_size * unit)
+                        .color(color),
+                )
+                .push(PickList::new(
+                    keyboard_manager.ims(),
+                    keyboard_manager.selected_im(),
+                    |im| keyboard_manager.select_im(&im),
+                ))
+                .align_y(Vertical::Center)
+                .spacing(unit),
+        );
+        row = row.push(
+            Row::new()
+                .push(
+                    FaIcon::new("palette", IconFont::Solid)
+                        .size(font_size * unit)
+                        .color(color),
+                )
+                .push(PickList::new(
+                    keyboard_manager.themes(),
+                    Some(keyboard_manager.selected_theme()),
+                    |theme| keyboard_manager.select_theme(&theme),
+                ))
+                .align_y(Vertical::Center)
+                .spacing(unit),
+        );
+        row = row.push(
+            Button::new(
+                FaIcon::new("gear", IconFont::Solid)
+                    .size(font_size * unit)
+                    .color(color),
+            )
+            .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
+            .padding(0)
+            .on_press_with(|| keyboard_manager.toggle_setting()),
+        );
+        Container::new(row.align_y(Vertical::Center).spacing(unit * 2))
+            .width(Length::Fill)
+            .align_x(Horizontal::Right)
+            .into()
+    }
+
+    fn to_toolbar_element<'a, 'b, KM, M>(
+        &'a self,
+        keyboard_manager: &'b KM,
+        unit: u16,
+        font_size: u16,
+        theme: &'a Theme,
+    ) -> Element<'b, M>
+    where
+        KM: KeyboardManager<Message = M>,
+        M: 'static + Clone,
+    {
+        let color = theme.extended_palette().background.weak.text;
+        let mut row = Row::new();
+
+        row = row.push(
+            Row::new()
+                .push(
+                    FaIcon::new("globe", IconFont::Solid)
+                        .size(font_size * unit)
+                        .color(color),
+                )
+                .push(PickList::new(
+                    keyboard_manager.ims(),
+                    keyboard_manager.selected_im(),
+                    |im| keyboard_manager.select_im(&im),
+                ))
+                .align_y(Vertical::Center)
+                .spacing(unit),
+        );
+        row = row.push(
+            Row::new()
+                .push(
+                    FaIcon::new("palette", IconFont::Solid)
+                        .size(font_size * unit)
+                        .color(color),
+                )
+                .push(PickList::new(
+                    keyboard_manager.themes(),
+                    Some(keyboard_manager.selected_theme()),
+                    |theme| keyboard_manager.select_theme(&theme),
+                ))
+                .align_y(Vertical::Center)
+                .spacing(unit),
+        );
+        row = row.push(
+            Button::new(
+                FaIcon::new("gear", IconFont::Solid)
+                    .size(font_size * unit)
+                    .color(color),
+            )
+            .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
+            .padding(0)
+            .on_press_with(|| keyboard_manager.toggle_setting()),
+        );
+        Container::new(row.align_y(Vertical::Center).spacing(unit * 2))
+            .width(Length::Fill)
+            .align_x(Horizontal::Right)
+            .into()
     }
 }

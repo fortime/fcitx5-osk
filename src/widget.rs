@@ -605,9 +605,9 @@ where
     ) {
         let state: &PopupKeyState = tree.state.downcast_ref();
         let background = if state.is_active {
-            theme.as_ref().extended_palette().success.strong.color
+            theme.as_ref().extended_palette().danger.strong.color
         } else {
-            theme.as_ref().extended_palette().success.weak.color
+            theme.as_ref().extended_palette().danger.weak.color
         };
         renderer.fill_quad(
             renderer::Quad {

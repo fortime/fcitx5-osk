@@ -1,15 +1,18 @@
-use std::{future::Future, rc::Rc, sync::Arc};
+use std::{future::Future, sync::Arc};
 
 use anyhow::{Error, Result};
+use dark_light::Mode;
 use getset::{Getters, MutGetters};
-use iced::Task;
+use iced::{window::Id, Element, Task, Theme};
 use zbus::Result as ZbusResult;
 
 use crate::{
     app::{KeyboardError, Message},
+    config::{Config, ConfigManager},
     dbus::client::Fcitx5Services,
-    layout::KeyAreaLayout,
+    layout::{KeyAreaLayout, KeyboardManager},
     store::Store,
+    window::WindowManager,
 };
 
 mod im;
@@ -17,13 +20,17 @@ mod keyboard;
 mod layout;
 mod window;
 
-pub use im::ImState;
-pub use keyboard::{KeyEvent, KeyboardState, ModifierState, StartDbusServiceEvent};
-pub use layout::LayoutState;
-pub use window::{HideOpSource, WindowEvent, WindowState, WindowStateSnapshot};
+pub use im::{CandidateAreaState, ImEvent, ImState};
+pub use keyboard::{KeyEvent, KeyboardState, StartDbusServiceEvent};
+pub use layout::{LayoutEvent, LayoutState};
+pub use window::{HideOpSource, WindowEvent, WindowState};
 
 #[derive(Getters, MutGetters)]
 pub struct State<WM> {
+    #[getset(get = "pub", get_mut = "pub")]
+    config_manager: ConfigManager,
+    #[getset(get = "pub", get_mut = "pub")]
+    store: Store,
     #[getset(get = "pub", get_mut = "pub")]
     layout: LayoutState,
     #[getset(get = "pub", get_mut = "pub")]
@@ -32,6 +39,7 @@ pub struct State<WM> {
     im: ImState,
     #[getset(get = "pub", get_mut = "pub")]
     window: WindowState<WM>,
+    theme: Theme,
     has_fcitx5_services: bool,
 }
 
@@ -39,30 +47,27 @@ impl<WM> State<WM>
 where
     WM: Default,
 {
-    pub fn new(keyboard: KeyboardState, layout: LayoutState) -> Self {
-        Self {
-            layout,
-            keyboard,
+    pub fn new(config_manager: ConfigManager) -> Result<Self> {
+        let config = config_manager.as_ref();
+        let store = Store::new(config)?;
+        // key_area_layout will be updated when cur_im is updated.
+        let key_area_layout = store.key_area_layout("");
+        let mut state = Self {
+            keyboard: KeyboardState::new(config.holding_timeout(), &key_area_layout, &store),
+            layout: LayoutState::new(config.width(), key_area_layout)?,
             im: Default::default(),
             window: Default::default(),
+            theme: Default::default(),
             has_fcitx5_services: false,
-        }
+            config_manager,
+            store,
+        };
+        state.sync_theme();
+        Ok(state)
     }
 }
 
 impl<WM> State<WM> {
-    pub fn update_cur_im(&mut self, im_name: &str, store: &Store) -> bool {
-        let key_area_layout = store.key_area_layout_by_im(im_name);
-        let res = self.layout.update_key_area_layout(key_area_layout.clone());
-        if res {
-            self.keyboard
-                .update_key_area_layout(&key_area_layout, store);
-            self.im.update_cur_im(im_name);
-            self.im.update_candidate_font(store.font_by_im(im_name));
-        }
-        res
-    }
-
     pub fn start(&mut self) -> Task<Message> {
         if self.has_fcitx5_services {
             Task::none()
@@ -85,6 +90,145 @@ impl<WM> State<WM> {
             true
         }
     }
+
+    fn update_cur_im(&mut self, im_name: &str) -> bool {
+        let key_area_layout = self.store.key_area_layout_by_im(im_name);
+        let res = self.layout.update_key_area_layout(key_area_layout.clone());
+        if res {
+            self.keyboard
+                .update_key_area_layout(&key_area_layout, &self.store);
+            self.im.update_cur_im(im_name);
+            self.layout
+                .update_candidate_font(self.store.font_by_im(im_name));
+        }
+        res
+    }
+
+    pub fn on_im_event(&mut self, event: ImEvent) -> Task<Message> {
+        match event {
+            ImEvent::UpdateCurrentIm(im) => {
+                self.update_cur_im(&im);
+                Task::none()
+            }
+            _ => self.im.on_event(event),
+        }
+    }
+
+    pub fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
+    fn is_auto_theme(&self) -> bool {
+        self.config().theme().eq_ignore_ascii_case("auto")
+    }
+
+    pub fn on_theme_event(&mut self, event: ThemeEvent) {
+        match event {
+            ThemeEvent::Detect => {
+                if self.is_auto_theme() {
+                    self.sync_theme();
+                }
+            }
+            ThemeEvent::Update(theme) => {
+                let config = self.config_manager.as_mut();
+                if theme != *config.theme() {
+                    config.set_theme(theme);
+                    self.config_manager.try_write();
+                    self.sync_theme();
+                }
+            }
+        }
+    }
+
+    fn sync_theme(&mut self) {
+        let config = self.config();
+        let mut default_theme = Default::default();
+        let theme = if !self.is_auto_theme() {
+            self.store.theme(config.theme())
+        } else {
+            match dark_light::detect() {
+                Mode::Dark => {
+                    default_theme = Theme::Dark;
+                    config.dark_theme().and_then(|t| self.store.theme(t))
+                }
+                Mode::Light | Mode::Default => {
+                    default_theme = Theme::Light;
+                    config.light_theme().and_then(|t| self.store.theme(t))
+                }
+            }
+        };
+        self.theme = theme.cloned().unwrap_or(default_theme);
+    }
+
+    pub fn config(&self) -> &Config {
+        self.config_manager.as_ref()
+    }
+
+    pub fn to_element(&self) -> Element<Message> {
+        self.layout.to_element(
+            self.im.candidate_area_state(),
+            self,
+            &self.keyboard,
+            &self.theme,
+        )
+    }
+}
+
+impl<WM> State<WM>
+where
+    WM: WindowManager,
+    WM::Message: From<Message> + 'static + Send + Sync,
+{
+    pub fn update_width(&mut self, id: Id, width_p: u16, scale_factor: f32) -> Task<WM::Message> {
+        if self.layout.update_width(width_p, scale_factor) {
+            if width_p != self.config_manager.as_ref().width() {
+                self.config_manager.as_mut().set_width(width_p);
+                self.config_manager.try_write();
+            }
+            let size = self.layout.size();
+            if !self.window.wm_inited() {
+                self.window.set_wm_inited(id)
+            }
+            // After width is changed, the pages of candidate area should be changed too. Here we
+            // just reset it.
+            self.im.reset_candidate_cursor();
+            return self.window.resize(size);
+        } else {
+            Task::none()
+        }
+    }
+}
+
+impl<WM> KeyboardManager for State<WM> {
+    type Message = Message;
+
+    fn themes(&self) -> &[String] {
+        self.store.theme_names()
+    }
+
+    fn selected_theme(&self) -> &String {
+        self.config().theme()
+    }
+
+    fn select_theme(&self, theme: &String) -> Self::Message {
+        ThemeEvent::Update(theme.clone()).into()
+    }
+
+    fn ims(&self) -> &[String] {
+        self.im.im_names()
+    }
+
+    fn selected_im(&self) -> Option<&String> {
+        self.im.im_name()
+    }
+
+    fn select_im(&self, im: &String) -> Self::Message {
+        ImEvent::SelectIm(im.clone()).into()
+    }
+
+    fn toggle_setting(&self) -> Self::Message {
+        LayoutEvent::ToggleSetting.into()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +239,18 @@ pub enum StartedEvent {
 impl From<StartedEvent> for Message {
     fn from(value: StartedEvent) -> Self {
         Self::Started(value)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ThemeEvent {
+    Detect,
+    Update(String),
+}
+
+impl From<ThemeEvent> for Message {
+    fn from(value: ThemeEvent) -> Self {
+        Self::ThemeEvent(value)
     }
 }
 

@@ -29,6 +29,7 @@ pub(crate) trait IdAndConfigPath {
 }
 
 pub struct Store {
+    theme_names: Vec<String>,
     themes: HashMap<String, Theme>,
     default_key_area_layout: Rc<KeyAreaLayout>,
     key_area_layouts: HashMap<String, Rc<KeyAreaLayout>>,
@@ -44,6 +45,11 @@ impl Store {
             .iter()
             .map(|t| (t.to_string().to_lowercase(), t.clone()))
             .collect();
+        let mut theme_names = Vec::with_capacity(Theme::ALL.len() + 1);
+        theme_names.push("Auto".to_string());
+        Theme::ALL
+            .iter()
+            .for_each(|t| theme_names.push(t.to_string()));
         let default_key_area_layout =
             Rc::new(init_default(default_value::DEFAULT_KEY_AREA_LAYOUT_TOML)?);
         let key_area_layouts = init_confs(&config.key_area_layout_folders())?;
@@ -56,6 +62,7 @@ impl Store {
             .map(|(k, v)| (k.clone(), font::load(&v)))
             .collect();
         Ok(Self {
+            theme_names,
             themes,
             default_key_area_layout,
             key_area_layouts,
@@ -66,8 +73,12 @@ impl Store {
         })
     }
 
+    pub fn theme_names(&self) -> &[String] {
+        &self.theme_names
+    }
+
     pub fn theme(&self, name: &str) -> Option<&Theme> {
-        self.themes.get(name)
+        self.themes.get(&name.to_ascii_lowercase())
     }
 
     pub fn key_area_layout(&self, name: &str) -> Rc<KeyAreaLayout> {

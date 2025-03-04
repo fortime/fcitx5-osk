@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{Error, Result};
-use dark_light::Mode;
 use iced::{
     futures::{
         channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -18,16 +17,15 @@ use iced::{
 };
 use iced_futures::event;
 use pin_project::pin_project;
-use xkeysym::Keysym;
+use tokio::time;
 
 use crate::{
-    config::{ConfigManager, Placement},
-    dbus::{client::InputMethodInfo, server::Fcitx5VirtualkeyboardImPanelEvent},
+    config::ConfigManager,
+    dbus::server::Fcitx5VirtualkeyboardImPanelEvent,
     state::{
-        HideOpSource, KeyEvent, KeyboardState, LayoutState, StartDbusServiceEvent, StartedEvent,
-        State, WindowEvent, WindowStateSnapshot,
+        HideOpSource, ImEvent, KeyEvent, LayoutEvent, StartDbusServiceEvent, StartedEvent, State,
+        ThemeEvent, WindowEvent,
     },
-    store::Store,
     window::{WindowManager, WindowSettings},
 };
 
@@ -42,12 +40,13 @@ pub enum Message {
     StartDbusService(StartDbusServiceEvent),
     Error(KeyboardError),
     AfterError,
+    ImEvent(ImEvent),
+    LayoutEvent(LayoutEvent),
     KeyEvent(KeyEvent),
-    Window(WindowEvent),
+    WindowEvent(WindowEvent),
+    ThemeEvent(ThemeEvent),
     UpdateKeyAreaLayout(String),
     Fcitx5VirtualkeyboardImPanel(Fcitx5VirtualkeyboardImPanelEvent),
-    UpdateImList(Vec<InputMethodInfo>),
-    UpdateCurrentIm(String),
 }
 
 trait MapTask<T> {
@@ -120,8 +119,6 @@ impl KeyboardError {
 }
 
 pub struct Keyboard<WM> {
-    config_manager: ConfigManager,
-    store: Store,
     state: State<WM>,
     error: Option<KeyboardError>,
 }
@@ -131,18 +128,8 @@ where
     WM: Default,
 {
     pub fn new(config_manager: ConfigManager) -> Result<Self> {
-        let config = config_manager.as_ref();
-        let store = Store::new(config)?;
-        // key_area_layout will be updated when cur_im is updated.
-        let key_area_layout = store.key_area_layout("");
-        let state = State::new(
-            KeyboardState::new(config.holding_timeout(), &key_area_layout, &store),
-            LayoutState::new(config.width(), key_area_layout)?,
-        );
         Ok(Self {
-            config_manager,
-            store,
-            state,
+            state: State::new(config_manager)?,
             error: None,
         })
     }
@@ -193,15 +180,7 @@ where
     WM::Message: From<Message> + 'static + Send + Sync,
 {
     pub fn view(&self, _window_id: Id) -> Element<WM::Message> {
-        let base = self
-            .state
-            .layout()
-            .to_element(
-                self.state.im().candidate_area_state(),
-                self.state.im().candidate_font(),
-                self.state.keyboard(),
-            )
-            .into();
+        let base = self.state.to_element().into();
         let res = if let Some(e) = &self.error {
             modal(base, self.error_dialog(e), Message::AfterError)
         } else if !self.state.window().wm_inited() {
@@ -231,6 +210,10 @@ where
                     IcedEvent::Window(IcedWindowEvent::Closed) => {
                         Some(WindowEvent::Hidden(id).into())
                     }
+                    IcedEvent::Keyboard(event) => {
+                        tracing::debug!("keyboard event: {:?}", event);
+                        None
+                    }
                     _ => None,
                 }
             }),
@@ -256,55 +239,75 @@ where
             Message::Started(event) => match event {
                 StartedEvent::StartedDbusClients(services) => {
                     self.state.set_dbus_clients(services);
-                    return self
-                        .state
-                        .im()
-                        .sync_input_methods()
-                        .chain(self.state.im().sync_current_input_method())
-                        // TODO show after im is updated
-                        .chain(self.state.window().show())
-                        .map_task();
+                    return Task::future(async {
+                        // wait a moment for fcitx5 starting the backend service.
+                        let _ = time::sleep(Duration::from_secs(1));
+                        Message::Nothing
+                    })
+                    .chain(self.state.window().show())
+                    // .chain(self.state.keyboard().set_keyboard_function_mode())
+                    .map_task();
                 }
             },
             Message::NewSubscription(tx) => {
+                {
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        while !tx.is_closed() {
+                            if let Err(_) = tx.unbounded_send(ThemeEvent::Detect.into()) {
+                                tracing::warn!(
+                                    "failed to send ThemeEvent::Check message, close the task"
+                                );
+                                break;
+                            }
+                            time::sleep(Duration::from_secs(1)).await;
+                        }
+                    });
+                }
                 return self.state.keyboard_mut().start_dbus_service(tx).map_task();
             }
             Message::StartDbusService(event) => match event {
                 StartDbusServiceEvent::Started(dbus_service_token, connection) => {
-                    self.state
+                    let (replaced, old) = self
+                        .state
                         .keyboard_mut()
                         .set_dbus_service_connection(dbus_service_token, connection);
-                    // make sure keyboard is started after dbus service is created.
-                    return self.start().map_task();
+                    let mut task = Task::none();
+                    if replaced {
+                        if let Some(old) = old {
+                            task = task.chain(Task::future(async move {
+                                if let Err(err) = old.close().await {
+                                    tracing::warn!("error in closing dbus connection: {err:?}");
+                                }
+                                Message::Nothing
+                            }));
+                        }
+                        // make sure keyboard is started after dbus service is created.
+                        task = task.chain(self.start());
+                    }
+                    return task.map_task();
                 }
             },
+            Message::LayoutEvent(event) => {
+                self.state.layout_mut().on_event(event);
+            }
             Message::KeyEvent(event) => {
                 return self.state.keyboard_mut().on_event(event).map_task();
             }
-            Message::Window(event) => match event {
+            Message::WindowEvent(event) => match event {
                 WindowEvent::Resize(id, scale_factor, width_p) => {
                     tracing::debug!("scale_factor: {}", scale_factor);
-                    if self.state.layout_mut().update_width(width_p, scale_factor) {
-                        if width_p != self.config_manager.as_ref().width() {
-                            self.config_manager.as_mut().set_width(width_p);
-                            self.config_manager.try_write();
-                        }
-                        let size = self.window_size();
-                        if !self.state.window().wm_inited() {
-                            self.state.window_mut().set_wm_inited(id)
-                        }
-                        return self.state.window_mut().resize(size);
-                    }
+                    return self.state.update_width(id, width_p, scale_factor);
                 }
                 WindowEvent::WmInited(id, size) => {
                     if has_fraction(size.width) || has_fraction(size.height) {
-                        let width_p = self.config_manager.as_ref().width();
+                        let width_p = self.state.config().width();
                         return window::get_scale_factor(id).map(move |scale_factor| {
                             // calculate a new size without fraction
                             Message::from(WindowEvent::Resize(id, scale_factor, width_p)).into()
                         });
                     }
-                    self.state.window_mut().set_wm_inited(id)
+                    self.state.window_mut().set_wm_inited(id);
                 }
                 WindowEvent::HideWindow(snapshot, source) => {
                     if let Some(snapshot) = snapshot {
@@ -317,6 +320,9 @@ where
                     return self.set_hidden(id);
                 }
             },
+            Message::ThemeEvent(event) => {
+                self.state.on_theme_event(event);
+            }
             Message::Fcitx5VirtualkeyboardImPanel(event) => {
                 match event {
                     Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
@@ -332,29 +338,16 @@ where
                             )
                             .map_task();
                     }
-                    Fcitx5VirtualkeyboardImPanelEvent::NotifyImListChanged => {
-                        return self.state.im().sync_input_methods().map_task();
-                    }
                     Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(state) => {
-                        self.state.im_mut().set_candidate_area_state(state);
-                    }
-                    Fcitx5VirtualkeyboardImPanelEvent::NotifyImActivated(im) => {
-                        self.state.update_cur_im(&im, &self.store);
-                    }
-                    Fcitx5VirtualkeyboardImPanelEvent::NotifyImDeactivated(_) => {
-                        // TODO? other logic
-                        self.state.im_mut().deactive();
+                        self.state.im_mut().update_candidate_area_state(state);
                     }
                     _ => {
                         // TODO
                     }
                 }
             }
-            Message::UpdateImList(list) => {
-                self.state.im_mut().update_ims(list);
-            }
-            Message::UpdateCurrentIm(im) => {
-                self.state.update_cur_im(&im, &self.store);
+            Message::ImEvent(event) => {
+                return self.state.on_im_event(event).map_task();
             }
             _ => {}
         };
@@ -370,20 +363,16 @@ where
     }
 
     pub fn theme(&self) -> Theme {
-        if let Some(t) = self.store.theme(&self.config_manager.as_ref().theme()) {
-            t.clone()
-        } else {
-            match dark_light::detect() {
-                Mode::Dark => Theme::Dark.clone(),
-                Mode::Light | Mode::Default => Theme::Light.clone(),
-            }
-        }
+        self.state.theme().clone()
     }
 
     fn show(&mut self) -> Task<WM::Message> {
-        let settings =
-            WindowSettings::new(self.window_size(), self.config_manager.as_ref().placement());
-        return self.state.window_mut().show_local(settings);
+        let settings = WindowSettings::new(self.window_size(), self.state.config().placement());
+        self.state
+            .on_im_event(ImEvent::SyncImList)
+            .chain(self.state.on_im_event(ImEvent::SyncCurrentIm))
+            .map_task()
+            .chain(self.state.window_mut().show_local(settings))
     }
 
     fn set_hidden(&mut self, window_id: Id) -> Task<WM::Message> {

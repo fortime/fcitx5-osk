@@ -5,7 +5,7 @@ use iced::futures::channel::mpsc::UnboundedSender;
 use tracing::instrument;
 use zbus::{fdo::Error, interface, Connection};
 
-use crate::app::Message;
+use crate::{app::Message, state::ImEvent};
 
 ///According to codes in fcitx5:src/ui/virtualkeyboard/virtualkeyboard.cpp
 ///
@@ -56,8 +56,11 @@ impl Fcitx5VirtualkeyboardImPanelService {
         Ok(())
     }
 
-    fn send(&self, state: Fcitx5VirtualkeyboardImPanelEvent) -> Result<(), Error> {
-        self.tx.unbounded_send(state.into()).map_err(|_| {
+    fn send<Event>(&self, event: Event) -> Result<(), Error>
+    where
+        Event: Into<Message>,
+    {
+        self.tx.unbounded_send(event.into()).map_err(|_| {
             Error::Failed("the channel has been closed, unable to handle the request".to_string())
         })
     }
@@ -112,19 +115,22 @@ impl Fcitx5VirtualkeyboardImPanelService {
         ))
     }
 
+    #[zbus(name = "NotifyIMActivated")]
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_activated(&self, im: String) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelEvent::NotifyImActivated(im))
+        self.send(ImEvent::UpdateCurrentIm(im))
     }
 
+    #[zbus(name = "NotifyIMDeactivated")]
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_deactivated(&self, im: String) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelEvent::NotifyImDeactivated(im))
+        self.send(ImEvent::DeactivateIm(im))
     }
 
+    #[zbus(name = "NotifyIMListChanged")]
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_list_changed(&self) -> Result<(), Error> {
-        self.send(Fcitx5VirtualkeyboardImPanelEvent::NotifyImListChanged)
+        self.send(ImEvent::SyncImList)
     }
 }
 
@@ -135,9 +141,6 @@ pub enum Fcitx5VirtualkeyboardImPanelEvent {
     UpdatePreeditCaret(i32),
     UpdatePreeditArea(String),
     UpdateCandidateArea(Arc<CandidateAreaState>),
-    NotifyImActivated(String),
-    NotifyImDeactivated(String),
-    NotifyImListChanged,
 }
 
 impl From<Fcitx5VirtualkeyboardImPanelEvent> for Message {
@@ -146,7 +149,7 @@ impl From<Fcitx5VirtualkeyboardImPanelEvent> for Message {
     }
 }
 
-#[derive(Clone, Debug, Getters, CopyGetters)]
+#[derive(Debug, Getters, CopyGetters)]
 pub struct CandidateAreaState {
     #[getset(get = "pub")]
     candidate_text_list: Vec<String>,

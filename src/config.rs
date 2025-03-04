@@ -34,7 +34,12 @@ pub struct Config {
     holding_timeout: Duration,
 
     #[getset(get = "pub", set = "pub")]
+    #[serde(default = "default_theme")]
     theme: String,
+
+    dark_theme: Option<String>,
+
+    light_theme: Option<String>,
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default)]
@@ -59,8 +64,22 @@ pub struct Config {
     im_font_mapping: HashMap<String, String>,
 }
 
+impl Config {
+    pub fn dark_theme(&self) -> Option<&str> {
+        self.dark_theme.as_deref()
+    }
+
+    pub fn light_theme(&self) -> Option<&str> {
+        self.light_theme.as_deref()
+    }
+}
+
 fn default_holding_timeout() -> Duration {
     Duration::from_millis(500)
+}
+
+fn default_theme() -> String {
+    "Auto".to_string()
 }
 
 pub struct ConfigManager {

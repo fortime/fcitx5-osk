@@ -258,6 +258,6 @@ pub enum WindowEvent {
 
 impl From<WindowEvent> for Message {
     fn from(value: WindowEvent) -> Self {
-        Self::Window(value)
+        Self::WindowEvent(value)
     }
 }

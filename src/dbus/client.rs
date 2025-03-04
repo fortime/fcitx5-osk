@@ -44,7 +44,7 @@ pub struct InputMethodInfo {
     #[getset(get = "pub")]
     label: String,
     #[getset(get = "pub")]
-    language_code: String,
+    kanguage_code: String,
     #[getset(get = "pub")]
     addon: String,
     #[getset(get = "pub")]
@@ -65,6 +65,10 @@ pub trait Fcitx5ControllerService {
 
     #[instrument(level = "debug", skip(self), err, ret)]
     fn current_input_method(&self) -> Result<String>;
+
+    #[zbus(name = "SetCurrentIM")]
+    #[instrument(level = "debug", skip(self), err, ret)]
+    fn set_current_im(&self, im: &str) -> Result<()>;
 }
 
 #[proxy(
@@ -89,11 +93,7 @@ pub trait Fcitx5VirtualKeyboardService {
     interface = "org.fcitx.Fcitx5.VirtualKeyboardBackend1"
 )]
 pub trait Fcitx5VirtualKeyboardBackendService {
-    #[instrument(level = "debug", skip(self), err, ret)]
-    fn set_virtual_keyboard_function_mode(&self, mode: u32) -> Result<()>;
-
     /// keyval(keysym), state: src/lib/fcitx-utils/keysym.h.
-    /// use keyval + state or keycode.
     #[instrument(level = "debug", skip(self), err, ret)]
     fn process_key_event(
         &self,
