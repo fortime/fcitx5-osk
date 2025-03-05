@@ -5,7 +5,10 @@ use iced::Task;
 use crate::{
     app::Message,
     dbus::{
-        client::{Fcitx5ControllerServiceProxy, Fcitx5Services, InputMethodInfo},
+        client::{
+            Fcitx5ControllerServiceProxy, Fcitx5Services, Fcitx5VirtualKeyboardBackendServiceProxy,
+            InputMethodInfo,
+        },
         server::CandidateAreaState as Fcitx5CandidateAreaState,
     },
 };
@@ -91,6 +94,17 @@ impl ImState {
             }
             ImEvent::SyncImList => return self.sync_input_methods(),
             ImEvent::SyncCurrentIm => return self.sync_current_input_method(),
+            ImEvent::PrevCandidates => {
+                if let Some(page_index) = self.candidate_area_state.prev() {
+                    return self.prev_page(page_index);
+                }
+            }
+            ImEvent::NextCandidates(c) => {
+                if let Some(page_index) = self.candidate_area_state.next(c) {
+                    return self.next_page(page_index);
+                }
+            }
+            ImEvent::SelectCandidate(c) => return self.select_candidate(c),
         }
         Task::none()
     }
@@ -102,6 +116,14 @@ impl ImState {
         self.fcitx5_services
             .as_ref()
             .map(Fcitx5Services::controller)
+    }
+
+    fn fcitx5_virtual_keyboard_backend_service(
+        &self,
+    ) -> Option<&Fcitx5VirtualKeyboardBackendServiceProxy<'static>> {
+        self.fcitx5_services
+            .as_ref()
+            .map(Fcitx5Services::virtual_keyboard_backend)
     }
 
     fn sync_input_methods(&self) -> Task<Message> {
@@ -129,9 +151,43 @@ impl ImState {
     fn select_im(&self, im: String) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_controller_service(),
-            format!("select im"),
+            format!("select im failed"),
             |s| async move {
                 s.set_current_im(&im).await?;
+                Ok(Message::Nothing)
+            },
+        )
+    }
+
+    fn select_candidate(&self, cursor: usize) -> Task<Message> {
+        super::call_fcitx5(
+            self.fcitx5_virtual_keyboard_backend_service(),
+            format!("select candidate {} failed", cursor),
+            |s| async move {
+                // TODO 0-based or 1-based
+                s.select_candidate(cursor as i32).await?;
+                Ok(Message::Nothing)
+            },
+        )
+    }
+
+    fn prev_page(&self, page_index: i32) -> Task<Message> {
+        super::call_fcitx5(
+            self.fcitx5_virtual_keyboard_backend_service(),
+            format!("prev page failed"),
+            |s| async move {
+                s.prev_page(page_index).await?;
+                Ok(Message::Nothing)
+            },
+        )
+    }
+
+    fn next_page(&self, page_index: i32) -> Task<Message> {
+        super::call_fcitx5(
+            self.fcitx5_virtual_keyboard_backend_service(),
+            format!("next page failed"),
+            |s| async move {
+                s.next_page(page_index).await?;
                 Ok(Message::Nothing)
             },
         )
@@ -141,7 +197,8 @@ impl ImState {
 #[derive(Default)]
 pub struct CandidateAreaState {
     fcitx5_state: Option<Arc<Fcitx5CandidateAreaState>>,
-    pageable: bool,
+    /// if candidate list is paged in fcitx5
+    paged: bool,
     prev_cursors: Vec<usize>,
     cursor: usize,
 }
@@ -149,10 +206,10 @@ pub struct CandidateAreaState {
 impl CandidateAreaState {
     pub fn update(&mut self, state: Arc<Fcitx5CandidateAreaState>) {
         self.reset_cursor();
-        self.pageable = false;
+        self.paged = false;
         if !state.candidate_text_list().is_empty() {
             if state.has_prev() || state.has_next() {
-                self.pageable = true;
+                self.paged = true;
             }
             self.fcitx5_state = Some(state);
         } else {
@@ -165,7 +222,7 @@ impl CandidateAreaState {
     fn reset(&mut self) {
         self.reset_cursor();
         self.fcitx5_state = None;
-        self.pageable = false;
+        self.paged = false;
     }
 
     pub fn reset_cursor(&mut self) {
@@ -176,17 +233,51 @@ impl CandidateAreaState {
         }
     }
 
-    pub fn next(&mut self, cursor: usize) {
+    pub fn next(&mut self, cursor: usize) -> Option<i32> {
         if let Some(fcitx5_state) = &self.fcitx5_state {
             if cursor > self.cursor && cursor < fcitx5_state.candidate_text_list().len() {
-                self.prev_cursors.push(cursor);
+                self.prev_cursors.push(self.cursor);
                 self.cursor = cursor;
+            } else if cursor >= fcitx5_state.candidate_text_list().len() && fcitx5_state.has_next()
+            {
+                return Some(fcitx5_state.page_index());
             }
         }
+        None
     }
 
-    pub fn prev(&mut self) {
-        self.cursor = self.prev_cursors.pop().unwrap_or(0);
+    pub fn prev(&mut self) -> Option<i32> {
+        if !self.prev_cursors.is_empty() {
+            self.cursor = self.prev_cursors.pop().unwrap_or(0);
+        } else if self.cursor != 0 {
+            self.cursor = 0;
+        } else {
+            // check if there is any previous page in fcitx5
+            if let Some(fcitx5_state) = &self.fcitx5_state {
+                if fcitx5_state.has_prev() {
+                    return Some(fcitx5_state.page_index() - 1);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn has_prev_in_fcitx5(&self) -> bool {
+        self.fcitx5_state
+            .as_ref()
+            .map(|s| s.has_prev())
+            .unwrap_or(false)
+    }
+
+    pub fn has_next_in_fcitx5(&self) -> bool {
+        self.fcitx5_state
+            .as_ref()
+            .map(|s| s.has_next())
+            .unwrap_or(false)
+    }
+
+    pub fn is_paged(&self) -> bool {
+        self.paged
     }
 
     pub fn cursor(&self) -> usize {
@@ -213,6 +304,9 @@ pub enum ImEvent {
     UpdateCurrentIm(String),
     SelectIm(String),
     DeactivateIm(String),
+    PrevCandidates,
+    NextCandidates(usize),
+    SelectCandidate(usize),
 }
 
 impl From<ImEvent> for Message {

@@ -91,6 +91,11 @@ impl LayoutState {
         Ok(())
     }
 
+    pub fn available_candidate_width_p(&self) -> u16 {
+        // minus padding
+        self.size_p.0 - 2 * self.unit
+    }
+
     pub fn size(&self) -> Size {
         Size::from((self.size_p.0 as f32, self.size_p.1 as f32))
     }

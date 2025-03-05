@@ -202,6 +202,10 @@ where
 impl<WM> KeyboardManager for State<WM> {
     type Message = Message;
 
+    fn available_candidate_width_p(&self) -> u16 {
+        self.layout.available_candidate_width_p()
+    }
+
     fn themes(&self) -> &[String] {
         self.store.theme_names()
     }
@@ -228,6 +232,18 @@ impl<WM> KeyboardManager for State<WM> {
 
     fn toggle_setting(&self) -> Self::Message {
         LayoutEvent::ToggleSetting.into()
+    }
+
+    fn prev_candidates_message(&self) -> Self::Message {
+        ImEvent::PrevCandidates.into()
+    }
+
+    fn next_candidates_message(&self, cursor: usize) -> Self::Message {
+        ImEvent::NextCandidates(cursor).into()
+    }
+
+    fn select_candidate_message(&self, index: usize) -> Self::Message {
+        ImEvent::SelectCandidate(index).into()
     }
 }
 

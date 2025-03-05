@@ -91,7 +91,7 @@ k55 = "k_left_super"
 k56 = "k_left_alt"
 k57 = "k_space"
 k58 = "k_right_alt"
-k59 = "k_print"
+k59 = "k_right_super"
 k60 = "k_right_ctrl"
 "#;
 
@@ -421,7 +421,7 @@ p = {ks = 0xffea, s = "Alt", kc = 108}
 p = {ks = 0xffec, s = "Super", kc = 134}
 
 [keys.k_print]
-p = {ks = 0xff61, s = "PrtSc", kc = 218}
+p = {ks = 0xff61, s = "Print", kc = 218}
 
 [keys.k_right_ctrl]
 p = {ks = 0xffe4, s = "Ctrl", kc = 105}

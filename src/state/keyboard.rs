@@ -283,7 +283,8 @@ impl KeyboardState {
                 |s| async move {
                     let (keyval, keycode, modifiers) =
                         if let Some(keycode) = common.key_value.keycode() {
-                            (0, keycode, 0)
+                            let keyval = u32::from(common.key_value.keysym());
+                            (keyval, keycode, 0)
                         } else {
                             let keyval = u32::from(common.key_value.keysym());
                             // TODO how will modifiers be used?

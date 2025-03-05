@@ -4,7 +4,11 @@
 use getset::{CopyGetters, Getters};
 use iced::{
     alignment::{Horizontal, Vertical},
-    widget::{button::Style as ButtonStyle, Button, Column, Container, PickList, Row, Space},
+    widget::{
+        button::Style as ButtonStyle,
+        scrollable::{Direction, Scrollbar},
+        Button, Column, Container, PickList, Row, Scrollable, Space, Text,
+    },
     Color, Element, Font, Length, Theme,
 };
 use iced_font_awesome::{FaIcon, IconFont};
@@ -28,6 +32,8 @@ pub trait KeyManager {
 pub trait KeyboardManager {
     type Message;
 
+    fn available_candidate_width_p(&self) -> u16;
+
     fn themes(&self) -> &[String];
 
     fn selected_theme(&self) -> &String;
@@ -41,6 +47,12 @@ pub trait KeyboardManager {
     fn select_im(&self, im: &String) -> Self::Message;
 
     fn toggle_setting(&self) -> Self::Message;
+
+    fn prev_candidates_message(&self) -> Self::Message;
+
+    fn next_candidates_message(&self, cursor: usize) -> Self::Message;
+
+    fn select_candidate_message(&self, index: usize) -> Self::Message;
 }
 
 #[derive(Deserialize, CopyGetters, Getters)]
@@ -373,8 +385,8 @@ impl ToolbarLayout {
         &'a self,
         keyboard_manager: &'b KM,
         unit: u16,
-        candidate_area_state: &'b CandidateAreaState,
-        candidate_font: Font,
+        state: &'b CandidateAreaState,
+        font: Font,
         font_size: u16,
         theme: &'a Theme,
     ) -> Element<'b, M>
@@ -382,64 +394,111 @@ impl ToolbarLayout {
         KM: KeyboardManager<Message = M>,
         M: 'static + Clone,
     {
+        let spacing_p = 2 * unit;
+        let font_size_p = font_size * unit;
         let color = theme.extended_palette().background.weak.text;
-        let mut row = Row::new();
+        let disabled_color = theme.extended_palette().background.weak.color;
 
-        row = row.push(
-            // caret-right caret-left
-            Button::new(
-                FaIcon::new("caret-left", IconFont::Solid)
-                    .size(font_size * unit)
-                    .color(color),
+        let mut available_candidate_width_p = keyboard_manager.available_candidate_width_p();
+        // minus the size of < and > and their spacing
+        available_candidate_width_p -= 2 * font_size_p;
+        let candidate_list = state.candidate_list();
+        let mut candidate_row = Row::new().spacing(spacing_p).align_y(Vertical::Center);
+        let char_width_p = 2 * font_size_p;
+        let (consumed, max_width_p) = if state.is_paged() {
+            (
+                candidate_list.len(),
+                candidate_list
+                    .iter()
+                    .map(|c| c.chars().count())
+                    .max()
+                    .unwrap_or(0) as u16
+                    * char_width_p,
             )
-            .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
-            .padding(0)
-            .on_press_with(|| keyboard_manager.toggle_setting()),
+        } else {
+            let mut consumed = 0;
+            let mut max_width = 0;
+            for candidate in candidate_list {
+                // TODO Simply assume one char consumes 2 * font_size_p. Calculate the width in the
+                // future.
+                let width = candidate.chars().count() as u16;
+                if max_width.max(width) * (consumed + 1) * char_width_p + consumed * spacing_p
+                    > available_candidate_width_p
+                {
+                    break;
+                }
+                max_width = max_width.max(width);
+                consumed += 1;
+            }
+            (consumed as usize, max_width * char_width_p)
+        };
+        let mut index = state.cursor();
+        // as least 1
+        for candidate in &candidate_list[..consumed.max(1)] {
+            candidate_row = candidate_row.push(
+                candidate_btn(&candidate, font, font_size_p, max_width_p)
+                    .on_press(keyboard_manager.select_candidate_message(index)),
+            );
+            index += 1;
+        }
+
+        let prev_message = if state.cursor() > 0 || state.has_prev_in_fcitx5() {
+            Some(keyboard_manager.prev_candidates_message())
+        } else {
+            None
+        };
+
+        let next_message = if consumed < candidate_list.len() || state.has_next_in_fcitx5() {
+            Some(keyboard_manager.next_candidates_message(consumed + state.cursor()))
+        } else {
+            None
+        };
+        let candidate_element: Element<_> = if state.is_paged() {
+            Scrollable::with_direction(
+                candidate_row,
+                Direction::Horizontal(Scrollbar::new().width(1).spacing(unit)),
+            )
+            .into()
+        } else {
+            candidate_row.into()
+        };
+
+        let mut row = Row::new().height(Length::Fill).align_y(Vertical::Center);
+        row = row.push(
+            fa_btn(
+                "caret-left",
+                IconFont::Solid,
+                font_size_p,
+                if prev_message.is_some() {
+                    color
+                } else {
+                    disabled_color
+                },
+            )
+            .on_press_maybe(prev_message),
+        );
+        row = row.push(
+            // make it scrollable if there are too many items
+            Container::new(candidate_element).center(Length::Fill),
+        );
+        row = row.push(
+            fa_btn(
+                "caret-right",
+                IconFont::Solid,
+                font_size_p,
+                if next_message.is_some() {
+                    color
+                } else {
+                    disabled_color
+                },
+            )
+            .on_press_maybe(next_message),
         );
 
-        row = row.push(
-            Row::new()
-                .push(
-                    FaIcon::new("globe", IconFont::Solid)
-                        .size(font_size * unit)
-                        .color(color),
-                )
-                .push(PickList::new(
-                    keyboard_manager.ims(),
-                    keyboard_manager.selected_im(),
-                    |im| keyboard_manager.select_im(&im),
-                ))
-                .align_y(Vertical::Center)
-                .spacing(unit),
-        );
-        row = row.push(
-            Row::new()
-                .push(
-                    FaIcon::new("palette", IconFont::Solid)
-                        .size(font_size * unit)
-                        .color(color),
-                )
-                .push(PickList::new(
-                    keyboard_manager.themes(),
-                    Some(keyboard_manager.selected_theme()),
-                    |theme| keyboard_manager.select_theme(&theme),
-                ))
-                .align_y(Vertical::Center)
-                .spacing(unit),
-        );
-        row = row.push(
-            Button::new(
-                FaIcon::new("gear", IconFont::Solid)
-                    .size(font_size * unit)
-                    .color(color),
-            )
-            .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
-            .padding(0)
-            .on_press_with(|| keyboard_manager.toggle_setting()),
-        );
-        Container::new(row.align_y(Vertical::Center).spacing(unit * 2))
+        Container::new(row)
             .width(Length::Fill)
-            .align_x(Horizontal::Right)
+            .height(Length::Fill)
+            .align_x(Horizontal::Center)
             .into()
     }
 
@@ -455,51 +514,78 @@ impl ToolbarLayout {
         M: 'static + Clone,
     {
         let color = theme.extended_palette().background.weak.text;
-        let mut row = Row::new();
+        let font_size_p = font_size * unit;
+        let mut row = Row::new()
+            .height(Length::Fill)
+            .align_y(Vertical::Center)
+            .spacing(unit * 2);
 
         row = row.push(
             Row::new()
+                .align_y(Vertical::Center)
+                .spacing(unit)
                 .push(
                     FaIcon::new("globe", IconFont::Solid)
-                        .size(font_size * unit)
+                        .size(font_size_p)
                         .color(color),
                 )
                 .push(PickList::new(
                     keyboard_manager.ims(),
                     keyboard_manager.selected_im(),
                     |im| keyboard_manager.select_im(&im),
-                ))
-                .align_y(Vertical::Center)
-                .spacing(unit),
+                )),
         );
         row = row.push(
             Row::new()
+                .align_y(Vertical::Center)
+                .spacing(unit)
                 .push(
                     FaIcon::new("palette", IconFont::Solid)
-                        .size(font_size * unit)
+                        .size(font_size_p)
                         .color(color),
                 )
                 .push(PickList::new(
                     keyboard_manager.themes(),
                     Some(keyboard_manager.selected_theme()),
                     |theme| keyboard_manager.select_theme(&theme),
-                ))
-                .align_y(Vertical::Center)
-                .spacing(unit),
+                )),
         );
         row = row.push(
-            Button::new(
-                FaIcon::new("gear", IconFont::Solid)
-                    .size(font_size * unit)
-                    .color(color),
-            )
-            .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
-            .padding(0)
-            .on_press_with(|| keyboard_manager.toggle_setting()),
+            fa_btn("gear", IconFont::Solid, font_size_p, color)
+                .on_press_with(|| keyboard_manager.toggle_setting()),
         );
-        Container::new(row.align_y(Vertical::Center).spacing(unit * 2))
+        Container::new(row)
             .width(Length::Fill)
+            .height(Length::Fill)
             .align_x(Horizontal::Right)
             .into()
     }
+}
+
+fn fa_btn<Message>(
+    name: &str,
+    icon_font: IconFont,
+    font_size_p: u16,
+    color: Color,
+) -> Button<Message> {
+    Button::new(FaIcon::new(name, icon_font).size(font_size_p).color(color))
+        .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
+        .padding(0)
+}
+
+fn candidate_btn<Message>(
+    candidate: &str,
+    font: Font,
+    font_size_p: u16,
+    width_p: u16,
+) -> Button<Message> {
+    let text = Text::new(candidate)
+        .font(font)
+        .size(font_size_p)
+        .align_x(Horizontal::Center)
+        .align_y(Vertical::Center);
+    Button::new(text)
+        .width(width_p)
+        .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
+        .padding(0)
 }
