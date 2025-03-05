@@ -4,7 +4,7 @@ use std::{collections::HashMap, fmt::Display, path::PathBuf, rc::Rc};
 use crate::{
     config::Config,
     font,
-    key_set::{Key, KeySet, KeyValue},
+    key_set::{Key, KeySet},
     layout::{KeyAreaLayout, KeyId},
 };
 

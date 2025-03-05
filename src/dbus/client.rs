@@ -9,10 +9,13 @@ use zvariant::Type;
 /// "sssa{sv}a(sssssssbsa{sv})"
 #[derive(Debug, Deserialize, Getters, Type)]
 pub struct InputMethodGroupInfo {
+    #[allow(unused)]
     #[getset(get = "pub")]
     group_name: String,
+    #[allow(unused)]
     #[getset(get = "pub")]
     default_input_method: String,
+    #[allow(unused)]
     #[getset(get = "pub")]
     default_layout: String,
     _unknon_field1: HashMap<String, OwnedValue>,
@@ -22,10 +25,7 @@ pub struct InputMethodGroupInfo {
 
 impl InputMethodGroupInfo {
     pub fn into_input_methods(self) -> Vec<InputMethodInfo> {
-        let Self {
-            input_methods,
-            ..
-        } = self;
+        let Self { input_methods, .. } = self;
         input_methods
     }
 }
@@ -35,20 +35,28 @@ impl InputMethodGroupInfo {
 pub struct InputMethodInfo {
     #[getset(get = "pub")]
     unique_name: String,
+    #[allow(unused)]
     #[getset(get = "pub")]
     name: String,
+    #[allow(unused)]
     #[getset(get = "pub")]
     native_name: String,
+    #[allow(unused)]
     #[getset(get = "pub")]
     icon: String,
+    #[allow(unused)]
     #[getset(get = "pub")]
     label: String,
+    #[allow(unused)]
     #[getset(get = "pub")]
     kanguage_code: String,
+    #[allow(unused)]
     #[getset(get = "pub")]
     addon: String,
+    #[allow(unused)]
     #[getset(get = "pub")]
     is_configurable: bool,
+    #[allow(unused)]
     #[getset(get = "pub")]
     layout: String,
     _unknon_field1: HashMap<String, OwnedValue>,

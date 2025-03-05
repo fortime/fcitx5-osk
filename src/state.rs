@@ -10,7 +10,7 @@ use crate::{
     app::{KeyboardError, Message},
     config::{Config, ConfigManager},
     dbus::client::Fcitx5Services,
-    layout::{KeyAreaLayout, KeyboardManager},
+    layout::KeyboardManager,
     store::Store,
     window::WindowManager,
 };

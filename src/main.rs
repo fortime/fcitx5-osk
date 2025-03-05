@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf, process};
+use std::{env, path::PathBuf, process};
 
 use anyhow::Result;
 use app::{Keyboard, Message};

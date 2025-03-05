@@ -25,10 +25,14 @@ impl WindowManager for X11WindowManager {
         iced_settings.decorations = false;
         // TODO placement, and application_id
         let (id, task) = iced_window::open(iced_settings);
-        (id, task.then(|id| iced_window::get_scale_factor(id)).map(|scale_factor| {
-            tracing::debug!("scale_factor of window: {}", scale_factor);
-            Self::Message::Nothing
-        }))
+        (
+            id,
+            task.then(|id| iced_window::get_scale_factor(id))
+                .map(|scale_factor| {
+                    tracing::debug!("scale_factor of window: {}", scale_factor);
+                    Self::Message::Nothing
+                }),
+        )
     }
 
     fn close(&mut self, window_id: Id) -> Task<Self::Message> {

@@ -138,14 +138,16 @@ impl Fcitx5VirtualkeyboardImPanelService {
 pub enum Fcitx5VirtualkeyboardImPanelEvent {
     ShowVirtualKeyboard,
     HideVirtualKeyboard,
+    #[allow(unused)]
     UpdatePreeditCaret(i32),
+    #[allow(unused)]
     UpdatePreeditArea(String),
     UpdateCandidateArea(Arc<CandidateAreaState>),
 }
 
 impl From<Fcitx5VirtualkeyboardImPanelEvent> for Message {
     fn from(value: Fcitx5VirtualkeyboardImPanelEvent) -> Self {
-        Self::Fcitx5VirtualkeyboardImPanel(value)
+        Self::Fcitx5VirtualkeyboardImPanelEvent(value)
     }
 }
 
@@ -159,6 +161,7 @@ pub struct CandidateAreaState {
     has_next: bool,
     #[getset(get_copy = "pub")]
     page_index: i32,
+    #[allow(unused)]
     #[getset(get_copy = "pub")]
     global_cursor_index: i32,
 }

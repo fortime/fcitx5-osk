@@ -12,7 +12,7 @@ use iced::{
         Stream, StreamExt,
     },
     widget,
-    window::{self, Event as IcedWindowEvent, Id, Settings},
+    window::{self, Event as IcedWindowEvent, Id},
     Color, Element, Event as IcedEvent, Size, Subscription, Task, Theme,
 };
 use iced_futures::event;
@@ -45,8 +45,7 @@ pub enum Message {
     KeyEvent(KeyEvent),
     WindowEvent(WindowEvent),
     ThemeEvent(ThemeEvent),
-    UpdateKeyAreaLayout(String),
-    Fcitx5VirtualkeyboardImPanel(Fcitx5VirtualkeyboardImPanelEvent),
+    Fcitx5VirtualkeyboardImPanelEvent(Fcitx5VirtualkeyboardImPanelEvent),
 }
 
 trait MapTask<T> {
@@ -323,7 +322,7 @@ where
             Message::ThemeEvent(event) => {
                 self.state.on_theme_event(event);
             }
-            Message::Fcitx5VirtualkeyboardImPanel(event) => {
+            Message::Fcitx5VirtualkeyboardImPanelEvent(event) => {
                 match event {
                     Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
                         return self.show();
