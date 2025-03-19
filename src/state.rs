@@ -170,10 +170,10 @@ where
     WM: WindowManager,
     WM::Message: From<Message> + 'static + Send + Sync,
 {
-    //pub fn update_width(&mut self, id: Id, width_p: u16, scale_factor: f32) -> Task<WM::Message> {
-    //    if self.layout.update_width(width_p, scale_factor) {
-    //        if width_p != self.config_manager.as_ref().width() {
-    //            self.config_manager.as_mut().set_width(width_p);
+    //pub fn update_width(&mut self, id: Id, width: u16, scale_factor: f32) -> Task<WM::Message> {
+    //    if self.layout.update_width(width, scale_factor) {
+    //        if width != self.config_manager.as_ref().width() {
+    //            self.config_manager.as_mut().set_width(width);
     //            self.config_manager.try_write();
     //        }
     //        let size = self.layout.size();
@@ -203,8 +203,8 @@ where
 impl<WM> KeyboardManager for State<WM> {
     type Message = Message;
 
-    fn available_candidate_width_p(&self) -> u16 {
-        self.window_manager.available_candidate_width_p()
+    fn available_candidate_width(&self) -> u16 {
+        self.window_manager.available_candidate_width()
     }
 
     fn themes(&self) -> &[String] {

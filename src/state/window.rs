@@ -249,11 +249,11 @@ impl<WM> WindowManagerState<WM> {
         self.screen_size.height > self.screen_size.width
     }
 
-    pub fn available_candidate_width_p(&self) -> u16 {
+    pub fn available_candidate_width(&self) -> u16 {
         if self.is_portrait() {
-            self.portrait_layout.available_candidate_width_p()
+            self.portrait_layout.available_candidate_width()
         } else {
-            self.landscape_layout.available_candidate_width_p()
+            self.landscape_layout.available_candidate_width()
         }
     }
 

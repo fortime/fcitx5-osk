@@ -71,15 +71,15 @@ struct HoldingKeyState {
 pub struct KeyboardState {
     id: u8,
     modifiers: u32,
-    primary_text_size: u16,
-    secondary_text_size: u16,
+    primary_text_size_u: u16,
+    secondary_text_size_u: u16,
     font: Font,
     keys: HashMap<String, Key>,
     pressed_keys: HashMap<Arc<String>, KeyState>,
     holding_timeout: Duration,
     holding_key_state: Option<HoldingKeyState>,
-    popup_key_width: u16,
-    popup_key_height: u16,
+    popup_key_width_u: u16,
+    popup_key_height_u: u16,
     /// To avoid capturing the lifetime of this object, we seperate the connection process into
     /// multiple steps. In theory, there would be multiple creations of connection in the same
     /// time, we only keep the connection with the correct id only.
@@ -94,15 +94,15 @@ impl KeyboardState {
             id: 0,
             // always virtual
             modifiers: Default::default(),
-            primary_text_size: Default::default(),
-            secondary_text_size: Default::default(),
+            primary_text_size_u: Default::default(),
+            secondary_text_size_u: Default::default(),
             font: Default::default(),
             keys: HashMap::new(),
             pressed_keys: HashMap::new(),
             holding_timeout,
             holding_key_state: None,
-            popup_key_width: 0,
-            popup_key_height: 0,
+            popup_key_width_u: 0,
+            popup_key_height_u: 0,
             dbus_service_token: 0,
             dbus_service_connection: None,
             fcitx5_services: None,
@@ -118,10 +118,10 @@ impl KeyboardState {
     pub fn update_key_area_layout(&mut self, key_area_layout: &KeyAreaLayout, store: &Store) {
         self.id = self.id.wrapping_add(1);
         self.modifiers = 0;
-        self.primary_text_size = key_area_layout.primary_text_size();
-        self.secondary_text_size = key_area_layout.secondary_text_size();
-        self.popup_key_width = key_area_layout.popup_key_width();
-        self.popup_key_height = key_area_layout.popup_key_height();
+        self.primary_text_size_u = key_area_layout.primary_text_size_u();
+        self.secondary_text_size_u = key_area_layout.secondary_text_size_u();
+        self.popup_key_width_u = key_area_layout.popup_key_width_u();
+        self.popup_key_height_u = key_area_layout.popup_key_height_u();
         self.keys = key_area_layout
             .key_mappings()
             .iter()
@@ -190,11 +190,11 @@ impl KeyboardState {
                 .align_x(Horizontal::Center)
                 .align_y(Vertical::Center)
                 .font(self.font)
-                .size(self.primary_text_size * unit),
+                .size(self.primary_text_size_u * unit),
             holding_key_state.key_widget_event.finger.clone(),
         )
-        .width(self.popup_key_width * unit)
-        .height(self.popup_key_height * unit)
+        .width(self.popup_key_width_u * unit)
+        .height(self.popup_key_height_u * unit)
         .on_enter(KeyEvent::new(common.clone(), KeyEventInner::SelectSecondary).into())
         .on_exit(KeyEvent::new(common, KeyEventInner::UnselectSecondary).into())
     }
@@ -503,37 +503,37 @@ impl KeyboardState {
 impl KeyManager for KeyboardState {
     type Message = Message;
 
-    fn key(&self, key_name: Arc<String>, unit: u16, size_p: (u16, u16)) -> Element<Self::Message> {
-        let (width_p, height_p) = size_p;
-        let (inner_width_p, inner_height_p) = (
-            width_p - TEXT_PADDING_LENGTH * 2,
-            height_p - TEXT_PADDING_LENGTH * 2,
+    fn key(&self, key_name: Arc<String>, unit: u16, size: (u16, u16)) -> Element<Self::Message> {
+        let (width, height) = size;
+        let (inner_width, inner_height) = (
+            width - TEXT_PADDING_LENGTH * 2,
+            height - TEXT_PADDING_LENGTH * 2,
         );
 
         let (content, press_cb, release_cb) = if let Some(key) = self.keys.get(&*key_name) {
             let is_shift_set = ModifierState::Shift.is_set(self.modifiers);
             let is_caps_lock_set = ModifierState::CapsLock.is_set(self.modifiers);
-            let secondary_height_p = inner_height_p / 4;
-            let primary_height_p = inner_height_p - 2 * secondary_height_p;
+            let secondary_height = inner_height / 4;
+            let primary_height = inner_height - 2 * secondary_height;
             let mut column: Column<Self::Message> = Column::new();
             let top = Text::new(key.secondary_text(is_shift_set, is_caps_lock_set));
             let middle = Text::new(key.primary_text(is_shift_set, is_caps_lock_set));
             let key_value = key.key_value(is_shift_set, is_caps_lock_set);
             column = column
                 .push(
-                    top.width(inner_width_p)
-                        .height(secondary_height_p)
+                    top.width(inner_width)
+                        .height(secondary_height)
                         .font(self.font)
-                        .size((self.secondary_text_size * unit) as f32)
+                        .size((self.secondary_text_size_u * unit) as f32)
                         .align_y(Vertical::Center)
                         .align_x(Horizontal::Right),
                 )
                 .push(
                     middle
-                        .width(inner_width_p)
-                        .height(primary_height_p)
+                        .width(inner_width)
+                        .height(primary_height)
                         .font(self.font)
-                        .size((self.primary_text_size * unit) as f32)
+                        .size((self.primary_text_size_u * unit) as f32)
                         .align_y(Vertical::Center)
                         .align_x(Horizontal::Center),
                 );
@@ -562,13 +562,13 @@ impl KeyManager for KeyboardState {
             .on_press_with(press_cb)
             .on_release_with(release_cb)
             .padding(Padding::new(TEXT_PADDING_LENGTH as f32))
-            .width(width_p)
-            .height(height_p)
+            .width(width)
+            .height(height)
             .into()
     }
 
-    fn popup_overlay(&self, unit: u16, size_p: (u16, u16)) -> Option<Element<Self::Message>> {
-        let (width_p, height_p) = size_p;
+    fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Self::Message>> {
+        let (width, height) = size;
 
         let holding_key_state = self.holding_key_state.as_ref()?;
 
@@ -578,26 +578,26 @@ impl KeyManager for KeyboardState {
         let key = &holding_key_state.key;
         let mut row = Row::new();
         let mut skip = 0;
-        let mut popup_key_area_width_p = 0;
+        let mut popup_key_area_width = 0;
         if Key::is_shifted(is_shift_set, is_caps_lock_set) {
             row = row.push(self.new_popup_key(holding_key_state, key.primary(), unit));
             skip = 1;
-            popup_key_area_width_p += self.popup_key_width * unit;
+            popup_key_area_width += self.popup_key_width_u * unit;
         }
         for secondary in key.secondaries().iter().skip(skip) {
             row = row.push(self.new_popup_key(holding_key_state, secondary, unit));
-            popup_key_area_width_p += self.popup_key_width * unit;
+            popup_key_area_width += self.popup_key_width_u * unit;
         }
 
         // calculate position.
         let bounds = &holding_key_state.key_widget_event.bounds;
         let mut left_x = bounds.x as u16;
-        if left_x + popup_key_area_width_p > width_p {
-            left_x = width_p.checked_sub(popup_key_area_width_p).unwrap_or(0);
+        if left_x + popup_key_area_width > width {
+            left_x = width.checked_sub(popup_key_area_width).unwrap_or(0);
         }
         let mut top_y = bounds.y as u16;
-        if top_y > self.popup_key_height * unit {
-            top_y -= self.popup_key_height * unit;
+        if top_y > self.popup_key_height_u * unit {
+            top_y -= self.popup_key_height_u * unit;
         } else {
             top_y += bounds.height as u16;
         }
@@ -607,8 +607,8 @@ impl KeyManager for KeyboardState {
         Some(
             Container::new(row)
                 .padding(padding)
-                .width(width_p)
-                .height(height_p)
+                .width(width)
+                .height(height)
                 .into(),
         )
     }

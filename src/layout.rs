@@ -25,15 +25,15 @@ use crate::{state::CandidateAreaState, store::IdAndConfigPath};
 pub trait KeyManager {
     type Message;
 
-    fn key(&self, key_name: Arc<String>, unit: u16, size_p: (u16, u16)) -> Element<Self::Message>;
+    fn key(&self, key_name: Arc<String>, unit: u16, size: (u16, u16)) -> Element<Self::Message>;
 
-    fn popup_overlay(&self, unit: u16, size_p: (u16, u16)) -> Option<Element<Self::Message>>;
+    fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Self::Message>>;
 }
 
 pub trait KeyboardManager {
     type Message;
 
-    fn available_candidate_width_p(&self) -> u16;
+    fn available_candidate_width(&self) -> u16;
 
     fn themes(&self) -> &[String];
 
@@ -66,63 +66,75 @@ pub struct KeyAreaLayout {
     #[getset(get = "pub")]
     name: String,
     /// vertical space between rows
-    #[serde(default = "KeyAreaLayout::default_spacing")]
-    spacing: u16,
+    #[serde(alias = "spacing", default = "KeyAreaLayout::default_spacing_u")]
+    spacing_u: u16,
     elements: Vec<KeyRow>,
     #[getset(get = "pub")]
     key_mappings: HashMap<String, KeyId>,
-    #[serde(default = "KeyAreaLayout::default_primary_text_size")]
+    #[serde(
+        alias = "primary_text_size",
+        default = "KeyAreaLayout::default_primary_text_size_u"
+    )]
     #[getset(get_copy = "pub")]
-    primary_text_size: u16,
-    #[serde(default = "KeyAreaLayout::default_secondary_text_size")]
+    primary_text_size_u: u16,
+    #[serde(
+        alias = "secondary_text_size",
+        default = "KeyAreaLayout::default_secondary_text_size_u"
+    )]
     #[getset(get_copy = "pub")]
-    secondary_text_size: u16,
-    #[serde(default = "KeyAreaLayout::default_popup_key_width")]
+    secondary_text_size_u: u16,
+    #[serde(
+        alias = "popup_key_width",
+        default = "KeyAreaLayout::default_popup_key_width_u"
+    )]
     #[getset(get_copy = "pub")]
-    popup_key_width: u16,
-    #[serde(default = "KeyAreaLayout::default_popup_key_height")]
+    popup_key_width_u: u16,
+    #[serde(
+        alias = "popup_key_height",
+        default = "KeyAreaLayout::default_popup_key_height_u"
+    )]
     #[getset(get_copy = "pub")]
-    popup_key_height: u16,
+    popup_key_height_u: u16,
     #[getset(get = "pub")]
     font: Option<String>,
 }
 
 impl KeyAreaLayout {
-    fn default_spacing() -> u16 {
+    fn default_spacing_u() -> u16 {
         1
     }
 
-    fn default_primary_text_size() -> u16 {
+    fn default_primary_text_size_u() -> u16 {
         2
     }
 
-    fn default_popup_key_width() -> u16 {
+    fn default_popup_key_width_u() -> u16 {
         4
     }
 
-    fn default_popup_key_height() -> u16 {
+    fn default_popup_key_height_u() -> u16 {
         4
     }
 
-    fn default_secondary_text_size() -> u16 {
+    fn default_secondary_text_size_u() -> u16 {
         1
     }
 
-    pub fn width(&self) -> u16 {
-        self.elements.iter().map(KeyRow::width).max().unwrap_or(0)
+    pub fn width_u(&self) -> u16 {
+        self.elements.iter().map(KeyRow::width_u).max().unwrap_or(0)
     }
 
-    pub fn height(&self) -> u16 {
+    pub fn height_u(&self) -> u16 {
         if self.elements.is_empty() {
             return 0;
         }
-        let mut height = self.spacing * (self.elements.len() as u16 - 1);
-        height += self.elements.iter().map(KeyRow::height).sum::<u16>();
-        height
+        let mut height_u = self.spacing_u * (self.elements.len() as u16 - 1);
+        height_u += self.elements.iter().map(KeyRow::height_u).sum::<u16>();
+        height_u
     }
 
-    pub fn size_p(&self, unit: u16) -> (u16, u16) {
-        (self.width() * unit, self.height() * unit)
+    pub fn size(&self, unit: u16) -> (u16, u16) {
+        (self.width_u() * unit, self.height_u() * unit)
     }
 
     pub fn to_element<'a, 'b, KM, M>(
@@ -135,7 +147,7 @@ impl KeyAreaLayout {
         M: 'static,
     {
         let mut col = Column::new()
-            .spacing(self.spacing * unit)
+            .spacing(self.spacing_u * unit)
             .align_x(Horizontal::Center);
 
         for key_row in &self.elements {
@@ -197,24 +209,30 @@ impl<'de> Deserialize<'de> for KeyId {
 
 #[derive(Deserialize)]
 pub struct KeyRow {
-    height: u16,
+    #[serde(alias = "height")]
+    height_u: u16,
+    #[serde(alias = "spacing")]
     /// horizontal space between elements
-    spacing: u16,
+    spacing_u: u16,
     elements: Vec<KeyRowElement>,
 }
 
 impl KeyRow {
-    fn width(&self) -> u16 {
+    fn width_u(&self) -> u16 {
         if self.elements.is_empty() {
             return 0;
         }
-        let mut width = self.spacing * (self.elements.len() as u16 - 1);
-        width += self.elements.iter().map(KeyRowElement::width).sum::<u16>();
-        width
+        let mut width_u = self.spacing_u * (self.elements.len() as u16 - 1);
+        width_u += self
+            .elements
+            .iter()
+            .map(KeyRowElement::width_u)
+            .sum::<u16>();
+        width_u
     }
 
-    fn height(&self) -> u16 {
-        self.height
+    fn height_u(&self) -> u16 {
+        self.height_u
     }
 
     fn to_element<'a, 'b, KM, M>(&'a self, unit: u16, manager: &'b KM) -> impl Into<Element<'b, M>>
@@ -223,11 +241,11 @@ impl KeyRow {
         M: 'static,
     {
         let mut row = Row::new()
-            .spacing(self.spacing * unit)
+            .spacing(self.spacing_u * unit)
             .align_y(Vertical::Center)
-            .height(self.height * unit);
+            .height(self.height_u * unit);
         for element in &self.elements {
-            row = row.push(element.to_element(self.height, unit, manager));
+            row = row.push(element.to_element(self.height_u, unit, manager));
         }
         row
     }
@@ -236,27 +254,27 @@ impl KeyRow {
 pub enum KeyRowElement {
     Padding(u16),
     Key {
-        width: u16,
-        height: Option<u16>,
+        width_u: u16,
+        height_u: Option<u16>,
         name: Arc<String>,
     },
 }
 
 impl KeyRowElement {
-    fn width(&self) -> u16 {
+    fn width_u(&self) -> u16 {
         match self {
             KeyRowElement::Padding(n) => *n,
             KeyRowElement::Key {
-                width,
-                height: _height,
+                width_u,
+                height_u: _height,
                 name: _name,
-            } => *width,
+            } => *width_u,
         }
     }
 
     fn to_element<'a, 'b, KM, M>(
         &'a self,
-        max_height: u16,
+        max_height_u: u16,
         unit: u16,
         manager: &'b KM,
     ) -> Element<'b, M>
@@ -265,28 +283,28 @@ impl KeyRowElement {
         M: 'static,
     {
         match self {
-            KeyRowElement::Padding(width) => Space::with_width(width * unit).into(),
+            KeyRowElement::Padding(width_u) => Space::with_width(width_u * unit).into(),
             KeyRowElement::Key {
-                width,
-                height,
+                width_u,
+                height_u,
                 name,
             } => {
-                let mut height = height.unwrap_or(max_height);
-                if height > max_height {
+                let mut height_u = height_u.unwrap_or(max_height_u);
+                if height_u > max_height_u {
                     tracing::warn!(
-                        "key[{name}] is too high: {height}, updated to: {}",
-                        max_height
+                        "key[{name}] is too high: {height_u}, updated to: {}",
+                        max_height_u
                     );
-                    height = max_height;
+                    height_u = max_height_u;
                 }
                 tracing::trace!(
                     "key: {}, width: {}, height: {}",
                     name,
-                    width * unit,
-                    height * unit
+                    width_u * unit,
+                    height_u * unit
                 );
                 manager
-                    .key(name.clone(), unit, (width * unit, height * unit))
+                    .key(name.clone(), unit, (width_u * unit, height_u * unit))
                     .into()
             }
         }
@@ -302,26 +320,26 @@ impl<'de> Deserialize<'de> for KeyRowElement {
         let mut items = s.splitn(2, ':');
         let typ = items.next().unwrap_or("");
         if typ == "p" {
-            let width = items.next().unwrap_or("1");
-            match width.parse() {
+            let width_u = items.next().unwrap_or("1");
+            match width_u.parse() {
                 Ok(n) => Ok(KeyRowElement::Padding(n)),
                 Err(_) => Err(Error::invalid_value(
-                    Unexpected::Str(width),
+                    Unexpected::Str(width_u),
                     &"it should end with an empty string or a u16 integer",
                 )),
             }
         } else if typ.starts_with("k") {
-            let width = items.next().unwrap_or("8");
-            let width = match width.parse() {
+            let width_u = items.next().unwrap_or("8");
+            let width_u = match width_u.parse() {
                 Ok(n) => n,
                 Err(_) => {
                     return Err(Error::invalid_value(
-                        Unexpected::Str(width),
+                        Unexpected::Str(width_u),
                         &"width should be empty or a u16 integer",
                     ))
                 }
             };
-            let height = items
+            let height_u = items
                 .next()
                 .map(|s| {
                     s.parse().map_err(|_| {
@@ -333,8 +351,8 @@ impl<'de> Deserialize<'de> for KeyRowElement {
                 })
                 .transpose()?;
             Ok(KeyRowElement::Key {
-                height,
-                width,
+                height_u,
+                width_u,
                 name: Arc::new(typ.to_string()),
             })
         } else {
@@ -365,7 +383,7 @@ impl ToolbarLayout {
         unit: u16,
         candidate_area_state: &'b CandidateAreaState,
         candidate_font: Font,
-        font_size: u16,
+        font_size_u: u16,
         theme: &'a Theme,
     ) -> Element<'b, M>
     where
@@ -378,11 +396,11 @@ impl ToolbarLayout {
                 unit,
                 candidate_area_state,
                 candidate_font,
-                font_size,
+                font_size_u,
                 theme,
             )
         } else {
-            self.to_toolbar_element(keyboard_manager, unit, font_size, theme)
+            self.to_toolbar_element(keyboard_manager, unit, font_size_u, theme)
         }
     }
 
@@ -392,25 +410,25 @@ impl ToolbarLayout {
         unit: u16,
         state: &'b CandidateAreaState,
         font: Font,
-        font_size: u16,
+        font_size_u: u16,
         theme: &'a Theme,
     ) -> Element<'b, M>
     where
         KM: KeyboardManager<Message = M>,
         M: 'static + Clone,
     {
-        let spacing_p = 2 * unit;
-        let font_size_p = font_size * unit;
+        let spacing = 2 * unit;
+        let font_size = font_size_u * unit;
         let color = theme.extended_palette().background.weak.text;
         let disabled_color = theme.extended_palette().background.weak.color;
 
-        let mut available_candidate_width_p = keyboard_manager.available_candidate_width_p();
+        let mut available_candidate_width = keyboard_manager.available_candidate_width();
         // minus the size of < and > and their spacing
-        available_candidate_width_p -= 2 * font_size_p;
+        available_candidate_width -= 2 * font_size;
         let candidate_list = state.candidate_list();
-        let mut candidate_row = Row::new().spacing(spacing_p).align_y(Vertical::Center);
-        let char_width_p = 2 * font_size_p;
-        let (consumed, max_width_p) = if state.is_paged() {
+        let mut candidate_row = Row::new().spacing(spacing).align_y(Vertical::Center);
+        let char_width = 2 * font_size;
+        let (consumed, max_width) = if state.is_paged() {
             (
                 candidate_list.len(),
                 candidate_list
@@ -418,30 +436,30 @@ impl ToolbarLayout {
                     .map(|c| c.chars().count())
                     .max()
                     .unwrap_or(0) as u16
-                    * char_width_p,
+                    * char_width,
             )
         } else {
             let mut consumed = 0;
             let mut max_width = 0;
             for candidate in candidate_list {
-                // TODO Simply assume one char consumes 2 * font_size_p. Calculate the width in the
+                // TODO Simply assume one char consumes 2 * font_size. Calculate the width in the
                 // future.
                 let width = candidate.chars().count() as u16;
-                if max_width.max(width) * (consumed + 1) * char_width_p + consumed * spacing_p
-                    > available_candidate_width_p
+                if max_width.max(width) * (consumed + 1) * char_width + consumed * spacing
+                    > available_candidate_width
                 {
                     break;
                 }
                 max_width = max_width.max(width);
                 consumed += 1;
             }
-            (consumed as usize, max_width * char_width_p)
+            (consumed as usize, max_width * char_width)
         };
         let mut index = state.cursor();
         // as least 1
         for candidate in &candidate_list[..consumed.max(1)] {
             candidate_row = candidate_row.push(
-                candidate_btn(&candidate, font, font_size_p, max_width_p)
+                candidate_btn(&candidate, font, font_size, max_width)
                     .on_press(keyboard_manager.select_candidate_message(index)),
             );
             index += 1;
@@ -473,7 +491,7 @@ impl ToolbarLayout {
             fa_btn(
                 "caret-left",
                 IconFont::Solid,
-                font_size_p,
+                font_size,
                 if prev_message.is_some() {
                     color
                 } else {
@@ -490,7 +508,7 @@ impl ToolbarLayout {
             fa_btn(
                 "caret-right",
                 IconFont::Solid,
-                font_size_p,
+                font_size,
                 if next_message.is_some() {
                     color
                 } else {
@@ -511,7 +529,7 @@ impl ToolbarLayout {
         &'a self,
         keyboard_manager: &'b KM,
         unit: u16,
-        font_size: u16,
+        font_size_u: u16,
         theme: &'a Theme,
     ) -> Element<'b, M>
     where
@@ -519,7 +537,7 @@ impl ToolbarLayout {
         M: 'static + Clone,
     {
         let color = theme.extended_palette().background.weak.text;
-        let font_size_p = font_size * unit;
+        let font_size = font_size_u * unit;
         let mut row = Row::new()
             .height(Length::Fill)
             .align_y(Vertical::Center)
@@ -531,7 +549,7 @@ impl ToolbarLayout {
                 .spacing(unit)
                 .push(
                     FaIcon::new("globe", IconFont::Solid)
-                        .size(font_size_p)
+                        .size(font_size)
                         .color(color),
                 )
                 .push(PickList::new(
@@ -546,7 +564,7 @@ impl ToolbarLayout {
                 .spacing(unit)
                 .push(
                     FaIcon::new("palette", IconFont::Solid)
-                        .size(font_size_p)
+                        .size(font_size)
                         .color(color),
                 )
                 .push(PickList::new(
@@ -556,7 +574,7 @@ impl ToolbarLayout {
                 )),
         );
         row = row.push(
-            fa_btn("gear", IconFont::Solid, font_size_p, color)
+            fa_btn("gear", IconFont::Solid, font_size, color)
                 .on_press_with(|| keyboard_manager.toggle_setting()),
         );
         Container::new(row)
@@ -570,10 +588,10 @@ impl ToolbarLayout {
 fn fa_btn<Message>(
     name: &str,
     icon_font: IconFont,
-    font_size_p: u16,
+    font_size: u16,
     color: Color,
 ) -> Button<Message> {
-    Button::new(FaIcon::new(name, icon_font).size(font_size_p).color(color))
+    Button::new(FaIcon::new(name, icon_font).size(font_size).color(color))
         .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
         .padding(0)
 }
@@ -581,16 +599,16 @@ fn fa_btn<Message>(
 fn candidate_btn<Message>(
     candidate: &str,
     font: Font,
-    font_size_p: u16,
-    width_p: u16,
+    font_size: u16,
+    width: u16,
 ) -> Button<Message> {
     let text = Text::new(candidate)
         .font(font)
-        .size(font_size_p)
+        .size(font_size)
         .align_x(Horizontal::Center)
         .align_y(Vertical::Center);
     Button::new(text)
-        .width(width_p)
+        .width(width)
         .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
         .padding(0)
 }
