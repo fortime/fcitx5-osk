@@ -1,4 +1,4 @@
-use std::{mem, rc::Rc};
+use std::{mem, rc::Rc, result::Result as StdResult};
 
 use anyhow::Result;
 use iced::{
@@ -100,38 +100,49 @@ impl LayoutState {
         Size::from((self.size_p.0 as f32, self.size_p.1 as f32))
     }
 
-    pub fn update_width(&mut self, mut width_p: u16, scale_factor: f32) -> bool {
+    pub fn update_width(&mut self, mut width_p: u16) -> StdResult<u16, u16> {
         mem::swap(&mut self.size_p.0, &mut width_p);
-        self.scale_factor = scale_factor;
         if let Err(e) = self.calculate_size() {
-            tracing::debug!("failed to update width: {e}, recovering.");
+            tracing::warn!("failed to update width: {e}, recovering.");
             // recover
             mem::swap(&mut self.size_p.0, &mut width_p);
-            false
+            Err(width_p)
         } else {
-            true
+            Ok(width_p)
         }
     }
 
-    pub(super) fn update_key_area_layout(
+    pub fn update_scale_factor(&mut self, mut scale_factor: f32) -> StdResult<f32, f32> {
+        mem::swap(&mut self.scale_factor, &mut scale_factor);
+        if let Err(e) = self.calculate_size() {
+            tracing::warn!("failed to update scale factor: {e}, recovering.");
+            // recover
+            mem::swap(&mut self.scale_factor, &mut scale_factor);
+            Err(scale_factor)
+        } else {
+            Ok(scale_factor)
+        }
+    }
+
+    pub fn update_key_area_layout(
         &mut self,
         mut key_area_layout: Rc<KeyAreaLayout>,
-    ) -> bool {
+    ) -> StdResult<Rc<KeyAreaLayout>, Rc<KeyAreaLayout>> {
         mem::swap(&mut self.key_area_layout, &mut key_area_layout);
         if let Err(e) = self.calculate_size() {
-            tracing::debug!(
+            tracing::warn!(
                 "failed to update key area layout[{}]: {e}, recovering.",
                 key_area_layout.name()
             );
             // recover
             mem::swap(&mut self.key_area_layout, &mut key_area_layout);
-            false
+            Err(key_area_layout)
         } else {
-            true
+            Ok(key_area_layout)
         }
     }
 
-    pub(super) fn update_candidate_font(&mut self, font: Font) {
+    pub fn update_candidate_font(&mut self, font: Font) {
         self.candidate_font = font;
     }
 

@@ -7,11 +7,11 @@ use iced::{
 use iced_layershell::{
     build_pattern::{self, MainSettings},
     settings::{LayerShellSettings, StartMode},
-    to_layer_message,
+    to_layer_message, Appearance,
 };
 
 use crate::{
-    config::ConfigManager, font, state::WindowEvent, window::wayland::WaylandWindowManager,
+    config::ConfigManager, font, window::wayland::WaylandWindowManager,
 };
 
 use super::{Keyboard, Message};
@@ -43,8 +43,8 @@ impl WaylandKeyboard {
 }
 
 impl WaylandKeyboard {
-    pub fn view(&self, window_id: Id) -> Element<WaylandMessage> {
-        self.inner.view(window_id)
+    pub fn view(&self, id: Id) -> Element<WaylandMessage> {
+        self.inner.view(id)
     }
 
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
@@ -63,21 +63,26 @@ impl WaylandKeyboard {
         }
     }
 
-    pub fn theme(&self) -> Theme {
-        self.inner.theme()
+    pub fn appearance(&self, theme: &Theme, id: Id) -> Appearance {
+        self.inner.appearance(theme, id)
     }
 
-    pub fn remove_id(&mut self, window_id: Id) {
-        if let Some(tx) = &self.tx {
-            if let Err(_) = tx.unbounded_send(WindowEvent::Hidden(window_id).into()) {
-                tracing::error!("unable to send window[{}] hidden event", window_id);
-            }
-        } else {
-            tracing::error!(
-                "window[{}] is closed when there is no subscription",
-                window_id
-            );
-        }
+    pub fn theme(&self, id: Id) -> Theme {
+        self.inner.theme(id)
+    }
+
+    pub fn remove_id(&mut self, _id: Id) {
+        // use Closed event
+        //if let Some(tx) = &self.tx {
+        //    if let Err(_) = tx.unbounded_send(WindowEvent::Hidden(id).into()) {
+        //        tracing::error!("unable to send window[{}] hidden event", id);
+        //    }
+        //} else {
+        //    tracing::error!(
+        //        "window[{}] is closed when there is no subscription",
+        //        id
+        //    );
+        //}
     }
 }
 
@@ -99,7 +104,9 @@ where
         WaylandKeyboard::view,
         WaylandKeyboard::remove_id,
     )
+    .style(WaylandKeyboard::appearance)
     .theme(WaylandKeyboard::theme)
+    .scale_factor(|_, _| 1.0)
     .subscription(WaylandKeyboard::subscription)
     .settings(MainSettings {
         layer_settings: LayerShellSettings {

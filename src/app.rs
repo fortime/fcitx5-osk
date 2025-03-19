@@ -11,7 +11,7 @@ use iced::{
         channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
         Stream, StreamExt,
     },
-    widget,
+    widget::{self, Column},
     window::{self, Event as IcedWindowEvent, Id},
     Color, Element, Event as IcedEvent, Size, Subscription, Task, Theme,
 };
@@ -23,10 +23,10 @@ use crate::{
     config::ConfigManager,
     dbus::server::Fcitx5VirtualkeyboardImPanelEvent,
     state::{
-        HideOpSource, ImEvent, KeyEvent, LayoutEvent, StartDbusServiceEvent, StartedEvent, State,
-        ThemeEvent, WindowEvent,
+        CloseOpSource, ImEvent, KeyEvent, LayoutEvent, StartDbusServiceEvent, StartedEvent, State,
+        ThemeEvent, WindowEvent, WindowManagerEvent,
     },
-    window::{WindowManager, WindowSettings},
+    window::{WindowAppearance, WindowManager, WindowSettings},
 };
 
 pub mod wayland;
@@ -44,11 +44,12 @@ pub enum Message {
     LayoutEvent(LayoutEvent),
     KeyEvent(KeyEvent),
     WindowEvent(WindowEvent),
+    WindowManagerEvent(WindowManagerEvent),
     ThemeEvent(ThemeEvent),
     Fcitx5VirtualkeyboardImPanelEvent(Fcitx5VirtualkeyboardImPanelEvent),
 }
 
-trait MapTask<T> {
+pub(crate) trait MapTask<T> {
     fn map_task(self) -> Task<T>;
 }
 
@@ -150,7 +151,7 @@ impl<WM> Keyboard<WM> {
             .spacing(10)
             .padding(10),
         )
-        .max_width(self.state.layout().size().width)
+        .max_width(self.state.window_manager().size().width)
         .style(widget::container::rounded_box)
         .into()
     }
@@ -177,21 +178,22 @@ impl<WM> Keyboard<WM>
 where
     WM: WindowManager,
     WM::Message: From<Message> + 'static + Send + Sync,
+    WM::Appearance: WindowAppearance + 'static + Send + Sync,
 {
-    pub fn view(&self, _window_id: Id) -> Element<WM::Message> {
-        let base = self.state.to_element().into();
-        let res = if let Some(e) = &self.error {
-            modal(base, self.error_dialog(e), Message::AfterError)
-        } else if !self.state.window().wm_inited() {
-            modal(
-                base,
-                self.error_dialog("Keyboard window is Initializing!"),
-                Message::AfterError,
-            )
+    pub fn view(&self, id: Id) -> Element<WM::Message> {
+        if self.state.window_manager().is_keyboard(id) {
+            let base = self.state.to_element(id);
+            let res = if let Some(e) = &self.error {
+                modal(base, self.error_dialog(e), Message::AfterError)
+            } else {
+                base
+            };
+            res.map(|m| m.into())
+        } else if self.state.window_manager().is_indicator(id) {
+            self.state.to_element(id).map(|m| m.into())
         } else {
-            base
-        };
-        res.map(|m| m.into())
+            Column::new().into()
+        }
     }
 
     pub fn subscription(&self) -> Subscription<WM::Message> {
@@ -204,10 +206,11 @@ where
                         size,
                     }) => {
                         // ignore position, position isn't supported in wayland
-                        Some(WindowEvent::WmInited(id, size).into())
+                        Some(WindowEvent::Opened(id, size).into())
                     }
                     IcedEvent::Window(IcedWindowEvent::Closed) => {
-                        Some(WindowEvent::Hidden(id).into())
+                        tracing::debug!("closed: {}", id);
+                        Some(WindowEvent::Closed(id).into())
                     }
                     IcedEvent::Keyboard(event) => {
                         tracing::debug!("keyboard event: {:?}", event);
@@ -230,9 +233,7 @@ where
             Message::Error(e) => self.handle_error_message(e),
             Message::AfterError => {
                 if let Some(KeyboardError::Fatal(_)) = self.error.take() {
-                    return window::get_latest().then(|id| {
-                        window::close(id.expect("failed to get id to close in fatal error"))
-                    });
+                    return iced::exit();
                 }
             }
             Message::Started(event) => match event {
@@ -243,9 +244,8 @@ where
                         let _ = time::sleep(Duration::from_secs(1));
                         Message::Nothing
                     })
-                    .chain(self.state.window().show())
-                    // .chain(self.state.keyboard().set_keyboard_function_mode())
-                    .map_task();
+                    .map_task()
+                    .chain(self.state.window_manager_mut().open_keyboard());
                 }
             },
             Message::NewSubscription(tx) => {
@@ -288,54 +288,35 @@ where
                 }
             },
             Message::LayoutEvent(event) => {
-                self.state.layout_mut().on_event(event);
+                self.state.window_manager_mut().on_layout_event(event);
             }
             Message::KeyEvent(event) => {
                 return self.state.keyboard_mut().on_event(event).map_task();
             }
-            Message::WindowEvent(event) => match event {
-                WindowEvent::Resize(id, scale_factor, width_p) => {
-                    tracing::debug!("scale_factor: {}", scale_factor);
-                    return self.state.update_width(id, width_p, scale_factor);
-                }
-                WindowEvent::WmInited(id, size) => {
-                    if has_fraction(size.width) || has_fraction(size.height) {
-                        let width_p = self.state.config().width();
-                        return window::get_scale_factor(id).map(move |scale_factor| {
-                            // calculate a new size without fraction
-                            Message::from(WindowEvent::Resize(id, scale_factor, width_p)).into()
-                        });
-                    }
-                    self.state.window_mut().set_wm_inited(id);
-                }
-                WindowEvent::HideWindow(snapshot, source) => {
-                    if let Some(snapshot) = snapshot {
-                        return self.state.window_mut().hide_local_checked(snapshot, source);
-                    } else {
-                        return self.state.window_mut().hide_local(source);
-                    }
-                }
-                WindowEvent::Hidden(id) => {
-                    return self.set_hidden(id);
-                }
-            },
+            Message::WindowEvent(event) => {
+                return self.state.window_manager_mut().on_window_event(event)
+            }
+            Message::WindowManagerEvent(event) => {
+                return self.state.window_manager_mut().on_event(event)
+            }
             Message::ThemeEvent(event) => {
                 self.state.on_theme_event(event);
             }
             Message::Fcitx5VirtualkeyboardImPanelEvent(event) => {
                 match event {
                     Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
-                        return self.show();
+                        return self
+                            .state
+                            .on_im_event(ImEvent::SyncImList)
+                            .chain(self.state.on_im_event(ImEvent::SyncCurrentIm))
+                            .map_task()
+                            .chain(self.state.window_manager_mut().open_keyboard());
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard => {
                         return self
                             .state
-                            .window_mut()
-                            .hide_local_with_delay(
-                                Duration::from_millis(1000),
-                                HideOpSource::Fcitx5,
-                            )
-                            .map_task();
+                            .window_manager_mut()
+                            .close_keyboard(CloseOpSource::Fcitx5);
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(state) => {
                         self.state.im_mut().update_candidate_area_state(state);
@@ -353,35 +334,12 @@ where
         Task::none()
     }
 
-    pub fn window_size(&self) -> Size {
-        self.state.layout().size()
+    pub fn appearance(&self, theme: &Theme, id: Id) -> WM::Appearance {
+        self.state.window_manager().appearance(theme, id)
     }
 
-    pub fn theme_multi_dummy(&self, _window_id: Id) -> Theme {
-        self.theme()
-    }
-
-    pub fn theme(&self) -> Theme {
+    pub fn theme(&self, _window_id: Id) -> Theme {
         self.state.theme().clone()
-    }
-
-    fn show(&mut self) -> Task<WM::Message> {
-        let settings = WindowSettings::new(self.window_size(), self.state.config().placement());
-        self.state
-            .on_im_event(ImEvent::SyncImList)
-            .chain(self.state.on_im_event(ImEvent::SyncCurrentIm))
-            .map_task()
-            .chain(self.state.window_mut().show_local(settings))
-    }
-
-    fn set_hidden(&mut self, window_id: Id) -> Task<WM::Message> {
-        match self.state.window_mut().set_hidden(window_id) {
-            None | Some(HideOpSource::Fcitx5) => Task::none(),
-            Some(HideOpSource::External) => {
-                // call fcitx5 to hide if it is caused by external user action.
-                self.state.window().hide().map_task()
-            }
-        }
     }
 }
 
@@ -426,8 +384,4 @@ fn modal<'a>(
         )
     ]
     .into()
-}
-
-fn has_fraction(f: f32) -> bool {
-    f != f.trunc()
 }

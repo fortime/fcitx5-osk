@@ -75,7 +75,7 @@ fn run(args: Args) -> Result<()> {
         let keyboard = Keyboard::<X11WindowManager>::new(config_manager)?;
 
         iced::daemon(clap::crate_name!(), Keyboard::update, Keyboard::view)
-            .theme(Keyboard::theme_multi_dummy)
+            .theme(Keyboard::theme)
             .subscription(Keyboard::subscription)
             .run_with(move || {
                 (

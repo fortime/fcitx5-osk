@@ -9,7 +9,7 @@ clap = { version = "4.5.23", features = ["cargo", "derive"] }
 dark-light = "1.1.1"
 figment = { version = "0.10.19", features = ["toml"] }
 getset = "0.1.3"
-iced = { version = "0.13.1", features = ["tokio"] }
+iced = { version = "0.13.1", features = ["tokio", "image", "svg"] }
 pin-project = "1.1.7"
 serde = { version = "1.0.216", features = ["derive"] }
 tokio = { version = "1.42", features = ["fs", "macros", "rt-multi-thread"] }
@@ -19,7 +19,7 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 xkeysym = "0.2.1"
 zbus = { version = "5.2.0", features = ["tokio"], default-features = false }
 zvariant = "5.1.0"
-iced_layershell = "0.13.0"
+iced_layershell = "0.13.5"
 iced_futures = "0.13.2"
 iced_graphics = "0.13.0"
 humantime-serde = "1.1.1"

@@ -27,7 +27,12 @@ pub struct Config {
     key_set_folders: Vec<PathBuf>,
 
     #[getset(get_copy = "pub", set = "pub")]
-    width: u16,
+    #[serde(default = "default_landscape_width")]
+    landscape_width: u16,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default = "default_portrait_width")]
+    portrait_width: u16,
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(with = "humantime_serde", default = "default_holding_timeout")]
@@ -62,6 +67,14 @@ pub struct Config {
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
     im_font_mapping: HashMap<String, String>,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default = "default_indicator_width")]
+    indicator_width: u16,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    indicator_display: IndicatorDisplay,
 }
 
 impl Config {
@@ -72,6 +85,18 @@ impl Config {
     pub fn light_theme(&self) -> Option<&str> {
         self.light_theme.as_deref()
     }
+}
+
+fn default_landscape_width() -> u16 {
+    1024
+}
+
+fn default_portrait_width() -> u16 {
+    768
+}
+
+fn default_indicator_width() -> u16 {
+    100
 }
 
 fn default_holding_timeout() -> Duration {
@@ -161,9 +186,17 @@ impl AsMut<Config> for ConfigManager {
     }
 }
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub enum Placement {
     #[default]
     Dock,
     Float,
+}
+
+#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum IndicatorDisplay {
+    #[default]
+    Auto,
+    AlwaysOn,
+    AlwaysOff,
 }

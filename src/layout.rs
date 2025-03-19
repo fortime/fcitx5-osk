@@ -3,11 +3,12 @@
 
 use getset::{CopyGetters, Getters};
 use iced::{
+    advanced::svg::Handle as SvgHandle,
     alignment::{Horizontal, Vertical},
     widget::{
         button::Style as ButtonStyle,
         scrollable::{Direction, Scrollbar},
-        Button, Column, Container, PickList, Row, Scrollable, Space, Text,
+        Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text,
     },
     Color, Element, Font, Length, Theme,
 };
@@ -53,6 +54,10 @@ pub trait KeyboardManager {
     fn next_candidates_message(&self, cursor: usize) -> Self::Message;
 
     fn select_candidate_message(&self, index: usize) -> Self::Message;
+
+    fn open_keyboard(&self) -> Self::Message;
+
+    fn close_keyboard(&self) -> Self::Message;
 }
 
 #[derive(Deserialize, CopyGetters, Getters)]
@@ -586,6 +591,15 @@ fn candidate_btn<Message>(
         .align_y(Vertical::Center);
     Button::new(text)
         .width(width_p)
+        .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
+        .padding(0)
+}
+
+pub fn indicator_btn<Message>(width: u16) -> Button<'static, Message> {
+    let icon = include_bytes!("../assets/fcitx5-osk.svg");
+    let svg = Svg::new(SvgHandle::from_memory(icon)).width(width);
+    Button::new(svg)
+        .width(width)
         .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
         .padding(0)
 }

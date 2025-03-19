@@ -23,7 +23,7 @@ mod window;
 pub use im::{CandidateAreaState, ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardState, StartDbusServiceEvent};
 pub use layout::{LayoutEvent, LayoutState};
-pub use window::{HideOpSource, WindowEvent, WindowState};
+pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerState};
 
 #[derive(Getters, MutGetters)]
 pub struct State<WM> {
@@ -32,13 +32,11 @@ pub struct State<WM> {
     #[getset(get = "pub", get_mut = "pub")]
     store: Store,
     #[getset(get = "pub", get_mut = "pub")]
-    layout: LayoutState,
-    #[getset(get = "pub", get_mut = "pub")]
     keyboard: KeyboardState,
     #[getset(get = "pub", get_mut = "pub")]
     im: ImState,
     #[getset(get = "pub", get_mut = "pub")]
-    window: WindowState<WM>,
+    window_manager: WindowManagerState<WM>,
     theme: Theme,
     has_fcitx5_services: bool,
 }
@@ -54,9 +52,8 @@ where
         let key_area_layout = store.key_area_layout("");
         let mut state = Self {
             keyboard: KeyboardState::new(config.holding_timeout(), &key_area_layout, &store),
-            layout: LayoutState::new(config.width(), key_area_layout)?,
             im: Default::default(),
-            window: Default::default(),
+            window_manager: WindowManagerState::new(config, key_area_layout)?,
             theme: Default::default(),
             has_fcitx5_services: false,
             config_manager,
@@ -85,7 +82,8 @@ impl<WM> State<WM> {
         } else {
             self.keyboard.set_dbus_clients(fcitx5_services.clone());
             self.im.set_dbus_clients(fcitx5_services.clone());
-            self.window.set_dbus_clients(fcitx5_services.clone());
+            self.window_manager
+                .set_dbus_clients(fcitx5_services.clone());
             self.has_fcitx5_services = true;
             true
         }
@@ -93,12 +91,14 @@ impl<WM> State<WM> {
 
     fn update_cur_im(&mut self, im_name: &str) -> bool {
         let key_area_layout = self.store.key_area_layout_by_im(im_name);
-        let res = self.layout.update_key_area_layout(key_area_layout.clone());
+        let res = self
+            .window_manager
+            .update_key_area_layout(key_area_layout.clone());
         if res {
             self.keyboard
                 .update_key_area_layout(&key_area_layout, &self.store);
             self.im.update_cur_im(im_name);
-            self.layout
+            self.window_manager
                 .update_candidate_font(self.store.font_by_im(im_name));
         }
         res
@@ -163,9 +163,35 @@ impl<WM> State<WM> {
     pub fn config(&self) -> &Config {
         self.config_manager.as_ref()
     }
+}
 
-    pub fn to_element(&self) -> Element<Message> {
-        self.layout.to_element(
+impl<WM> State<WM>
+where
+    WM: WindowManager,
+    WM::Message: From<Message> + 'static + Send + Sync,
+{
+    //pub fn update_width(&mut self, id: Id, width_p: u16, scale_factor: f32) -> Task<WM::Message> {
+    //    if self.layout.update_width(width_p, scale_factor) {
+    //        if width_p != self.config_manager.as_ref().width() {
+    //            self.config_manager.as_mut().set_width(width_p);
+    //            self.config_manager.try_write();
+    //        }
+    //        let size = self.layout.size();
+    //        if !self.window.wm_inited() {
+    //            self.window.set_wm_inited(id)
+    //        }
+    //        // After width is changed, the pages of candidate area should be changed too. Here we
+    //        // just reset it.
+    //        self.im.reset_candidate_cursor();
+    //        return self.window.resize(size);
+    //    } else {
+    //        Task::none()
+    //    }
+    //}
+
+    pub fn to_element(&self, id: Id) -> Element<Message> {
+        self.window_manager.to_element(
+            id,
             self.im.candidate_area_state(),
             self,
             &self.keyboard,
@@ -174,36 +200,11 @@ impl<WM> State<WM> {
     }
 }
 
-impl<WM> State<WM>
-where
-    WM: WindowManager,
-    WM::Message: From<Message> + 'static + Send + Sync,
-{
-    pub fn update_width(&mut self, id: Id, width_p: u16, scale_factor: f32) -> Task<WM::Message> {
-        if self.layout.update_width(width_p, scale_factor) {
-            if width_p != self.config_manager.as_ref().width() {
-                self.config_manager.as_mut().set_width(width_p);
-                self.config_manager.try_write();
-            }
-            let size = self.layout.size();
-            if !self.window.wm_inited() {
-                self.window.set_wm_inited(id)
-            }
-            // After width is changed, the pages of candidate area should be changed too. Here we
-            // just reset it.
-            self.im.reset_candidate_cursor();
-            return self.window.resize(size);
-        } else {
-            Task::none()
-        }
-    }
-}
-
 impl<WM> KeyboardManager for State<WM> {
     type Message = Message;
 
     fn available_candidate_width_p(&self) -> u16 {
-        self.layout.available_candidate_width_p()
+        self.window_manager.available_candidate_width_p()
     }
 
     fn themes(&self) -> &[String] {
@@ -244,6 +245,14 @@ impl<WM> KeyboardManager for State<WM> {
 
     fn select_candidate_message(&self, index: usize) -> Self::Message {
         ImEvent::SelectCandidate(index).into()
+    }
+
+    fn open_keyboard(&self) -> Self::Message {
+        WindowManagerEvent::OpenKeyboard.into()
+    }
+
+    fn close_keyboard(&self) -> Self::Message {
+        WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into()
     }
 }
 

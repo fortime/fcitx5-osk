@@ -23,7 +23,7 @@ pub struct ImState {
 }
 
 impl ImState {
-    pub fn reset_candidate_cursor(&mut self) {
+    fn reset_candidate_cursor(&mut self) {
         // I don't know how to reset the candidate state in fcitx5, so I just reset the cursor.
         self.candidate_area_state.reset_cursor();
     }
@@ -94,6 +94,7 @@ impl ImState {
             }
             ImEvent::SyncImList => return self.sync_input_methods(),
             ImEvent::SyncCurrentIm => return self.sync_current_input_method(),
+            ImEvent::ResetCandidateCursor => self.reset_candidate_cursor(),
             ImEvent::PrevCandidates => {
                 if let Some(page_index) = self.candidate_area_state.prev() {
                     return self.prev_page(page_index);
@@ -304,6 +305,7 @@ pub enum ImEvent {
     UpdateCurrentIm(String),
     SelectIm(String),
     DeactivateIm(String),
+    ResetCandidateCursor,
     PrevCandidates,
     NextCandidates(usize),
     SelectCandidate(usize),
