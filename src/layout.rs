@@ -614,7 +614,7 @@ fn candidate_btn<Message>(
 }
 
 pub fn indicator_btn<Message>(width: u16) -> Button<'static, Message> {
-    let icon = include_bytes!("../assets/fcitx5-osk.svg");
+    let icon = include_bytes!("../assets/icons/fcitx5-osk.svg");
     let svg = Svg::new(SvgHandle::from_memory(icon)).width(width);
     Button::new(svg)
         .width(width)

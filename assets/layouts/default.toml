@@ -1,0 +1,94 @@
+name = "default"
+
+[[elements]]
+height = 6
+spacing = 1
+# 13 * 8 + 16 + 13 = 133
+elements = ["k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "k10", "k11", "k12", "k13", "k14:16"]
+
+[[elements]]
+height = 6
+spacing = 1
+# 12 * 8 + 2 * 12 + 13 = 133
+elements = ["k15:12", "k16", "k17", "k18", "k19", "k20", "k21", "k22", "k23", "k24", "k25", "k26", "k27", "k28:12"]
+
+[[elements]]
+height = 6
+spacing = 1
+# 13 + 11 * 8 + 20 + 12 = 133
+elements = ["k29:13", "k30", "k31", "k32", "k33", "k34", "k35", "k36", "k37", "k38", "k39", "k40", "k41:20"]
+
+[[elements]]
+height = 6
+spacing = 1
+# 18 + 10 * 8 + 24 + 11 = 133
+elements = ["k42:18", "k43", "k44", "k45", "k46", "k47", "k48", "k49", "k50", "k51", "k52", "k53:24"]
+
+[[elements]]
+height = 6
+spacing = 1
+# 8 + 10 + 8 + 10 + 39 + 10 + 8 + 8 + 24 + 8 = 133
+elements = ["p:8", "k54:10", "k55", "k56:10", "k57:39", "k58:10", "k59", "k60", "p:24"]
+
+[key_mappings]
+k1 = "k_grave_accent"
+k2 = "k_one"
+k3 = "k_two"
+k4 = "k_three"
+k5 = "k_four"
+k6 = "k_five"
+k7 = "k_six"
+k8 = "k_seven"
+k9 = "k_eight"
+k10 = "k_nine"
+k11 = "k_zero"
+k12 = "k_hyphen"
+k13 = "k_equals"
+k14 = "k_backspace"
+k15 = "k_tab"
+k16 = "k_q"
+k17 = "k_w"
+k18 = "k_e"
+k19 = "k_r"
+k20 = "k_t"
+k21 = "k_y"
+k22 = "k_u"
+k23 = "k_i"
+k24 = "k_o"
+k25 = "k_p"
+k26 = "k_open_bracket"
+k27 = "k_close_bracket"
+k28 = "k_backslash"
+#k29 = "k_escape"
+k29 = "k_caps_lock"
+k30 = "k_a"
+k31 = "k_s"
+k32 = "k_d"
+k33 = "k_f"
+k34 = "k_g"
+k35 = "k_h"
+k36 = "k_j"
+k37 = "k_k"
+k38 = "k_l"
+k39 = "k_semicolon"
+k40 = "k_apostrophe"
+k41 = "k_enter"
+k42 = "k_left_shift"
+k43 = "k_z"
+k44 = "k_x"
+k45 = "k_c"
+k46 = "k_v"
+k47 = "k_b"
+k48 = "k_n"
+k49 = "k_m"
+k50 = "k_comma"
+k51 = "k_dot"
+k52 = "k_slash"
+k53 = "k_right_shift"
+k54 = "k_left_ctrl"
+k55 = "k_left_super"
+k56 = "k_left_alt"
+k57 = "k_space"
+k58 = "k_right_alt"
+k59 = "k_right_super"
+k60 = "k_right_ctrl"
