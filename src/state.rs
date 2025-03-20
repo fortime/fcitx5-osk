@@ -8,7 +8,7 @@ use zbus::Result as ZbusResult;
 
 use crate::{
     app::{KeyboardError, Message},
-    config::{Config, ConfigManager},
+    config::{Config, ConfigManager, IndicatorDisplay},
     dbus::client::Fcitx5Services,
     layout::KeyboardManager,
     store::Store,
@@ -21,7 +21,7 @@ mod layout;
 mod window;
 
 pub use im::{CandidateAreaState, ImEvent, ImState};
-pub use keyboard::{KeyEvent, KeyboardState, StartDbusServiceEvent};
+pub use keyboard::{KeyEvent, KeyboardState, KeyboardEvent};
 pub use layout::{LayoutEvent, LayoutState};
 pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerState};
 
@@ -70,7 +70,7 @@ impl<WM> State<WM> {
             Task::none()
         } else {
             Task::perform(Fcitx5Services::new(), |res: ZbusResult<_>| match res {
-                Ok(services) => StartedEvent::StartedDbusClients(services).into(),
+                Ok(services) => StartEvent::StartedDbusClients(services).into(),
                 Err(e) => fatal_with_context(e, "failed to create dbus clients"),
             })
         }
@@ -110,6 +110,11 @@ impl<WM> State<WM> {
                 self.update_cur_im(&im);
                 Task::none()
             }
+            // make sure virtual keyboard mode of fcitx5 is activated
+            ImEvent::SelectIm(_) => self
+                .keyboard_mut()
+                .clear_fcitx5_hidden()
+                .chain(self.im.on_event(event)),
             _ => self.im.on_event(event),
         }
     }
@@ -254,16 +259,25 @@ impl<WM> KeyboardManager for State<WM> {
     fn close_keyboard(&self) -> Self::Message {
         WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into()
     }
+
+    fn open_indicator(&self) -> Option<Self::Message> {
+        match self.config().indicator_display() {
+            IndicatorDisplay::Auto => Some(WindowManagerEvent::OpenIndicator.into()),
+            IndicatorDisplay::AlwaysOn => Some(self.close_keyboard()),
+            IndicatorDisplay::AlwaysOff => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
-pub enum StartedEvent {
+pub enum StartEvent {
+    Start,
     StartedDbusClients(Fcitx5Services),
 }
 
-impl From<StartedEvent> for Message {
-    fn from(value: StartedEvent) -> Self {
-        Self::Started(value)
+impl From<StartEvent> for Message {
+    fn from(value: StartEvent) -> Self {
+        Self::StartEvent(value)
     }
 }
 

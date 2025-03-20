@@ -18,7 +18,10 @@ use zbus::Connection;
 use crate::{
     app::Message,
     dbus::{
-        client::{Fcitx5Services, Fcitx5VirtualKeyboardBackendServiceProxy},
+        client::{
+            Fcitx5Services, Fcitx5VirtualKeyboardBackendServiceProxy,
+            Fcitx5VirtualKeyboardServiceProxy,
+        },
         server::Fcitx5VirtualkeyboardImPanelService,
     },
     font,
@@ -27,6 +30,8 @@ use crate::{
     store::Store,
     widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
 };
+
+use super::StartEvent;
 
 const TEXT_PADDING_LENGTH: u16 = 5;
 
@@ -59,13 +64,20 @@ struct KeyState {
 }
 
 struct HoldingKeyState {
-    name: Arc<String>,
+    name: Arc<str>,
     key_widget_event: KeyWidgetEvent,
     key: Key,
     // The order of SelectSecondary/UnselectSecondary is uncertain when moving between popup keys,
     // we use this flags to record which key is selected, once it is empty, we will use the primary
     // keysym.
     flags: Vec<ThinKeyValue>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fcitx5Hidden {
+    Unset,
+    Clearing,
+    Set,
 }
 
 pub struct KeyboardState {
@@ -75,7 +87,7 @@ pub struct KeyboardState {
     secondary_text_size_u: u16,
     font: Font,
     keys: HashMap<String, Key>,
-    pressed_keys: HashMap<Arc<String>, KeyState>,
+    pressed_keys: HashMap<Arc<str>, KeyState>,
     holding_timeout: Duration,
     holding_key_state: Option<HoldingKeyState>,
     popup_key_width_u: u16,
@@ -85,6 +97,10 @@ pub struct KeyboardState {
     /// time, we only keep the connection with the correct id only.
     dbus_service_token: u8,
     dbus_service_connection: Option<Connection>,
+    /// if there is no indicator and fcitx5 hides virtual keyboard, we won't hide the keyboard,
+    /// instead we set this flag, and tell fcitx5 to show virtual keyboard when there is any key
+    /// pressing event.
+    fcitx5_hidden: Fcitx5Hidden,
     fcitx5_services: Option<Fcitx5Services>,
 }
 
@@ -105,6 +121,7 @@ impl KeyboardState {
             popup_key_height_u: 0,
             dbus_service_token: 0,
             dbus_service_connection: None,
+            fcitx5_hidden: Fcitx5Hidden::Unset,
             fcitx5_services: None,
         };
         res.update_key_area_layout(key_area_layout, store);
@@ -137,9 +154,6 @@ impl KeyboardState {
     }
 
     pub fn start_dbus_service(&mut self, tx: UnboundedSender<Message>) -> Task<Message> {
-        // drop the old one
-        let _ = self.dbus_service_connection.take();
-
         self.dbus_service_token = self.dbus_service_token.wrapping_add(1);
 
         let new_dbus_service_token = self.dbus_service_token;
@@ -154,63 +168,58 @@ impl KeyboardState {
                 Ok((new_dbus_service_token, conn))
             },
             |res: Result<_>| match res {
-                Ok((id, connection)) => StartDbusServiceEvent::Started(id, connection).into(),
+                Ok((id, connection)) => KeyboardEvent::DbusServiceStarted(id, connection).into(),
                 Err(e) => super::fatal(e),
             },
         )
     }
 
-    pub fn set_dbus_service_connection(
+    fn set_dbus_service_connection(
         &mut self,
         dbus_service_token: u8,
         connection: Connection,
-    ) -> (bool, Option<Connection>) {
-        if dbus_service_token != self.dbus_service_token {
+    ) -> Task<Message> {
+        let (replaced, to_be_closed) = if dbus_service_token != self.dbus_service_token {
             tracing::warn!(
                 "concurrency creation of dbus service, connection is dropped: {}/{:?}",
                 dbus_service_token,
                 connection
             );
-            (false, None)
+            (false, Some(connection))
         } else {
             (true, self.dbus_service_connection.replace(connection))
+        };
+        let mut task = if let Some(to_be_closed) = to_be_closed {
+            Task::future(async move {
+                if let Err(err) = to_be_closed.close().await {
+                    tracing::warn!("error in closing dbus connection: {err:?}");
+                }
+                Message::Nothing
+            })
+        } else {
+            Task::none()
+        };
+        if replaced {
+            task = task.chain(Task::done(StartEvent::Start.into()));
+        }
+        task
+    }
+
+    pub fn on_event(&mut self, event: KeyboardEvent) -> Task<Message> {
+        match event {
+            KeyboardEvent::DbusServiceStarted(token, connection) => {
+                self.set_dbus_service_connection(token, connection)
+            }
+            KeyboardEvent::UnsetFcitx5Hidden => {
+                if self.fcitx5_hidden == Fcitx5Hidden::Clearing {
+                    self.fcitx5_hidden = Fcitx5Hidden::Unset;
+                }
+                Task::none()
+            }
         }
     }
 
-    fn new_popup_key<'a>(
-        &'a self,
-        holding_key_state: &'a HoldingKeyState,
-        key_value: &'a KeyValue,
-        unit: u16,
-    ) -> PopupKey<'a, Message> {
-        let common =
-            KeyEventCommon::new(self.id, holding_key_state.name.clone(), key_value.to_thin());
-        PopupKey::new(
-            Text::new(key_value.symbol())
-                .align_x(Horizontal::Center)
-                .align_y(Vertical::Center)
-                .font(self.font)
-                .size(self.primary_text_size_u * unit),
-            holding_key_state.key_widget_event.finger.clone(),
-        )
-        .width(self.popup_key_width_u * unit)
-        .height(self.popup_key_height_u * unit)
-        .on_enter(KeyEvent::new(common.clone(), KeyEventInner::SelectSecondary).into())
-        .on_exit(KeyEvent::new(common, KeyEventInner::UnselectSecondary).into())
-    }
-}
-
-// call fcitx5
-impl KeyboardState {
-    fn fcitx5_virtual_keyboard_backend_service(
-        &self,
-    ) -> Option<&Fcitx5VirtualKeyboardBackendServiceProxy<'static>> {
-        self.fcitx5_services
-            .as_ref()
-            .map(Fcitx5Services::virtual_keyboard_backend)
-    }
-
-    pub fn on_event(&mut self, event: KeyEvent) -> Task<Message> {
+    pub fn on_key_event(&mut self, event: KeyEvent) -> Task<Message> {
         if event.common.id != self.id {
             tracing::debug!(
                 "receive event of keyboard state id: {}, expected: {}",
@@ -238,6 +247,100 @@ impl KeyboardState {
         Task::none()
     }
 
+    fn new_popup_key<'a>(
+        &'a self,
+        holding_key_state: &'a HoldingKeyState,
+        key_value: &'a KeyValue,
+        unit: u16,
+    ) -> PopupKey<'a, Message> {
+        let common =
+            KeyEventCommon::new(self.id, holding_key_state.name.clone(), key_value.to_thin());
+        PopupKey::new(
+            Text::new(key_value.symbol())
+                .align_x(Horizontal::Center)
+                .align_y(Vertical::Center)
+                .font(self.font)
+                .size(self.primary_text_size_u * unit),
+            holding_key_state.key_widget_event.finger.clone(),
+        )
+        .width(self.popup_key_width_u * unit)
+        .height(self.popup_key_height_u * unit)
+        .on_enter(KeyEvent::new(common.clone(), KeyEventInner::SelectSecondary).into())
+        .on_exit(KeyEvent::new(common, KeyEventInner::UnselectSecondary).into())
+    }
+
+    pub fn set_fcitx5_hidden(&mut self) {
+        self.fcitx5_hidden = Fcitx5Hidden::Set;
+    }
+
+    #[instrument(skip(self))]
+    fn change_selected_secondary(&mut self, common: KeyEventCommon, is_select: bool) {
+        let Some(holding_key_state) = &mut self.holding_key_state else {
+            tracing::warn!("there is no holding key");
+            return;
+        };
+        if holding_key_state.name != common.key_name {
+            tracing::warn!(
+                "holding key is not the same, expected: {}",
+                holding_key_state.name,
+            );
+            return;
+        }
+
+        if let Some(key_state) = self.pressed_keys.get_mut(&common.key_name) {
+            let key_value = common.key_value;
+            if is_select {
+                key_state.selected_key_value = key_value.clone();
+                holding_key_state.flags.push(key_value);
+            } else {
+                let mut start = 0;
+                let mut end = holding_key_state.flags.len();
+                while end > start {
+                    if holding_key_state.flags[start] == key_value {
+                        end -= 1;
+                        holding_key_state.flags.swap(start, end);
+                    } else {
+                        start += 1;
+                    }
+                }
+                holding_key_state.flags.truncate(end);
+                if key_state.selected_key_value == key_value {
+                    if let Some(key_value) = holding_key_state.flags.last() {
+                        key_state.selected_key_value = *key_value;
+                    } else {
+                        // set key_value to the primary one.
+                        let is_shift_set = ModifierState::Shift.is_set(self.modifiers);
+                        let is_caps_lock_set = ModifierState::CapsLock.is_set(self.modifiers);
+                        key_state.selected_key_value = holding_key_state
+                            .key
+                            .key_value(is_shift_set, is_caps_lock_set);
+                    }
+                }
+            }
+        } else {
+            tracing::warn!("not pressed: {}", common.key_name);
+        }
+    }
+}
+
+// call fcitx5
+impl KeyboardState {
+    fn fcitx5_virtual_keyboard_backend_service(
+        &self,
+    ) -> Option<&Fcitx5VirtualKeyboardBackendServiceProxy<'static>> {
+        self.fcitx5_services
+            .as_ref()
+            .map(Fcitx5Services::virtual_keyboard_backend)
+    }
+
+    fn fcitx5_virtual_keyboard_service(
+        &self,
+    ) -> Option<&Fcitx5VirtualKeyboardServiceProxy<'static>> {
+        self.fcitx5_services
+            .as_ref()
+            .map(Fcitx5Services::virtual_keyboard)
+    }
+
     fn press_key(
         &mut self,
         common: KeyEventCommon,
@@ -261,23 +364,25 @@ impl KeyboardState {
                 }
             });
         }
+        let mut task = self.clear_fcitx5_hidden();
         if modifier_state == ModifierState::NoState && !contains {
             let holding_timeout = self.holding_timeout;
-            Task::future(async move {
+            let next = Task::future(async move {
                 tokio::time::sleep(holding_timeout).await;
                 KeyEvent::new(
                     common,
                     KeyEventInner::Holding(key_widget_event, pressed_time),
                 )
                 .into()
-            })
+            });
+            task = task.chain(next);
         } else if modifier_state != ModifierState::CapsLock
             && modifier_state != ModifierState::Shift
         {
             // not send caps lock and shift state.
             let modifiers =
                 self.modifiers & !(ModifierState::CapsLock as u32) & !(ModifierState::Shift as u32);
-            super::call_fcitx5(
+            let next = super::call_fcitx5(
                 self.fcitx5_virtual_keyboard_backend_service(),
                 format!("send key pressed event failed: {}", common.key_name),
                 |s| async move {
@@ -300,10 +405,10 @@ impl KeyboardState {
                     .await?;
                     Ok(Message::Nothing)
                 },
-            )
-        } else {
-            Task::none()
+            );
+            task = task.chain(next);
         }
+        task
     }
 
     fn release_key(&mut self, common: KeyEventCommon) -> Task<Message> {
@@ -450,52 +555,20 @@ impl KeyboardState {
         }
     }
 
-    #[instrument(skip(self))]
-    fn change_selected_secondary(&mut self, common: KeyEventCommon, is_select: bool) {
-        let Some(holding_key_state) = &mut self.holding_key_state else {
-            tracing::warn!("there is no holding key");
-            return;
-        };
-        if holding_key_state.name != common.key_name {
-            tracing::warn!(
-                "holding key is not the same, expected: {}",
-                holding_key_state.name,
-            );
-            return;
-        }
-
-        if let Some(key_state) = self.pressed_keys.get_mut(&common.key_name) {
-            let key_value = common.key_value;
-            if is_select {
-                key_state.selected_key_value = key_value.clone();
-                holding_key_state.flags.push(key_value);
-            } else {
-                let mut start = 0;
-                let mut end = holding_key_state.flags.len();
-                while end > start {
-                    if holding_key_state.flags[start] == key_value {
-                        end -= 1;
-                        holding_key_state.flags.swap(start, end);
-                    } else {
-                        start += 1;
-                    }
-                }
-                holding_key_state.flags.truncate(end);
-                if key_state.selected_key_value == key_value {
-                    if let Some(key_value) = holding_key_state.flags.last() {
-                        key_state.selected_key_value = *key_value;
-                    } else {
-                        // set key_value to the primary one.
-                        let is_shift_set = ModifierState::Shift.is_set(self.modifiers);
-                        let is_caps_lock_set = ModifierState::CapsLock.is_set(self.modifiers);
-                        key_state.selected_key_value = holding_key_state
-                            .key
-                            .key_value(is_shift_set, is_caps_lock_set);
-                    }
-                }
-            }
+    pub fn clear_fcitx5_hidden(&mut self) -> Task<Message> {
+        if self.fcitx5_hidden != Fcitx5Hidden::Unset {
+            // make sure to unset the flag.
+            self.fcitx5_hidden = Fcitx5Hidden::Clearing;
+            super::call_fcitx5(
+                self.fcitx5_virtual_keyboard_service(),
+                "show virtual keyboard in pressing event",
+                |s| async move {
+                    s.show_virtual_keyboard().await?;
+                    Ok(KeyboardEvent::UnsetFcitx5Hidden.into())
+                },
+            )
         } else {
-            tracing::warn!("not pressed: {}", common.key_name);
+            Task::none()
         }
     }
 }
@@ -503,7 +576,7 @@ impl KeyboardState {
 impl KeyManager for KeyboardState {
     type Message = Message;
 
-    fn key(&self, key_name: Arc<String>, unit: u16, size: (u16, u16)) -> Element<Self::Message> {
+    fn key(&self, key_name: Arc<str>, unit: u16, size: (u16, u16)) -> Element<Self::Message> {
         let (width, height) = size;
         let (inner_width, inner_height) = (
             width - TEXT_PADDING_LENGTH * 2,
@@ -629,12 +702,12 @@ impl KeyEvent {
 #[derive(Clone, Debug)]
 struct KeyEventCommon {
     id: u8,
-    key_name: Arc<String>,
+    key_name: Arc<str>,
     key_value: ThinKeyValue,
 }
 
 impl KeyEventCommon {
-    fn new(id: u8, key_name: Arc<String>, key_value: ThinKeyValue) -> Self {
+    fn new(id: u8, key_name: Arc<str>, key_value: ThinKeyValue) -> Self {
         Self {
             id,
             key_name,
@@ -659,13 +732,14 @@ impl From<KeyEvent> for Message {
 }
 
 #[derive(Clone, Debug)]
-pub enum StartDbusServiceEvent {
-    Started(u8, Connection),
+pub enum KeyboardEvent {
+    DbusServiceStarted(u8, Connection),
+    UnsetFcitx5Hidden,
 }
 
-impl From<StartDbusServiceEvent> for Message {
-    fn from(value: StartDbusServiceEvent) -> Self {
-        Self::StartDbusService(value)
+impl From<KeyboardEvent> for Message {
+    fn from(value: KeyboardEvent) -> Self {
+        Self::KeyboardEvent(value)
     }
 }
 

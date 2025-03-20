@@ -25,7 +25,7 @@ use crate::{state::CandidateAreaState, store::IdAndConfigPath};
 pub trait KeyManager {
     type Message;
 
-    fn key(&self, key_name: Arc<String>, unit: u16, size: (u16, u16)) -> Element<Self::Message>;
+    fn key(&self, key_name: Arc<str>, unit: u16, size: (u16, u16)) -> Element<Self::Message>;
 
     fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Self::Message>>;
 }
@@ -58,6 +58,8 @@ pub trait KeyboardManager {
     fn open_keyboard(&self) -> Self::Message;
 
     fn close_keyboard(&self) -> Self::Message;
+
+    fn open_indicator(&self) -> Option<Self::Message>;
 }
 
 #[derive(Deserialize, CopyGetters, Getters)]
@@ -256,7 +258,7 @@ pub enum KeyRowElement {
     Key {
         width_u: u16,
         height_u: Option<u16>,
-        name: Arc<String>,
+        name: Arc<str>,
     },
 }
 
@@ -353,7 +355,7 @@ impl<'de> Deserialize<'de> for KeyRowElement {
             Ok(KeyRowElement::Key {
                 height_u,
                 width_u,
-                name: Arc::new(typ.to_string()),
+                name: typ.into(),
             })
         } else {
             Err(Error::invalid_value(
@@ -542,6 +544,21 @@ impl ToolbarLayout {
             .height(Length::Fill)
             .align_y(Vertical::Center)
             .spacing(unit * 2);
+
+        if let Some(message) = keyboard_manager.open_indicator() {
+            row = row.push(
+                fa_btn(
+                    "down-left-and-up-right-to-center",
+                    IconFont::Solid,
+                    font_size,
+                    color,
+                )
+                .on_press(message),
+            );
+        }
+
+        // padding
+        row = row.push(Column::new().width(Length::Fill));
 
         row = row.push(
             Row::new()

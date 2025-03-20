@@ -85,14 +85,17 @@ impl ImState {
 
     pub(super) fn on_event(&mut self, event: ImEvent) -> Task<Message> {
         match event {
-            ImEvent::UpdateImList(ims) => self.update_ims(ims),
+            ImEvent::UpdateImListAndCurrentIm(ims, im) => {
+                self.update_ims(ims);
+                self.update_cur_im(&im);
+            }
             ImEvent::UpdateCurrentIm(im) => self.update_cur_im(&im),
             ImEvent::SelectIm(im) => return self.select_im(im),
             ImEvent::DeactivateIm(im) => {
                 // TODO? other logic
                 self.deactive(&im)
             }
-            ImEvent::SyncImList => return self.sync_input_methods(),
+            ImEvent::SyncImList => return self.sync_input_methods_and_current_im(),
             ImEvent::SyncCurrentIm => return self.sync_current_input_method(),
             ImEvent::ResetCandidateCursor => self.reset_candidate_cursor(),
             ImEvent::PrevCandidates => {
@@ -127,13 +130,21 @@ impl ImState {
             .map(Fcitx5Services::virtual_keyboard_backend)
     }
 
-    fn sync_input_methods(&self) -> Task<Message> {
+    fn sync_input_methods_and_current_im(&self) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_controller_service(),
-            format!("get input method group info failed"),
+            format!("get input method group info and current im failed"),
             |s| async move {
+                // if we fetch input methods and current input method in two message, in some cases, we will update current input method first. And it will fail because there is no input methods. So we put them in a call.
                 let group_info = s.full_input_method_group_info("").await?;
-                Ok(ImEvent::UpdateImList(group_info.into_input_methods()).into())
+                let input_method = s.current_input_method().await?;
+                Ok(
+                    ImEvent::UpdateImListAndCurrentIm(
+                        group_info.into_input_methods(),
+                        input_method,
+                    )
+                    .into(),
+                )
             },
         )
     }
@@ -301,7 +312,7 @@ impl CandidateAreaState {
 pub enum ImEvent {
     SyncImList,
     SyncCurrentIm,
-    UpdateImList(Vec<InputMethodInfo>),
+    UpdateImListAndCurrentIm(Vec<InputMethodInfo>, String),
     UpdateCurrentIm(String),
     SelectIm(String),
     DeactivateIm(String),

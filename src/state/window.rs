@@ -2,8 +2,6 @@ use std::{rc::Rc, time::Duration};
 
 use anyhow::Result;
 use iced::{
-    advanced::svg::Handle as SvgHandle,
-    widget::svg::Svg,
     window::{Id, Position},
     Color, Element, Font, Size, Task, Theme,
 };
@@ -46,7 +44,6 @@ struct WindowState {
     id: Option<Id>,
     state: InnerWindowState,
     close_req_token: u16,
-    fcitx5_services: Option<Fcitx5Services>,
     positions: (Option<Position>, Option<Position>),
 }
 
@@ -155,7 +152,7 @@ impl WindowState {
     }
 
     fn set_closed(&mut self) -> Option<CloseOpSource> {
-        if let Some(id) = self.id {
+        if let Some(id) = self.id.take() {
             let source = match self.state {
                 InnerWindowState::Closing(source) => Some(source),
                 InnerWindowState::Closed => None,
@@ -189,7 +186,6 @@ impl WindowState {
 #[derive(Clone, Debug)]
 pub enum WindowEvent {
     // Resize(Id, f32, u16),
-    SyncSize(Id),
     Opened(Id, Size),
     ClosingWindow(Id, Option<WindowStateSnapshot>, CloseOpSource),
     Closed(Id),
@@ -283,7 +279,19 @@ impl<WM> WindowManagerState<WM> {
             return false;
         }
         let landscape_res = self.landscape_layout.update_scale_factor(scale_factor);
+        if landscape_res.is_err() {
+            tracing::warn!(
+                "unable to update scale factor of landscape layout: {}",
+                scale_factor
+            );
+        }
         let portrait_res = self.portrait_layout.update_scale_factor(scale_factor);
+        if portrait_res.is_err() {
+            tracing::warn!(
+                "unable to update scale factor of portrait layout: {}",
+                scale_factor
+            );
+        }
         match (landscape_res, portrait_res) {
             (Ok(_), Ok(_)) => {
                 self.scale_factor = scale_factor;
@@ -347,6 +355,12 @@ where
     WM: WindowManager,
     WM::Message: From<Message> + 'static + Send + Sync,
 {
+    pub fn shutdown(&mut self) -> Task<WM::Message> {
+        // in fcitx5, calling hideVirtualKeyboardForcibly doesn't set InputMethodMode::PhysicalKeyboard. it causes that if we doesn't press any physical keys fcitx5 will still kept in InputMethodMode::VirtualKeyboard and its icon in tray will be gone.
+        // self.fcitx5_hide().chain(iced::exit()).map_task()
+        iced::exit()
+    }
+
     pub fn is_keyboard(&self, id: Id) -> bool {
         Some(id) == self.keyboard_window_state.id()
     }
@@ -356,28 +370,55 @@ where
     }
 
     pub fn open_indicator(&mut self) -> Task<WM::Message> {
-        if self.indicator_window_state.id().is_none() {
-            self.to_be_opened = Some(ToBeOpened::Indicator);
-            self.wm.fetch_screen_info()
-        } else {
-            // manually increase close_req_token
-            self.indicator_window_state.inc_close_req_token();
-            Task::none()
+        match self.indicator_display {
+            IndicatorDisplay::Auto | IndicatorDisplay::AlwaysOn => {
+                if self.indicator_window_state.id().is_none() {
+                    self.to_be_opened = Some(ToBeOpened::Indicator);
+                    self.wm.fetch_screen_info()
+                } else {
+                    // manually increase close_req_token
+                    self.indicator_window_state.inc_close_req_token();
+                    Task::none()
+                }
+            }
+            IndicatorDisplay::AlwaysOff => self.open_keyboard(),
         }
     }
 
     pub fn close_indicator(&mut self) -> Task<WM::Message> {
-        todo!()
+        self.indicator_window_state
+            .close(&mut self.wm, CloseOpSource::UserAction)
     }
 
     pub fn open_keyboard(&mut self) -> Task<WM::Message> {
+        let mut task = Task::done(Message::from(ImEvent::SyncImList).into())
+            .chain(Task::done(Message::from(ImEvent::SyncCurrentIm).into()));
         if self.keyboard_window_state.id().is_none() {
             self.to_be_opened = Some(ToBeOpened::Keyboard);
-            self.wm.fetch_screen_info()
+            task = task.chain(self.wm.fetch_screen_info());
         } else {
             // manually increase close_req_token
             self.keyboard_window_state.inc_close_req_token();
-            Task::none()
+        }
+        task
+    }
+
+    pub fn close_keyboard(&mut self, source: CloseOpSource) -> Task<WM::Message> {
+        match source {
+            CloseOpSource::Fcitx5 => self
+                .keyboard_window_state
+                .close_with_delay(Duration::from_millis(1000), source)
+                .map_task(),
+            CloseOpSource::UserAction => {
+                let mut task = self.keyboard_window_state.close(&mut self.wm, source);
+                if (IndicatorDisplay::Auto == self.indicator_display
+                    || IndicatorDisplay::AlwaysOn == self.indicator_display)
+                    && self.indicator_window_state.id().is_none()
+                {
+                    task = self.open_indicator().chain(task);
+                }
+                task
+            }
         }
     }
 
@@ -423,45 +464,52 @@ where
         }
     }
 
-    pub fn close_keyboard(&mut self, source: CloseOpSource) -> Task<WM::Message> {
-        match source {
-            CloseOpSource::Fcitx5 => self
-                .keyboard_window_state
-                .close_with_delay(Duration::from_millis(1000), source)
-                .map_task(),
-            CloseOpSource::UserAction => self.keyboard_window_state.close(&mut self.wm, source),
-        }
-    }
-
     pub fn on_window_event(&mut self, event: WindowEvent) -> Task<WM::Message> {
         match event {
-            //WindowEvent::Resize(id, scale_factor, width_p) => {
+            //WindowEvent::Resize(id, scale_factor, width) => {
             //    tracing::debug!("scale_factor: {}", scale_factor);
-            //    return self.update_width(id, width_p, scale_factor);
+            //    return self.update_width(id, width, scale_factor);
             //}
             WindowEvent::Opened(id, size) => {
                 let mut task = self.wm.opened(id, size);
                 if self.is_keyboard(id) {
                     self.keyboard_window_state.set_opened();
                     task = task.chain(self.fcitx5_show().map_task());
+                    if IndicatorDisplay::Auto == self.indicator_display {
+                        task = task.chain(self.close_indicator())
+                    }
                 } else if self.is_indicator(id) {
                     self.indicator_window_state.set_opened();
+                    if IndicatorDisplay::Auto == self.indicator_display {
+                        task = task.chain(self.close_keyboard(CloseOpSource::UserAction));
+                    }
                 }
                 task
             }
             WindowEvent::ClosingWindow(id, snapshot, source) => {
+                let mut task = Task::none();
                 let window_state = if self.is_keyboard(id) {
-                    &mut self.keyboard_window_state
+                    if (IndicatorDisplay::Auto == self.indicator_display
+                        || IndicatorDisplay::AlwaysOn == self.indicator_display)
+                        && self.indicator_window_state.id().is_none()
+                    {
+                        task = self.open_indicator();
+                    }
+                    Some(&mut self.keyboard_window_state)
                 } else if self.is_indicator(id) {
-                    &mut self.indicator_window_state
+                    Some(&mut self.indicator_window_state)
                 } else {
-                    return Task::none();
+                    None
                 };
-                if let Some(snapshot) = snapshot {
-                    return window_state.close_checked(&mut self.wm, snapshot, source);
-                } else {
-                    return window_state.close(&mut self.wm, source);
+                if let Some(window_state) = window_state {
+                    if let Some(snapshot) = snapshot {
+                        task =
+                            task.chain(window_state.close_checked(&mut self.wm, snapshot, source));
+                    } else {
+                        task = task.chain(window_state.close(&mut self.wm, source));
+                    }
                 }
+                task
             }
             WindowEvent::Closed(id) => {
                 let mut task = self.wm.closed(id);
@@ -474,11 +522,6 @@ where
                 }
                 task
             }
-            //WindowEvent::SyncSize(id) => {
-            //    let size = self.window_size();
-            //    return self.state.window_mut().resize(size);
-            //}
-            _ => Task::none(),
         }
     }
 
@@ -503,9 +546,6 @@ where
             WindowManagerEvent::ScreenInfo(screen_size, scale_factor) => {
                 let update1 = self.update_screen_size(screen_size);
                 let update2 = self.update_scale_factor(scale_factor);
-                if !update2 {
-                    tracing::warn!("unable to update scale factor: {}", scale_factor);
-                }
                 match self.to_be_opened {
                     Some(ToBeOpened::Keyboard) => {
                         let task = if update1 || update2 {
@@ -542,7 +582,6 @@ where
             WindowManagerEvent::OpenKeyboard => return self.open_keyboard(),
             WindowManagerEvent::CloseKeyboard(source) => return self.close_keyboard(source),
             WindowManagerEvent::OpenIndicator => return self.open_indicator(),
-            WindowManagerEvent::CloseIndicator => return self.close_indicator(),
         }
         Task::none()
     }
@@ -621,7 +660,6 @@ pub enum WindowManagerEvent {
     OpenKeyboard,
     CloseKeyboard(CloseOpSource),
     OpenIndicator,
-    CloseIndicator,
     ScreenInfo(Size, f32),
     // Resize(Id, f32, u16),
 }

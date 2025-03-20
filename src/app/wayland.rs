@@ -1,18 +1,17 @@
-use std::future::Future;
+use std::{
+    future::Future,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 use anyhow::Result;
-use iced::{
-    futures::channel::mpsc::UnboundedSender, window::Id, Element, Subscription, Task, Theme,
-};
+use iced::{window::Id, Element, Subscription, Task, Theme};
 use iced_layershell::{
     build_pattern::{self, MainSettings},
     settings::{LayerShellSettings, StartMode},
     to_layer_message, Appearance,
 };
 
-use crate::{
-    config::ConfigManager, font, window::wayland::WaylandWindowManager,
-};
+use crate::{config::ConfigManager, font, window::wayland::WaylandWindowManager};
 
 use super::{Keyboard, Message};
 
@@ -30,15 +29,12 @@ impl From<Message> for WaylandMessage {
 
 struct WaylandKeyboard {
     inner: Keyboard<WaylandWindowManager>,
-    // there is no way to run async function in remove_id, so we send a Hidden through
-    // subscription.
-    tx: Option<UnboundedSender<Message>>,
 }
 
 impl WaylandKeyboard {
-    pub fn new(config_manager: ConfigManager) -> Result<Self> {
-        let inner = Keyboard::new(config_manager)?;
-        Ok(Self { inner, tx: None })
+    pub fn new(config_manager: ConfigManager, shutdown_flag: Arc<AtomicBool>) -> Result<Self> {
+        let inner = Keyboard::new(config_manager, shutdown_flag)?;
+        Ok(Self { inner })
     }
 }
 
@@ -52,14 +48,10 @@ impl WaylandKeyboard {
     }
 
     pub fn update(&mut self, message: WaylandMessage) -> Task<WaylandMessage> {
-        match message {
-            WaylandMessage::Inner(message) => {
-                if let Message::NewSubscription(tx) = &message {
-                    self.tx = Some(tx.clone());
-                }
-                self.inner.update(message)
-            }
-            _ => unreachable!("layershell message should be handled before calling this method"),
+        if let WaylandMessage::Inner(message) = message {
+            self.inner.update(message)
+        } else {
+            Task::none()
         }
     }
 
@@ -71,24 +63,18 @@ impl WaylandKeyboard {
         self.inner.theme(id)
     }
 
-    pub fn remove_id(&mut self, _id: Id) {
-        // use Closed event
-        //if let Some(tx) = &self.tx {
-        //    if let Err(_) = tx.unbounded_send(WindowEvent::Hidden(id).into()) {
-        //        tracing::error!("unable to send window[{}] hidden event", id);
-        //    }
-        //} else {
-        //    tracing::error!(
-        //        "window[{}] is closed when there is no subscription",
-        //        id
-        //    );
-        //}
-    }
+    pub fn remove_id(&mut self, _id: Id) {}
 }
 
-pub fn start<BG>(config_manager: ConfigManager, config_write_bg: BG) -> Result<()>
+pub fn start<BG, SH>(
+    config_manager: ConfigManager,
+    config_write_bg: BG,
+    signal_handle: SH,
+    shutdown_flag: Arc<AtomicBool>,
+) -> Result<()>
 where
     BG: Future<Output = ()> + 'static + Send + Sync,
+    SH: Future<Output = ()> + 'static + Send + Sync,
 {
     let default_font = if let Some(font) = config_manager.as_ref().default_font() {
         font::load(&font)
@@ -96,7 +82,7 @@ where
         Default::default()
     };
 
-    let keyboard = WaylandKeyboard::new(config_manager)?;
+    let keyboard = WaylandKeyboard::new(config_manager, shutdown_flag)?;
 
     build_pattern::daemon(
         clap::crate_name!(),
@@ -120,6 +106,7 @@ where
         (
             keyboard,
             Task::future(async move {
+                tokio::spawn(signal_handle);
                 tokio::spawn(config_write_bg);
                 Message::Nothing.into()
             }),

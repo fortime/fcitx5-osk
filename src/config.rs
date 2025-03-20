@@ -96,7 +96,7 @@ fn default_portrait_width() -> u16 {
 }
 
 fn default_indicator_width() -> u16 {
-    100
+    80
 }
 
 fn default_holding_timeout() -> Duration {

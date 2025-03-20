@@ -1,6 +1,9 @@
 use std::{
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
     time::Duration,
 };
@@ -12,21 +15,21 @@ use iced::{
         Stream, StreamExt,
     },
     widget::{self, Column},
-    window::{self, Event as IcedWindowEvent, Id},
-    Color, Element, Event as IcedEvent, Size, Subscription, Task, Theme,
+    window::{Event as IcedWindowEvent, Id},
+    Color, Element, Event as IcedEvent, Subscription, Task, Theme,
 };
 use iced_futures::event;
 use pin_project::pin_project;
 use tokio::time;
 
 use crate::{
-    config::ConfigManager,
+    config::{ConfigManager, IndicatorDisplay},
     dbus::server::Fcitx5VirtualkeyboardImPanelEvent,
     state::{
-        CloseOpSource, ImEvent, KeyEvent, LayoutEvent, StartDbusServiceEvent, StartedEvent, State,
+        CloseOpSource, ImEvent, KeyEvent, KeyboardEvent, LayoutEvent, StartEvent, State,
         ThemeEvent, WindowEvent, WindowManagerEvent,
     },
-    window::{WindowAppearance, WindowManager, WindowSettings},
+    window::{WindowAppearance, WindowManager},
 };
 
 pub mod wayland;
@@ -35,9 +38,9 @@ pub mod x11;
 #[derive(Clone, Debug)]
 pub enum Message {
     Nothing,
-    Started(StartedEvent),
+    StartEvent(StartEvent),
     NewSubscription(UnboundedSender<Message>),
-    StartDbusService(StartDbusServiceEvent),
+    KeyboardEvent(KeyboardEvent),
     Error(KeyboardError),
     AfterError,
     ImEvent(ImEvent),
@@ -121,16 +124,20 @@ impl KeyboardError {
 pub struct Keyboard<WM> {
     state: State<WM>,
     error: Option<KeyboardError>,
+    shutdown_flag: Arc<AtomicBool>,
+    shutdown_sent: bool,
 }
 
 impl<WM> Keyboard<WM>
 where
     WM: Default,
 {
-    pub fn new(config_manager: ConfigManager) -> Result<Self> {
+    pub fn new(config_manager: ConfigManager, shutdown_flag: Arc<AtomicBool>) -> Result<Self> {
         Ok(Self {
             state: State::new(config_manager)?,
             error: None,
+            shutdown_flag,
+            shutdown_sent: false,
         })
     }
 }
@@ -229,23 +236,28 @@ where
     }
 
     pub fn update(&mut self, message: Message) -> Task<WM::Message> {
+        let mut task = if self.shutdown_flag.load(Ordering::Relaxed) {
+            if !self.shutdown_sent {
+                self.shutdown_sent = true;
+                self.state.window_manager_mut().shutdown()
+            } else {
+                Task::none()
+            }
+        } else {
+            Task::none()
+        };
         match message {
             Message::Error(e) => self.handle_error_message(e),
             Message::AfterError => {
                 if let Some(KeyboardError::Fatal(_)) = self.error.take() {
-                    return iced::exit();
+                    task = task.chain(self.state.window_manager_mut().shutdown());
                 }
             }
-            Message::Started(event) => match event {
-                StartedEvent::StartedDbusClients(services) => {
+            Message::StartEvent(event) => match event {
+                StartEvent::Start => task = task.chain(self.start().map_task()),
+                StartEvent::StartedDbusClients(services) => {
                     self.state.set_dbus_clients(services);
-                    return Task::future(async {
-                        // wait a moment for fcitx5 starting the backend service.
-                        let _ = time::sleep(Duration::from_secs(1));
-                        Message::Nothing
-                    })
-                    .map_task()
-                    .chain(self.state.window_manager_mut().open_keyboard());
+                    task = task.chain(self.state.window_manager_mut().open_indicator());
                 }
             },
             Message::NewSubscription(tx) => {
@@ -263,41 +275,22 @@ where
                         }
                     });
                 }
-                return self.state.keyboard_mut().start_dbus_service(tx).map_task();
+                task = task.chain(self.state.keyboard_mut().start_dbus_service(tx).map_task());
             }
-            Message::StartDbusService(event) => match event {
-                StartDbusServiceEvent::Started(dbus_service_token, connection) => {
-                    let (replaced, old) = self
-                        .state
-                        .keyboard_mut()
-                        .set_dbus_service_connection(dbus_service_token, connection);
-                    let mut task = Task::none();
-                    if replaced {
-                        if let Some(old) = old {
-                            task = task.chain(Task::future(async move {
-                                if let Err(err) = old.close().await {
-                                    tracing::warn!("error in closing dbus connection: {err:?}");
-                                }
-                                Message::Nothing
-                            }));
-                        }
-                        // make sure keyboard is started after dbus service is created.
-                        task = task.chain(self.start());
-                    }
-                    return task.map_task();
-                }
-            },
+            Message::KeyboardEvent(event) => {
+                task = task.chain(self.state.keyboard_mut().on_event(event).map_task());
+            }
             Message::LayoutEvent(event) => {
                 self.state.window_manager_mut().on_layout_event(event);
             }
             Message::KeyEvent(event) => {
-                return self.state.keyboard_mut().on_event(event).map_task();
+                task = task.chain(self.state.keyboard_mut().on_key_event(event).map_task());
             }
             Message::WindowEvent(event) => {
-                return self.state.window_manager_mut().on_window_event(event)
+                task = task.chain(self.state.window_manager_mut().on_window_event(event))
             }
             Message::WindowManagerEvent(event) => {
-                return self.state.window_manager_mut().on_event(event)
+                task = task.chain(self.state.window_manager_mut().on_event(event))
             }
             Message::ThemeEvent(event) => {
                 self.state.on_theme_event(event);
@@ -305,18 +298,19 @@ where
             Message::Fcitx5VirtualkeyboardImPanelEvent(event) => {
                 match event {
                     Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
-                        return self
-                            .state
-                            .on_im_event(ImEvent::SyncImList)
-                            .chain(self.state.on_im_event(ImEvent::SyncCurrentIm))
-                            .map_task()
-                            .chain(self.state.window_manager_mut().open_keyboard());
+                        task = task.chain(self.state.window_manager_mut().open_keyboard());
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard => {
-                        return self
-                            .state
-                            .window_manager_mut()
-                            .close_keyboard(CloseOpSource::Fcitx5);
+                        // always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated.
+                        self.state.keyboard_mut().set_fcitx5_hidden();
+                        if self.state.config().indicator_display() != IndicatorDisplay::AlwaysOff {
+                            // if there is no indicator, we ignore hide call.
+                            task = task.chain(
+                                self.state
+                                    .window_manager_mut()
+                                    .close_keyboard(CloseOpSource::Fcitx5),
+                            );
+                        }
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(state) => {
                         self.state.im_mut().update_candidate_area_state(state);
@@ -327,18 +321,18 @@ where
                 }
             }
             Message::ImEvent(event) => {
-                return self.state.on_im_event(event).map_task();
+                task = task.chain(self.state.on_im_event(event).map_task());
             }
             _ => {}
         };
-        Task::none()
+        task
     }
 
     pub fn appearance(&self, theme: &Theme, id: Id) -> WM::Appearance {
         self.state.window_manager().appearance(theme, id)
     }
 
-    pub fn theme(&self, _window_id: Id) -> Theme {
+    pub fn theme(&self, _id: Id) -> Theme {
         self.state.theme().clone()
     }
 }
