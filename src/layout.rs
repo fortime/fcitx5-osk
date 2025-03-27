@@ -429,7 +429,7 @@ impl ToolbarLayout {
         available_candidate_width -= 2 * font_size;
         let candidate_list = state.candidate_list();
         let mut candidate_row = Row::new().spacing(spacing).align_y(Vertical::Center);
-        let char_width = 2 * font_size;
+        let char_width = font_size;
         let (consumed, max_width) = if state.is_paged() {
             (
                 candidate_list.len(),

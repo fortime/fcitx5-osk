@@ -1,11 +1,12 @@
 use iced::{
     daemon::{Appearance, DefaultStyle},
     window::{self as iced_window, Id, Settings},
-    Color, Size, Task, Theme,
+    Color, Point, Size, Task, Theme,
 };
 
 use crate::{
     app::Message,
+    config::Placement,
     has_text_within_env,
     window::{WindowAppearance, WindowManager, WindowSettings},
 };
@@ -32,6 +33,10 @@ impl WindowManager for X11WindowManager {
 
     type Appearance = Appearance;
 
+    fn nothing() -> Task<Self::Message> {
+        Message::from_nothing()
+    }
+
     fn open(&mut self, settings: WindowSettings) -> (Id, Task<Self::Message>) {
         let mut iced_settings = Settings::default();
         iced_settings.size = settings.size.unwrap();
@@ -48,7 +53,7 @@ impl WindowManager for X11WindowManager {
         )
     }
 
-    fn opened(&mut self, id: Id, size: Size) -> Task<Self::Message> {
+    fn opened(&mut self, _id: Id, _size: Size) -> Task<Self::Message> {
         todo!()
     }
 
@@ -56,12 +61,24 @@ impl WindowManager for X11WindowManager {
         iced_window::close(id)
     }
 
-    fn closed(&mut self, id: Id) -> Task<Self::Message> {
+    fn closed(&mut self, _id: Id) -> Task<Self::Message> {
         todo!()
     }
 
     fn resize(&mut self, id: Id, size: Size) -> Task<Self::Message> {
         iced_window::resize(id, size)
+    }
+
+    fn mv(&mut self, id: Id, position: Point) -> Task<Self::Message> {
+        iced_window::move_to(id, position)
+    }
+
+    fn position(&self, _id: Id) -> Option<Point> {
+        todo!()
+    }
+
+    fn placement(&self, _id: Id) -> Option<Placement> {
+        todo!()
     }
 
     fn fetch_screen_info(&mut self) -> Task<Self::Message> {

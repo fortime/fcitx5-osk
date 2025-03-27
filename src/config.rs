@@ -186,14 +186,14 @@ impl AsMut<Config> for ConfigManager {
     }
 }
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub enum Placement {
     #[default]
     Dock,
     Float,
 }
 
-#[derive(Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub enum IndicatorDisplay {
     #[default]
     Auto,

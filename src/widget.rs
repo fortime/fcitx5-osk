@@ -218,6 +218,11 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) -> Status {
+        match &event {
+            Event::Window(_) => {},
+            _ => tracing::trace!("on key event: {:?}", event),
+        }
+
         if let Status::Captured = self.content.as_widget_mut().on_event(
             &mut tree.children[0],
             event.clone(),

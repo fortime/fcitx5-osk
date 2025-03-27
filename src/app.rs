@@ -52,6 +52,21 @@ pub enum Message {
     Fcitx5VirtualkeyboardImPanelEvent(Fcitx5VirtualkeyboardImPanelEvent),
 }
 
+impl Message {
+    /// Chaining Task::none() will discard previous tasks, so we create a shortcut like
+    /// Task::none() but it won't discard previous tasks.
+    pub fn nothing() -> Task<Self> {
+        Task::done(Message::Nothing)
+    }
+
+    pub fn from_nothing<T>() -> Task<T>
+    where
+        T: From<Message> + 'static + Send,
+    {
+        Task::done(Message::Nothing.into())
+    }
+}
+
 pub(crate) trait MapTask<T> {
     fn map_task(self) -> Task<T>;
 }
@@ -241,12 +256,13 @@ where
                 self.shutdown_sent = true;
                 self.state.window_manager_mut().shutdown()
             } else {
-                Task::none()
+                Task::done(Message::Nothing.into())
             }
         } else {
-            Task::none()
+            Task::done(Message::Nothing.into())
         };
         match message {
+            Message::Nothing => task = Task::none(),
             Message::Error(e) => self.handle_error_message(e),
             Message::AfterError => {
                 if let Some(KeyboardError::Fatal(_)) = self.error.take() {

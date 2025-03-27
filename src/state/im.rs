@@ -110,7 +110,7 @@ impl ImState {
             }
             ImEvent::SelectCandidate(c) => return self.select_candidate(c),
         }
-        Task::none()
+        Message::nothing()
     }
 }
 
@@ -176,7 +176,6 @@ impl ImState {
             self.fcitx5_virtual_keyboard_backend_service(),
             format!("select candidate {} failed", cursor),
             |s| async move {
-                // TODO 0-based or 1-based
                 s.select_candidate(cursor as i32).await?;
                 Ok(Message::Nothing)
             },

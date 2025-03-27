@@ -3,7 +3,7 @@ use std::{rc::Rc, time::Duration};
 use anyhow::Result;
 use iced::{
     window::{Id, Position},
-    Color, Element, Font, Size, Task, Theme,
+    Color, Element, Font, Point, Size, Task, Theme, Vector,
 };
 use tokio::time;
 
@@ -44,7 +44,7 @@ struct WindowState {
     id: Option<Id>,
     state: InnerWindowState,
     close_req_token: u16,
-    positions: (Option<Position>, Option<Position>),
+    positions: (Option<Point>, Option<Point>),
 }
 
 impl WindowState {
@@ -63,14 +63,31 @@ impl WindowState {
         self.close_req_token = self.close_req_token.wrapping_add(1);
     }
 
-    fn set_opened(&mut self) {
+    fn set_opened<WM: WindowManager>(&mut self, wm: &mut WM, is_portrait: bool) {
+        let Some(id) = self.id else {
+            tracing::error!("window is closed, can't set_opened");
+            return;
+        };
         if let InnerWindowState::Init = self.state {
             self.state = InnerWindowState::Opened;
+            if Some(Placement::Float) == wm.placement(id) {
+                if is_portrait {
+                    self.positions.1 = wm.position(id);
+                } else {
+                    self.positions.0 = wm.position(id);
+                }
+                tracing::debug!(
+                    "update window[{}] positions: {:?}, is_portrait: {}",
+                    id,
+                    self.positions,
+                    is_portrait
+                );
+            }
             return;
         }
         tracing::error!(
-            "window[{:?}] is in a wrong state: {:?}, can't update to {:?}",
-            self.id,
+            "window[{}] is in a wrong state: {:?}, can't update to {:?}",
+            id,
             self.state,
             InnerWindowState::Opened
         )
@@ -79,14 +96,25 @@ impl WindowState {
     fn open<WM: WindowManager>(
         &mut self,
         wm: &mut WM,
-        settings: WindowSettings,
+        mut settings: WindowSettings,
+        is_portrait: bool,
     ) -> Task<WM::Message> {
         if let Some(id) = self.id {
             tracing::warn!("window[{}] is already shown", id);
-            // disable all pending close requests    .
+            // disable all pending close requests.
             self.inc_close_req_token();
-            Task::none()
+            WM::nothing()
         } else {
+            if settings.placement() == Placement::Float {
+                let position = if is_portrait {
+                    self.positions.1
+                } else {
+                    self.positions.0
+                };
+                if let Some(position) = position {
+                    settings = settings.set_position(position);
+                }
+            }
             let (id, task) = wm.open(settings);
             tracing::debug!("opening window: {}", id);
             self.id = Some(id);
@@ -103,8 +131,8 @@ impl WindowState {
                 WindowEvent::ClosingWindow(snapshot.id, Some(snapshot), source).into()
             })
         } else {
-            tracing::debug!("window is already hidden");
-            Task::none()
+            tracing::debug!("window is already closed");
+            Message::nothing()
         }
     }
 
@@ -123,7 +151,7 @@ impl WindowState {
                 snapshot,
                 last
             );
-            Task::none()
+            WM::nothing()
         }
     }
 
@@ -145,10 +173,10 @@ impl WindowState {
                 }
             }
             (None, _) | (_, InnerWindowState::Closed) => {
-                tracing::debug!("window is already hidden");
+                tracing::debug!("window is already closed");
             }
         }
-        Task::none()
+        WM::nothing()
     }
 
     fn set_closed(&mut self) -> Option<CloseOpSource> {
@@ -170,12 +198,44 @@ impl WindowState {
 
     fn resize<WM: WindowManager>(&mut self, wm: &mut WM, size: Size) -> Task<WM::Message> {
         if let Some(id) = self.id {
-            tracing::debug!("resizing window: {}", id);
+            tracing::debug!("resizing window: {}, size: {:?}", id, size);
             wm.resize(id, size)
         } else {
-            tracing::debug!("window is hidden, don't resize");
-            Task::none()
+            tracing::debug!("window is closed, don't resize");
+            WM::nothing()
         }
+    }
+
+    fn mv<WM: WindowManager>(
+        &mut self,
+        wm: &mut WM,
+        delta: Vector,
+        is_portrait: bool,
+        update: bool,
+    ) -> Task<WM::Message> {
+        let Some(id) = self.id else {
+            tracing::debug!("window is closed, don't move");
+            return WM::nothing();
+        };
+        let position = if is_portrait {
+            self.positions.1
+        } else {
+            self.positions.0
+        };
+        let Some(position) = position.or_else(|| wm.position(id)) else {
+            // ignore
+            tracing::debug!("no position info of window[{}]", id);
+            return WM::nothing();
+        };
+        let task = wm.mv(id, position + delta);
+        if update {
+            if is_portrait {
+                self.positions.1 = wm.position(id);
+            } else {
+                self.positions.0 = wm.position(id);
+            }
+        }
+        task
     }
 
     fn reset_positions(&mut self) {
@@ -378,7 +438,7 @@ where
                 } else {
                     // manually increase close_req_token
                     self.indicator_window_state.inc_close_req_token();
-                    Task::none()
+                    Message::from_nothing()
                 }
             }
             IndicatorDisplay::AlwaysOff => self.open_keyboard(),
@@ -471,15 +531,18 @@ where
             //    return self.update_width(id, width, scale_factor);
             //}
             WindowEvent::Opened(id, size) => {
+                let is_portrait = self.is_portrait();
                 let mut task = self.wm.opened(id, size);
                 if self.is_keyboard(id) {
-                    self.keyboard_window_state.set_opened();
+                    self.keyboard_window_state
+                        .set_opened(&mut self.wm, is_portrait);
                     task = task.chain(self.fcitx5_show().map_task());
                     if IndicatorDisplay::Auto == self.indicator_display {
                         task = task.chain(self.close_indicator())
                     }
                 } else if self.is_indicator(id) {
-                    self.indicator_window_state.set_opened();
+                    self.indicator_window_state
+                        .set_opened(&mut self.wm, is_portrait);
                     if IndicatorDisplay::Auto == self.indicator_display {
                         task = task.chain(self.close_keyboard(CloseOpSource::UserAction));
                     }
@@ -487,7 +550,7 @@ where
                 task
             }
             WindowEvent::ClosingWindow(id, snapshot, source) => {
-                let mut task = Task::none();
+                let mut task = Message::from_nothing();
                 let window_state = if self.is_keyboard(id) {
                     if (IndicatorDisplay::Auto == self.indicator_display
                         || IndicatorDisplay::AlwaysOn == self.indicator_display)
@@ -541,17 +604,26 @@ where
         }
     }
 
+    fn update_placement(&mut self, placement: Placement) -> Task<WM::Message> {
+        if placement == self.placement {
+            return Message::from_nothing();
+        }
+        self.placement = placement;
+        todo!()
+    }
+
     pub fn on_event(&mut self, event: WindowManagerEvent) -> Task<WM::Message> {
         match event {
             WindowManagerEvent::ScreenInfo(screen_size, scale_factor) => {
                 let update1 = self.update_screen_size(screen_size);
                 let update2 = self.update_scale_factor(scale_factor);
+                let is_portrait = self.is_portrait();
                 match self.to_be_opened {
                     Some(ToBeOpened::Keyboard) => {
                         let task = if update1 || update2 {
                             Task::done(WM::Message::from(ImEvent::ResetCandidateCursor.into()))
                         } else {
-                            Task::none()
+                            Message::from_nothing()
                         };
                         let size = if self.is_portrait() {
                             self.portrait_layout.size()
@@ -559,10 +631,11 @@ where
                             self.landscape_layout.size()
                         };
                         let window_settings = WindowSettings::new(Some(size), self.placement);
-                        return task.chain(
-                            self.keyboard_window_state
-                                .open(&mut self.wm, window_settings),
-                        );
+                        return task.chain(self.keyboard_window_state.open(
+                            &mut self.wm,
+                            window_settings,
+                            is_portrait,
+                        ));
                     }
                     Some(ToBeOpened::Indicator) => {
                         let window_settings = WindowSettings::new(
@@ -572,18 +645,25 @@ where
                             )),
                             Placement::Float,
                         );
-                        return self
-                            .indicator_window_state
-                            .open(&mut self.wm, window_settings);
+                        return self.indicator_window_state.open(
+                            &mut self.wm,
+                            window_settings,
+                            is_portrait,
+                        );
                     }
                     None => {}
                 }
             }
             WindowManagerEvent::OpenKeyboard => return self.open_keyboard(),
-            WindowManagerEvent::CloseKeyboard(source) => return self.close_keyboard(source),
+            WindowManagerEvent::CloseKeyboard(source) => {
+                return self.close_keyboard(source)
+            },
             WindowManagerEvent::OpenIndicator => return self.open_indicator(),
+            WindowManagerEvent::UpdatePlacement(placement) => {
+                return self.update_placement(placement)
+            }
         }
-        Task::none()
+        Message::from_nothing()
     }
 }
 
@@ -661,6 +741,7 @@ pub enum WindowManagerEvent {
     CloseKeyboard(CloseOpSource),
     OpenIndicator,
     ScreenInfo(Size, f32),
+    UpdatePlacement(Placement),
     // Resize(Id, f32, u16),
 }
 

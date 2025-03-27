@@ -1,4 +1,4 @@
-use iced::{window::{Id, Position}, Color, Size, Task, Theme};
+use iced::{window::Id, Color, Point, Size, Task, Theme};
 
 use crate::config::Placement;
 
@@ -16,6 +16,9 @@ pub trait WindowManager: Default {
 
     type Appearance;
 
+    /// generate a do nothing task
+    fn nothing() -> Task<Self::Message>;
+
     fn open(&mut self, settings: WindowSettings) -> (Id, Task<Self::Message>);
 
     fn opened(&mut self, id: Id, size: Size) -> Task<Self::Message>;
@@ -26,7 +29,11 @@ pub trait WindowManager: Default {
 
     fn resize(&mut self, id: Id, size: Size) -> Task<Self::Message>;
 
-    // fn move(&mut self, id: Id, position: Position) -> Task<Self::Message>;
+    fn mv(&mut self, id: Id, position: Point) -> Task<Self::Message>;
+
+    fn position(&self, id: Id) -> Option<Point>;
+
+    fn placement(&self, id: Id) -> Option<Placement>;
 
     fn fetch_screen_info(&mut self) -> Task<Self::Message>;
 
@@ -37,8 +44,8 @@ pub trait WindowManager: Default {
 pub struct WindowSettings {
     size: Option<Size>,
     placement: Placement,
-    position: Option<Position>,
-    use_last_output: bool,
+    position: Point,
+    internal: bool,
 }
 
 impl WindowSettings {
@@ -46,8 +53,19 @@ impl WindowSettings {
         Self {
             size,
             placement,
-            position: None,
-            use_last_output: true,
+            position: Point::ORIGIN,
+            internal: false,
         }
+    }
+
+    /// setting position will change placement to Float.
+    pub fn set_position(mut self, position: Point) -> Self {
+        self.placement = Placement::Float;
+        self.position = position;
+        self
+    }
+
+    pub fn placement(&self) -> Placement {
+        self.placement
     }
 }

@@ -197,7 +197,7 @@ impl KeyboardState {
                 Message::Nothing
             })
         } else {
-            Task::none()
+            Message::nothing()
         };
         if replaced {
             task = task.chain(Task::done(StartEvent::Start.into()));
@@ -214,7 +214,7 @@ impl KeyboardState {
                 if self.fcitx5_hidden == Fcitx5Hidden::Clearing {
                     self.fcitx5_hidden = Fcitx5Hidden::Unset;
                 }
-                Task::none()
+                Message::nothing()
             }
         }
     }
@@ -226,7 +226,7 @@ impl KeyboardState {
                 event.common.id,
                 self.id
             );
-            return Task::none();
+            return Message::nothing();
         }
         let KeyEvent { common, inner } = event;
         match inner {
@@ -244,7 +244,7 @@ impl KeyboardState {
                 self.change_selected_secondary(common, false);
             }
         }
-        Task::none()
+        Message::nothing()
     }
 
     fn new_popup_key<'a>(
@@ -431,7 +431,7 @@ impl KeyboardState {
                 // shift may be used as a shortcut to switch the state of an input method,
                 // We only send key pressed event to fcitx5, if the pressing time is short enough.
                 // And we never send caps lock event.
-                return Task::none();
+                return Message::nothing();
             }
 
             // not send caps lock and shift state.
@@ -510,7 +510,7 @@ impl KeyboardState {
                 },
             )
         } else {
-            Task::none()
+            Message::nothing()
         }
     }
 
@@ -568,7 +568,7 @@ impl KeyboardState {
                 },
             )
         } else {
-            Task::none()
+            Message::nothing()
         }
     }
 }

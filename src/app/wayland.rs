@@ -51,7 +51,7 @@ impl WaylandKeyboard {
         if let WaylandMessage::Inner(message) = message {
             self.inner.update(message)
         } else {
-            Task::none()
+            Message::from_nothing()
         }
     }
 

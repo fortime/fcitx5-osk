@@ -21,7 +21,7 @@ mod layout;
 mod window;
 
 pub use im::{CandidateAreaState, ImEvent, ImState};
-pub use keyboard::{KeyEvent, KeyboardState, KeyboardEvent};
+pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
 pub use layout::{LayoutEvent, LayoutState};
 pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerState};
 
@@ -67,7 +67,7 @@ where
 impl<WM> State<WM> {
     pub fn start(&mut self) -> Task<Message> {
         if self.has_fcitx5_services {
-            Task::none()
+            Task::done(Message::Nothing)
         } else {
             Task::perform(Fcitx5Services::new(), |res: ZbusResult<_>| match res {
                 Ok(services) => StartEvent::StartedDbusClients(services).into(),
@@ -108,7 +108,7 @@ impl<WM> State<WM> {
         match event {
             ImEvent::UpdateCurrentIm(im) => {
                 self.update_cur_im(&im);
-                Task::none()
+                Message::nothing()
             }
             // make sure virtual keyboard mode of fcitx5 is activated
             ImEvent::SelectIm(_) => self
