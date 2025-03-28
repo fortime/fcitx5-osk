@@ -3,7 +3,7 @@ use std::{future::Future, sync::Arc};
 use anyhow::{Error, Result};
 use dark_light::Mode;
 use getset::{Getters, MutGetters};
-use iced::{window::Id, Element, Task, Theme};
+use iced::{window::Id, Element, Task, Theme, Vector};
 use zbus::Result as ZbusResult;
 
 use crate::{
@@ -173,7 +173,6 @@ impl<WM> State<WM> {
 impl<WM> State<WM>
 where
     WM: WindowManager,
-    WM::Message: From<Message> + 'static + Send + Sync,
 {
     //pub fn update_width(&mut self, id: Id, width: u16, scale_factor: f32) -> Task<WM::Message> {
     //    if self.layout.update_width(width, scale_factor) {
@@ -205,8 +204,15 @@ where
     }
 }
 
-impl<WM> KeyboardManager for State<WM> {
+impl<WM> KeyboardManager for State<WM>
+where
+    WM: WindowManager,
+{
     type Message = Message;
+
+    fn nothing() -> Self::Message {
+        Self::Message::Nothing
+    }
 
     fn available_candidate_width(&self) -> u16 {
         self.window_manager.available_candidate_width()
@@ -266,6 +272,12 @@ impl<WM> KeyboardManager for State<WM> {
             IndicatorDisplay::AlwaysOn => Some(self.close_keyboard()),
             IndicatorDisplay::AlwaysOff => None,
         }
+    }
+
+    fn new_position(&self, id: Id, delta: Vector) -> Option<Self::Message> {
+        self.window_manager
+            .position(id)
+            .map(|p| Self::Message::from(WindowEvent::Move(id, p + delta)))
     }
 }
 

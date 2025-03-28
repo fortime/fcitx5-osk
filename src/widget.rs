@@ -12,6 +12,10 @@ use iced_futures::core::{
     Clipboard, Layout, Shell, Widget,
 };
 
+mod movable;
+
+pub use movable::Movable;
+
 /// Local state of the [`Key`].
 #[derive(Default)]
 struct KeyState {

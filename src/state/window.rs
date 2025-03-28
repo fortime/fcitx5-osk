@@ -206,40 +206,44 @@ impl WindowState {
         }
     }
 
-    fn mv<WM: WindowManager>(
-        &mut self,
-        wm: &mut WM,
-        delta: Vector,
-        is_portrait: bool,
-        update: bool,
-    ) -> Task<WM::Message> {
+    fn mv<WM>(&mut self, wm: &mut WM, position: Point, is_portrait: bool) -> Task<WM::Message>
+    where
+        WM: WindowManager,
+        WM::Message: From<Message> + 'static + Send + Sync,
+    {
         let Some(id) = self.id else {
             tracing::debug!("window is closed, don't move");
             return WM::nothing();
         };
-        let position = if is_portrait {
-            self.positions.1
-        } else {
-            self.positions.0
-        };
-        let Some(position) = position.or_else(|| wm.position(id)) else {
+        let Some(cur_position) = self.position(wm, is_portrait) else {
             // ignore
             tracing::debug!("no position info of window[{}]", id);
             return WM::nothing();
         };
-        let task = wm.mv(id, position + delta);
-        if update {
-            if is_portrait {
-                self.positions.1 = wm.position(id);
-            } else {
-                self.positions.0 = wm.position(id);
-            }
+        tracing::debug!("moving from position[{:?}] to position[{:?}]", cur_position, position);
+        let task = wm.mv(id, position);
+        // use latest position
+        if is_portrait {
+            self.positions.1 = wm.position(id);
+        } else {
+            self.positions.0 = wm.position(id);
         }
         task
     }
 
     fn reset_positions(&mut self) {
         self.positions = (None, None);
+    }
+
+    fn position<WM: WindowManager>(&self, wm: &WM, is_portrait: bool) -> Option<Point> {
+        self.id.and_then(|id| {
+            let position = if is_portrait {
+                self.positions.1
+            } else {
+                self.positions.0
+            };
+            position.or_else(|| wm.position(id))
+        })
     }
 }
 
@@ -249,6 +253,7 @@ pub enum WindowEvent {
     Opened(Id, Size),
     ClosingWindow(Id, Option<WindowStateSnapshot>, CloseOpSource),
     Closed(Id),
+    Move(Id, Point),
 }
 
 impl From<WindowEvent> for Message {
@@ -413,12 +418,15 @@ impl<WM> WindowManagerState<WM> {
 impl<WM> WindowManagerState<WM>
 where
     WM: WindowManager,
-    WM::Message: From<Message> + 'static + Send + Sync,
 {
-    pub fn shutdown(&mut self) -> Task<WM::Message> {
-        // in fcitx5, calling hideVirtualKeyboardForcibly doesn't set InputMethodMode::PhysicalKeyboard. it causes that if we doesn't press any physical keys fcitx5 will still kept in InputMethodMode::VirtualKeyboard and its icon in tray will be gone.
-        // self.fcitx5_hide().chain(iced::exit()).map_task()
-        iced::exit()
+    fn window_state(&self, id: Id) -> Option<&WindowState> {
+        if self.is_keyboard(id) {
+            Some(&self.keyboard_window_state)
+        } else if self.is_indicator(id) {
+            Some(&self.indicator_window_state)
+        } else {
+            None
+        }
     }
 
     pub fn is_keyboard(&self, id: Id) -> bool {
@@ -427,6 +435,90 @@ where
 
     pub fn is_indicator(&self, id: Id) -> bool {
         Some(id) == self.indicator_window_state.id()
+    }
+
+    fn update_screen_size(&mut self, screen_size: Size) -> bool {
+        if screen_size != self.screen_size {
+            if screen_size.width != self.screen_size.height
+                || screen_size.height != self.screen_size.width
+            {
+                // not rotated, reset position
+                self.keyboard_window_state.reset_positions();
+                self.indicator_window_state.reset_positions();
+            }
+            self.screen_size = screen_size;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn position(&self, id: Id) -> Option<Point> {
+        self.window_state(id)
+            .and_then(|s| s.position(&self.wm, self.is_portrait()))
+    }
+
+    pub fn to_element<'a, 'b, KbdM, KM, M>(
+        &'a self,
+        id: Id,
+        candidate_area_state: &'b CandidateAreaState,
+        keyboard_manager: &'b KbdM,
+        key_manager: &'b KM,
+        theme: &'a Theme,
+    ) -> Element<'b, M>
+    where
+        KbdM: KeyboardManager<Message = M>,
+        KM: KeyManager<Message = M>,
+        M: 'b + Clone,
+    {
+        if self.is_keyboard(id) {
+            if self.is_portrait() {
+                self.portrait_layout.to_element(
+                    candidate_area_state,
+                    keyboard_manager,
+                    key_manager,
+                    theme,
+                )
+            } else {
+                self.landscape_layout.to_element(
+                    candidate_area_state,
+                    keyboard_manager,
+                    key_manager,
+                    theme,
+                )
+            }
+        } else {
+            if self.keyboard_window_state.id().is_some() {
+                layout::indicator_btn(self.indicator_width)
+                    .on_press(keyboard_manager.close_keyboard())
+                    .into()
+            } else {
+                crate::widget::Movable::new(
+                    layout::indicator_btn(self.indicator_width)
+                        .on_press(keyboard_manager.open_keyboard()),
+                    // move |delta| Message::from(WindowEvent::Move(id, delta)).into(),
+                    move |delta| {
+                        keyboard_manager
+                            .new_position(id, delta)
+                            .unwrap_or_else(KbdM::nothing)
+                    },
+                    true,
+                )
+                .into()
+            }
+        }
+    }
+}
+
+impl<WM> WindowManagerState<WM>
+where
+    WM: WindowManager,
+    WM::Message: From<Message> + 'static + Send + Sync,
+{
+    pub fn shutdown(&mut self) -> Task<WM::Message> {
+        // in fcitx5, calling hideVirtualKeyboardForcibly doesn't set InputMethodMode::PhysicalKeyboard. it causes that if we doesn't press any physical keys fcitx5 will still kept in InputMethodMode::VirtualKeyboard and its icon in tray will be gone.
+        // self.fcitx5_hide().chain(iced::exit()).map_task()
+        iced::exit()
     }
 
     pub fn open_indicator(&mut self) -> Task<WM::Message> {
@@ -482,56 +574,14 @@ where
         }
     }
 
-    pub fn to_element<'a, 'b, KbdM, KM, M>(
-        &'a self,
-        id: Id,
-        candidate_area_state: &'b CandidateAreaState,
-        keyboard_manager: &'b KbdM,
-        key_manager: &'b KM,
-        theme: &'a Theme,
-    ) -> Element<'b, M>
-    where
-        KbdM: KeyboardManager<Message = M>,
-        KM: KeyManager<Message = M>,
-        M: 'static + Clone,
-    {
-        if self.is_keyboard(id) {
-            if self.is_portrait() {
-                self.portrait_layout.to_element(
-                    candidate_area_state,
-                    keyboard_manager,
-                    key_manager,
-                    theme,
-                )
-            } else {
-                self.landscape_layout.to_element(
-                    candidate_area_state,
-                    keyboard_manager,
-                    key_manager,
-                    theme,
-                )
-            }
-        } else {
-            if self.keyboard_window_state.id().is_some() {
-                layout::indicator_btn(self.indicator_width)
-                    .on_press(keyboard_manager.close_keyboard())
-                    .into()
-            } else {
-                layout::indicator_btn(self.indicator_width)
-                    .on_press(keyboard_manager.open_keyboard())
-                    .into()
-            }
-        }
-    }
-
     pub fn on_window_event(&mut self, event: WindowEvent) -> Task<WM::Message> {
+        let is_portrait = self.is_portrait();
         match event {
             //WindowEvent::Resize(id, scale_factor, width) => {
             //    tracing::debug!("scale_factor: {}", scale_factor);
             //    return self.update_width(id, width, scale_factor);
             //}
             WindowEvent::Opened(id, size) => {
-                let is_portrait = self.is_portrait();
                 let mut task = self.wm.opened(id, size);
                 if self.is_keyboard(id) {
                     self.keyboard_window_state
@@ -585,22 +635,20 @@ where
                 }
                 task
             }
-        }
-    }
-
-    fn update_screen_size(&mut self, screen_size: Size) -> bool {
-        if screen_size != self.screen_size {
-            if screen_size.width != self.screen_size.height
-                || screen_size.height != self.screen_size.width
-            {
-                // not rotated, reset position
-                self.keyboard_window_state.reset_positions();
-                self.indicator_window_state.reset_positions();
+            WindowEvent::Move(id, position) => {
+                let mut task = Message::from_nothing();
+                let window_state = if self.is_keyboard(id) {
+                    Some(&mut self.keyboard_window_state)
+                } else if self.is_indicator(id) {
+                    Some(&mut self.indicator_window_state)
+                } else {
+                    None
+                };
+                if let Some(window_state) = window_state {
+                    task = task.chain(window_state.mv(&mut self.wm, position, is_portrait));
+                }
+                task
             }
-            self.screen_size = screen_size;
-            true
-        } else {
-            false
         }
     }
 
@@ -655,9 +703,7 @@ where
                 }
             }
             WindowManagerEvent::OpenKeyboard => return self.open_keyboard(),
-            WindowManagerEvent::CloseKeyboard(source) => {
-                return self.close_keyboard(source)
-            },
+            WindowManagerEvent::CloseKeyboard(source) => return self.close_keyboard(source),
             WindowManagerEvent::OpenIndicator => return self.open_indicator(),
             WindowManagerEvent::UpdatePlacement(placement) => {
                 return self.update_placement(placement)

@@ -39,6 +39,8 @@ pub struct WaylandWindowManager {
     screen_size: Size,
 }
 
+type Margin = (i32, i32, i32, i32);
+
 impl WaylandWindowManager {
     /// make sure size and position are valid.
     fn fix_settings(settings: &mut WindowSettings, screen_size: Size) {
@@ -53,8 +55,14 @@ impl WaylandWindowManager {
             if settings.position.x > screen_size.width - size.width {
                 settings.position.x = screen_size.width - size.width;
             }
+            if settings.position.x < 0. {
+                settings.position.x = 0.;
+            }
             if settings.position.y > screen_size.height - size.height {
                 settings.position.y = screen_size.height - size.height;
+            }
+            if settings.position.y < 0. {
+                settings.position.y = 0.;
             }
         }
     }
@@ -71,7 +79,7 @@ impl WaylandWindowManager {
                 (Anchor::all(), None)
             }
         };
-        let use_last_output = !settings.internal;
+        let internal = settings.internal;
         let margin = self.margin(&settings);
         let id = Id::unique();
         self.settings.insert(id, settings);
@@ -85,8 +93,8 @@ impl WaylandWindowManager {
                     layer: Layer::Top,
                     margin,
                     keyboard_interactivity: KeyboardInteractivity::None,
-                    use_last_output,
-                    events_transparent: placement == Placement::Float,
+                    use_last_output: !internal,
+                    events_transparent: internal,
                     ..Default::default()
                 },
                 id,
@@ -94,13 +102,13 @@ impl WaylandWindowManager {
         )
     }
 
-    fn margin(&self, settings: &WindowSettings) -> Option<(i32, i32, i32, i32)> {
+    fn margin(&self, settings: &WindowSettings) -> Option<Margin> {
         settings.size.and_then(|size| {
             if settings.internal || settings.placement != Placement::Float {
                 None
             } else {
                 let position = settings.position;
-                Some((
+                let margin = (
                     // top
                     position.y.floor() as i32,
                     // right
@@ -109,27 +117,26 @@ impl WaylandWindowManager {
                     (self.screen_size.height - position.y - size.height).floor() as i32,
                     // left
                     position.x.floor() as i32,
-                ))
+                );
+                Some(margin)
             }
         })
     }
 
-    fn set_margin(&mut self, id: Id, margin: (i32, i32, i32, i32)) -> Task<WaylandMessage> {
-        Task::done(WaylandMessage::MarginChange { id, margin }).chain(self.set_input_region(
-            id,
-            (margin.3, margin.0, margin.1 - margin.3, margin.2 - margin.0),
-        ))
+    fn set_margin(&mut self, id: Id, margin: Margin) -> Task<WaylandMessage> {
+        tracing::debug!("set margin of window[{}]: {:?}", id, margin);
+        Task::done(WaylandMessage::MarginChange { id, margin })
     }
 
-    fn set_input_region(&mut self, id: Id, region: (i32, i32, i32, i32)) -> Task<WaylandMessage> {
-        Task::done(WaylandMessage::SetInputRegion {
-            id,
-            callback: ActionCallback::new(move |wl_input_region| {
-                tracing::debug!("set input region of window[{}]: {:?}", id, region);
-                wl_input_region.add(region.0, region.1, region.2, region.3);
-            }),
-        })
-    }
+    //fn set_input_region(&mut self, id: Id, region: Region) -> Task<WaylandMessage> {
+    //    Task::done(WaylandMessage::SetInputRegion {
+    //        id,
+    //        callback: ActionCallback::new(move |wl_input_region| {
+    //            tracing::debug!("set input region of window[{}]: {:?}", id, region);
+    //            wl_input_region.add(region.0, region.1, region.2, region.3);
+    //        }),
+    //    })
+    //}
 }
 
 impl WindowManager for WaylandWindowManager {
@@ -159,14 +166,6 @@ impl WindowManager for WaylandWindowManager {
             for id in &self.internals {
                 tracing::debug!("closing internal window: {}", id);
                 task = task.chain(iced_window::close(*id));
-            }
-            if let Some(settings) = self.settings.get(&id) {
-                if let Some(margin) = self.margin(settings) {
-                    task = task.chain(self.set_input_region(
-                        id,
-                        (margin.3, margin.0, margin.1 - margin.3, margin.2 - margin.0),
-                    ));
-                }
             }
             task
         }

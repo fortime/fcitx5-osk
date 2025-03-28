@@ -156,7 +156,7 @@ impl LayoutState {
     where
         KbdM: KeyboardManager<Message = M>,
         KM: KeyManager<Message = M>,
-        M: 'static + Clone,
+        M: 'b + Clone,
     {
         //let mut candidates: String = candidate_area_state
         //    .into_iter()

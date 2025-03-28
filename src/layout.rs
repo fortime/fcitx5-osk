@@ -3,14 +3,11 @@
 
 use getset::{CopyGetters, Getters};
 use iced::{
-    advanced::svg::Handle as SvgHandle,
-    alignment::{Horizontal, Vertical},
-    widget::{
+    advanced::svg::Handle as SvgHandle, alignment::{Horizontal, Vertical}, widget::{
         button::Style as ButtonStyle,
         scrollable::{Direction, Scrollbar},
         Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text,
-    },
-    Color, Element, Font, Length, Theme,
+    }, window::Id, Color, Element, Font, Length, Theme, Vector
 };
 use iced_font_awesome::{FaIcon, IconFont};
 use serde::{
@@ -32,6 +29,8 @@ pub trait KeyManager {
 
 pub trait KeyboardManager {
     type Message;
+
+    fn nothing() -> Self::Message;
 
     fn available_candidate_width(&self) -> u16;
 
@@ -60,6 +59,8 @@ pub trait KeyboardManager {
     fn close_keyboard(&self) -> Self::Message;
 
     fn open_indicator(&self) -> Option<Self::Message>;
+
+    fn new_position(&self, id: Id, delta: Vector) -> Option<Self::Message>;
 }
 
 #[derive(Deserialize, CopyGetters, Getters)]
@@ -146,7 +147,7 @@ impl KeyAreaLayout {
     ) -> impl Into<Element<'b, M>>
     where
         KM: KeyManager<Message = M>,
-        M: 'static,
+        M: 'b,
     {
         let mut col = Column::new()
             .spacing(self.spacing_u * unit)
@@ -240,7 +241,7 @@ impl KeyRow {
     fn to_element<'a, 'b, KM, M>(&'a self, unit: u16, manager: &'b KM) -> impl Into<Element<'b, M>>
     where
         KM: KeyManager<Message = M>,
-        M: 'static,
+        M: 'b,
     {
         let mut row = Row::new()
             .spacing(self.spacing_u * unit)
@@ -282,7 +283,7 @@ impl KeyRowElement {
     ) -> Element<'b, M>
     where
         KM: KeyManager<Message = M>,
-        M: 'static,
+        M: 'b,
     {
         match self {
             KeyRowElement::Padding(width_u) => Space::with_width(width_u * unit).into(),
@@ -390,7 +391,7 @@ impl ToolbarLayout {
     ) -> Element<'b, M>
     where
         KM: KeyboardManager<Message = M>,
-        M: 'static + Clone,
+        M: 'b + Clone,
     {
         if candidate_area_state.has_candidate() {
             self.to_candidate_element(
@@ -417,7 +418,7 @@ impl ToolbarLayout {
     ) -> Element<'b, M>
     where
         KM: KeyboardManager<Message = M>,
-        M: 'static + Clone,
+        M: 'b + Clone,
     {
         let spacing = 2 * unit;
         let font_size = font_size_u * unit;
@@ -536,7 +537,7 @@ impl ToolbarLayout {
     ) -> Element<'b, M>
     where
         KM: KeyboardManager<Message = M>,
-        M: 'static + Clone,
+        M: 'b + Clone,
     {
         let color = theme.extended_palette().background.weak.text;
         let font_size = font_size_u * unit;
@@ -630,7 +631,10 @@ fn candidate_btn<Message>(
         .padding(0)
 }
 
-pub fn indicator_btn<Message>(width: u16) -> Button<'static, Message> {
+pub fn indicator_btn<'a, Message>(width: u16) -> Button<'a, Message>
+where
+    Message: 'a,
+{
     let icon = include_bytes!("../assets/icons/fcitx5-osk.svg");
     let svg = Svg::new(SvgHandle::from_memory(icon)).width(width);
     Button::new(svg)
