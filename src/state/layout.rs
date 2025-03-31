@@ -4,13 +4,12 @@ use anyhow::Result;
 use iced::{
     alignment::Horizontal,
     widget::{self, Column},
-    Element, Font, Padding, Size, Theme,
+    Element, Font, Padding, Size,
 };
 
 use crate::{
     app::Message,
-    layout::{KeyAreaLayout, KeyManager, KeyboardManager, ToolbarLayout},
-    state::im::CandidateAreaState,
+    layout::{KeyAreaLayout, KeyManager, KeyboardManager, ToElementCommonParams, ToolbarLayout},
 };
 
 pub struct LayoutState {
@@ -148,22 +147,14 @@ impl LayoutState {
 
     pub fn to_element<'a, 'b, KbdM, KM, M>(
         &'a self,
-        candidate_area_state: &'b CandidateAreaState,
-        keyboard_manager: &'b KbdM,
-        key_manager: &'b KM,
-        theme: &'a Theme,
+        params: ToElementCommonParams<'b, KbdM, KM, M>,
     ) -> Element<'b, M>
     where
         KbdM: KeyboardManager<Message = M>,
         KM: KeyManager<Message = M>,
         M: 'b + Clone,
     {
-        //let mut candidates: String = candidate_area_state
-        //    .into_iter()
-        //    .flat_map(|s| s.candidate_text_list().iter().enumerate())
-        //    .map(|(pos, text)| format!("{}. {} | ", pos + 1, text))
-        //    .collect();
-        // candidates = format!("候选：{}", candidates);
+        let key_manager = params.key_manager;
         let size = self.size();
         let keyboard = Column::new()
             .align_x(Horizontal::Center)
@@ -172,12 +163,10 @@ impl LayoutState {
             .padding(self.padding)
             .spacing(self.unit)
             .push(self.toolbar_layout.to_element(
-                keyboard_manager,
+                params,
                 self.unit,
-                candidate_area_state,
                 self.candidate_font,
                 self.key_area_layout.primary_text_size_u(),
-                theme,
             ))
             .push(self.key_area_layout.to_element(self.unit, key_manager));
         // we let keyboard in a stack even there is no overlay, so the widget tree always has the

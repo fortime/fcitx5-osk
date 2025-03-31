@@ -1,18 +1,16 @@
-use std::{rc::Rc, time::Duration};
+use std::{marker::PhantomData, rc::Rc, time::Duration};
 
 use anyhow::Result;
-use iced::{
-    window::{Id, Position},
-    Color, Element, Font, Point, Size, Task, Theme, Vector,
-};
+use iced::{window::Id, Color, Element, Font, Point, Size, Task, Theme};
 use tokio::time;
 
 use crate::{
     app::{MapTask, Message},
     config::{Config, IndicatorDisplay, Placement},
     dbus::client::{Fcitx5Services, Fcitx5VirtualKeyboardServiceProxy},
-    layout::{self, KeyAreaLayout, KeyManager, KeyboardManager},
-    state::{CandidateAreaState, LayoutEvent, LayoutState},
+    layout::{self, KeyAreaLayout, KeyManager, KeyboardManager, ToElementCommonParams},
+    state::{LayoutEvent, LayoutState},
+    widget::Movable,
     window::{WindowAppearance, WindowManager, WindowSettings},
 };
 
@@ -40,14 +38,16 @@ enum InnerWindowState {
 }
 
 #[derive(Default)]
-struct WindowState {
+struct WindowState<WM> {
     id: Option<Id>,
     state: InnerWindowState,
     close_req_token: u16,
     positions: (Option<Point>, Option<Point>),
+    movable: bool,
+    phantom: PhantomData<WM>,
 }
 
-impl WindowState {
+impl<WM> WindowState<WM> {
     fn id(&self) -> Option<Id> {
         self.id
     }
@@ -63,7 +63,49 @@ impl WindowState {
         self.close_req_token = self.close_req_token.wrapping_add(1);
     }
 
-    fn set_opened<WM: WindowManager>(&mut self, wm: &mut WM, is_portrait: bool) {
+    fn close_with_delay(&mut self, delay: Duration, source: CloseOpSource) -> Task<Message> {
+        if let Some(snapshot) = self.snapshot() {
+            tracing::debug!("waiting to close window: {:?}", snapshot);
+            Task::future(time::sleep(delay)).map(move |_| {
+                WindowEvent::ClosingWindow(snapshot.id, Some(snapshot), source).into()
+            })
+        } else {
+            tracing::debug!("window is already closed");
+            Message::nothing()
+        }
+    }
+
+    fn set_closed(&mut self) -> Option<CloseOpSource> {
+        if let Some(id) = self.id.take() {
+            let source = match self.state {
+                InnerWindowState::Closing(source) => Some(source),
+                InnerWindowState::Closed => None,
+                _ => Some(CloseOpSource::UserAction),
+            };
+            if source.is_some() {
+                tracing::debug!("window[{}] closed", id);
+                self.state = InnerWindowState::Closed;
+            }
+            source
+        } else {
+            None
+        }
+    }
+
+    fn reset_positions(&mut self) {
+        self.positions = (None, None);
+    }
+
+    fn movable(&self) -> bool {
+        self.movable
+    }
+}
+
+impl<WM> WindowState<WM>
+where
+    WM: WindowManager,
+{
+    fn set_opened(&mut self, wm: &mut WM, is_portrait: bool) {
         let Some(id) = self.id else {
             tracing::error!("window is closed, can't set_opened");
             return;
@@ -93,7 +135,7 @@ impl WindowState {
         )
     }
 
-    fn open<WM: WindowManager>(
+    fn open(
         &mut self,
         wm: &mut WM,
         mut settings: WindowSettings,
@@ -124,19 +166,7 @@ impl WindowState {
         }
     }
 
-    fn close_with_delay(&mut self, delay: Duration, source: CloseOpSource) -> Task<Message> {
-        if let Some(snapshot) = self.snapshot() {
-            tracing::debug!("waiting to close window: {:?}", snapshot);
-            Task::future(time::sleep(delay)).map(move |_| {
-                WindowEvent::ClosingWindow(snapshot.id, Some(snapshot), source).into()
-            })
-        } else {
-            tracing::debug!("window is already closed");
-            Message::nothing()
-        }
-    }
-
-    fn close_checked<WM: WindowManager>(
+    fn close_checked(
         &mut self,
         wm: &mut WM,
         last: WindowStateSnapshot,
@@ -155,11 +185,7 @@ impl WindowState {
         }
     }
 
-    fn close<WM: WindowManager>(
-        &mut self,
-        wm: &mut WM,
-        source: CloseOpSource,
-    ) -> Task<WM::Message> {
+    fn close(&mut self, wm: &mut WM, source: CloseOpSource) -> Task<WM::Message> {
         match (self.id, self.state) {
             (Some(id), InnerWindowState::Init) | (Some(id), InnerWindowState::Opened) => {
                 self.state = InnerWindowState::Closing(source);
@@ -179,24 +205,7 @@ impl WindowState {
         WM::nothing()
     }
 
-    fn set_closed(&mut self) -> Option<CloseOpSource> {
-        if let Some(id) = self.id.take() {
-            let source = match self.state {
-                InnerWindowState::Closing(source) => Some(source),
-                InnerWindowState::Closed => None,
-                _ => Some(CloseOpSource::UserAction),
-            };
-            if source.is_some() {
-                tracing::debug!("window[{}] closed", id);
-                self.state = InnerWindowState::Closed;
-            }
-            source
-        } else {
-            None
-        }
-    }
-
-    fn resize<WM: WindowManager>(&mut self, wm: &mut WM, size: Size) -> Task<WM::Message> {
+    fn resize(&mut self, wm: &mut WM, size: Size) -> Task<WM::Message> {
         if let Some(id) = self.id {
             tracing::debug!("resizing window: {}, size: {:?}", id, size);
             wm.resize(id, size)
@@ -206,11 +215,7 @@ impl WindowState {
         }
     }
 
-    fn mv<WM>(&mut self, wm: &mut WM, position: Point, is_portrait: bool) -> Task<WM::Message>
-    where
-        WM: WindowManager,
-        WM::Message: From<Message> + 'static + Send + Sync,
-    {
+    fn mv(&mut self, wm: &mut WM, position: Point, is_portrait: bool) -> Task<WM::Message> {
         let Some(id) = self.id else {
             tracing::debug!("window is closed, don't move");
             return WM::nothing();
@@ -220,7 +225,11 @@ impl WindowState {
             tracing::debug!("no position info of window[{}]", id);
             return WM::nothing();
         };
-        tracing::debug!("moving from position[{:?}] to position[{:?}]", cur_position, position);
+        tracing::debug!(
+            "moving from position[{:?}] to position[{:?}]",
+            cur_position,
+            position
+        );
         let task = wm.mv(id, position);
         // use latest position
         if is_portrait {
@@ -231,11 +240,7 @@ impl WindowState {
         task
     }
 
-    fn reset_positions(&mut self) {
-        self.positions = (None, None);
-    }
-
-    fn position<WM: WindowManager>(&self, wm: &WM, is_portrait: bool) -> Option<Point> {
+    fn position(&self, wm: &WM, is_portrait: bool) -> Option<Point> {
         self.id.and_then(|id| {
             let position = if is_portrait {
                 self.positions.1
@@ -244,6 +249,19 @@ impl WindowState {
             };
             position.or_else(|| wm.position(id))
         })
+    }
+
+    fn set_movable(&mut self, wm: &WM, movable: bool) {
+        let Some(id) = self.id else {
+            tracing::debug!("window is closed, don't set movable");
+            return;
+        };
+
+        if !movable {
+            self.movable = movable;
+        } else {
+            self.movable = wm.position(id).is_some();
+        }
     }
 }
 
@@ -273,8 +291,8 @@ pub struct WindowManagerState<WM> {
     scale_factor: f32,
     landscape_layout: LayoutState,
     portrait_layout: LayoutState,
-    keyboard_window_state: WindowState,
-    indicator_window_state: WindowState,
+    keyboard_window_state: WindowState<WM>,
+    indicator_window_state: WindowState<WM>,
     placement: Placement,
     indicator_width: u16,
     indicator_display: IndicatorDisplay,
@@ -419,7 +437,7 @@ impl<WM> WindowManagerState<WM>
 where
     WM: WindowManager,
 {
-    fn window_state(&self, id: Id) -> Option<&WindowState> {
+    fn window_state(&self, id: Id) -> Option<&WindowState<WM>> {
         if self.is_keyboard(id) {
             Some(&self.keyboard_window_state)
         } else if self.is_indicator(id) {
@@ -458,54 +476,44 @@ where
             .and_then(|s| s.position(&self.wm, self.is_portrait()))
     }
 
+    pub fn movable(&self, id: Id) -> bool {
+        self.window_state(id).map(|s| s.movable()).unwrap_or(false)
+    }
+
     pub fn to_element<'a, 'b, KbdM, KM, M>(
         &'a self,
-        id: Id,
-        candidate_area_state: &'b CandidateAreaState,
-        keyboard_manager: &'b KbdM,
-        key_manager: &'b KM,
-        theme: &'a Theme,
+        mut params: ToElementCommonParams<'b, KbdM, KM, M>,
     ) -> Element<'b, M>
     where
         KbdM: KeyboardManager<Message = M>,
         KM: KeyManager<Message = M>,
         M: 'b + Clone,
     {
+        let id = params.window_id;
         if self.is_keyboard(id) {
+            params.movable = self.movable(id);
             if self.is_portrait() {
-                self.portrait_layout.to_element(
-                    candidate_area_state,
-                    keyboard_manager,
-                    key_manager,
-                    theme,
-                )
+                self.portrait_layout.to_element(params)
             } else {
-                self.landscape_layout.to_element(
-                    candidate_area_state,
-                    keyboard_manager,
-                    key_manager,
-                    theme,
-                )
+                self.landscape_layout.to_element(params)
             }
         } else {
-            if self.keyboard_window_state.id().is_some() {
-                layout::indicator_btn(self.indicator_width)
-                    .on_press(keyboard_manager.close_keyboard())
-                    .into()
+            let keyboard_manager = params.keyboard_manager;
+            let message = if self.keyboard_window_state.id().is_some() {
+                keyboard_manager.close_keyboard()
             } else {
-                crate::widget::Movable::new(
-                    layout::indicator_btn(self.indicator_width)
-                        .on_press(keyboard_manager.open_keyboard()),
-                    // move |delta| Message::from(WindowEvent::Move(id, delta)).into(),
-                    move |delta| {
-                        keyboard_manager
-                            .new_position(id, delta)
-                            .unwrap_or_else(KbdM::nothing)
-                    },
-                    true,
-                )
-                .into()
-            }
+                keyboard_manager.open_keyboard()
+            };
+            Movable::new(
+                layout::indicator_btn(self.indicator_width).on_press(message),
+                move |delta| {
+                    keyboard_manager
+                        .new_position(id, delta)
+                        .unwrap_or_else(KbdM::nothing)
+                },
+                self.movable(id),
+            )
+            .into()
         }
     }
 }

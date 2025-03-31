@@ -22,7 +22,7 @@ struct MovableState {
 /// A widget works like MouseArea, Emit messages on mouse enter/leave events and finger move event.
 pub struct Movable<'a, Message, MoveCb, Theme = iced::Theme, Renderer = iced::Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
-    is_movable: bool,
+    movable: bool,
     on_move_start: Option<Message>,
     on_move: MoveCb,
     on_move_end: Option<Message>,
@@ -48,13 +48,13 @@ where
     pub fn new(
         content: impl Into<Element<'a, Message, Theme, Renderer>>,
         on_move: MoveCb,
-        is_movable: bool,
+        movable: bool,
     ) -> Self {
         let content = content.into();
         Self {
             content,
             on_move,
-            is_movable,
+            movable,
             on_move_start: None,
             on_move_end: None,
         }
@@ -122,7 +122,7 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) -> Status {
-        if !self.is_movable {
+        if !self.movable {
             if let Status::Captured = self.content.as_widget_mut().on_event(
                 &mut tree.children[0],
                 event.clone(),
@@ -136,7 +136,7 @@ where
                 return Status::Captured;
             }
         } else {
-            let (is_pressed, is_moved, cur_pointer, cur_position) = match event {
+            let (pressed, moved, cur_pointer, cur_position) = match event {
                 Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                     (true, false, None, cursor.position())
                 }
@@ -159,7 +159,7 @@ where
                 _ => return Status::Ignored,
             };
             let state: &mut MovableState = tree.state.downcast_mut();
-            if is_pressed {
+            if pressed {
                 if state.pointer.is_some() {
                     return Status::Ignored;
                 }
@@ -171,7 +171,7 @@ where
                     }
                     return Status::Captured;
                 }
-            } else if is_moved {
+            } else if moved {
                 if let Some(position) = state.pointer.as_ref().and_then(|(pointer, position)| {
                     if *pointer == cur_pointer {
                         Some(position)
@@ -216,8 +216,15 @@ where
         viewport: &Rectangle,
         renderer: &Renderer,
     ) -> mouse::Interaction {
-        if self.is_movable {
-            mouse::Interaction::Move
+        if self.movable {
+            let state: &MovableState = tree.state.downcast_ref();
+            if !cursor.is_over(layout.bounds()) {
+                mouse::Interaction::None
+            } else if state.pointer.is_some() {
+                mouse::Interaction::Grabbing
+            } else {
+                mouse::Interaction::Grab
+            }
         } else {
             self.content.as_widget().mouse_interaction(
                 &tree.children[0],

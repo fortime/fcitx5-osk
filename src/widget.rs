@@ -245,19 +245,19 @@ where
 
     fn mouse_interaction(
         &self,
-        tree: &Tree,
+        _tree: &Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &Renderer,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(
-            &tree.children[0],
-            layout,
-            cursor,
-            viewport,
-            renderer,
-        )
+        let is_mouse_over = cursor.is_over(layout.bounds());
+
+        if is_mouse_over && self.on_press_with.is_some() {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
     }
 
     fn draw(
@@ -587,19 +587,19 @@ where
 
     fn mouse_interaction(
         &self,
-        tree: &Tree,
+        _tree: &Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
-        viewport: &Rectangle,
-        renderer: &Renderer,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
     ) -> mouse::Interaction {
-        self.content.as_widget().mouse_interaction(
-            &tree.children[0],
-            layout,
-            cursor,
-            viewport,
-            renderer,
-        )
+        let is_mouse_over = cursor.is_over(layout.bounds());
+
+        if is_mouse_over && self.on_enter.is_some() {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
     }
 
     fn draw(

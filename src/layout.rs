@@ -3,11 +3,15 @@
 
 use getset::{CopyGetters, Getters};
 use iced::{
-    advanced::svg::Handle as SvgHandle, alignment::{Horizontal, Vertical}, widget::{
+    advanced::svg::Handle as SvgHandle,
+    alignment::{Horizontal, Vertical},
+    widget::{
         button::Style as ButtonStyle,
         scrollable::{Direction, Scrollbar},
         Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text,
-    }, window::Id, Color, Element, Font, Length, Theme, Vector
+    },
+    window::Id,
+    Color, Element, Font, Length, Theme, Vector,
 };
 use iced_font_awesome::{FaIcon, IconFont};
 use serde::{
@@ -15,9 +19,12 @@ use serde::{
     Deserialize, Deserializer,
 };
 
-use std::{collections::HashMap, path::PathBuf, result::Result as StdResult, sync::Arc};
+use std::{
+    collections::HashMap, marker::PhantomData, path::PathBuf, result::Result as StdResult,
+    sync::Arc,
+};
 
-use crate::{state::CandidateAreaState, store::IdAndConfigPath};
+use crate::{state::CandidateAreaState, store::IdAndConfigPath, widget::Movable};
 
 pub trait KeyManager {
     type Message;
@@ -380,46 +387,38 @@ impl ToolbarLayout {
         self.height
     }
 
-    pub fn to_element<'a, 'b, KM, M>(
+    pub fn to_element<'a, 'b, KbdM, KM, M>(
         &'a self,
-        keyboard_manager: &'b KM,
+        params: ToElementCommonParams<'b, KbdM, KM, M>,
         unit: u16,
-        candidate_area_state: &'b CandidateAreaState,
         candidate_font: Font,
         font_size_u: u16,
-        theme: &'a Theme,
     ) -> Element<'b, M>
     where
-        KM: KeyboardManager<Message = M>,
+        KbdM: KeyboardManager<Message = M>,
         M: 'b + Clone,
     {
-        if candidate_area_state.has_candidate() {
-            self.to_candidate_element(
-                keyboard_manager,
-                unit,
-                candidate_area_state,
-                candidate_font,
-                font_size_u,
-                theme,
-            )
+        if params.candidate_area_state.has_candidate() {
+            self.to_candidate_element(params, unit, candidate_font, font_size_u)
         } else {
-            self.to_toolbar_element(keyboard_manager, unit, font_size_u, theme)
+            self.to_toolbar_element(params, unit, font_size_u)
         }
     }
 
-    fn to_candidate_element<'a, 'b, KM, M>(
+    fn to_candidate_element<'a, 'b, KbdM, KM, M>(
         &'a self,
-        keyboard_manager: &'b KM,
+        params: ToElementCommonParams<'b, KbdM, KM, M>,
         unit: u16,
-        state: &'b CandidateAreaState,
         font: Font,
         font_size_u: u16,
-        theme: &'a Theme,
     ) -> Element<'b, M>
     where
-        KM: KeyboardManager<Message = M>,
+        KbdM: KeyboardManager<Message = M>,
         M: 'b + Clone,
     {
+        let theme = params.theme;
+        let keyboard_manager = params.keyboard_manager;
+        let state = params.candidate_area_state;
         let spacing = 2 * unit;
         let font_size = font_size_u * unit;
         let color = theme.extended_palette().background.weak.text;
@@ -528,17 +527,18 @@ impl ToolbarLayout {
             .into()
     }
 
-    fn to_toolbar_element<'a, 'b, KM, M>(
+    fn to_toolbar_element<'a, 'b, KbdM, KM, M>(
         &'a self,
-        keyboard_manager: &'b KM,
+        params: ToElementCommonParams<'b, KbdM, KM, M>,
         unit: u16,
         font_size_u: u16,
-        theme: &'a Theme,
     ) -> Element<'b, M>
     where
-        KM: KeyboardManager<Message = M>,
+        KbdM: KeyboardManager<Message = M>,
         M: 'b + Clone,
     {
+        let theme = params.theme;
+        let keyboard_manager = params.keyboard_manager;
         let color = theme.extended_palette().background.weak.text;
         let font_size = font_size_u * unit;
         let mut row = Row::new()
@@ -559,7 +559,15 @@ impl ToolbarLayout {
         }
 
         // padding
-        row = row.push(Column::new().width(Length::Fill));
+        row = row.push(Movable::new(
+            Column::new().width(Length::Fill),
+            move |delta| {
+                keyboard_manager
+                    .new_position(params.window_id, delta)
+                    .unwrap_or_else(KbdM::nothing)
+            },
+            params.movable,
+        ));
 
         row = row.push(
             Row::new()
@@ -601,6 +609,16 @@ impl ToolbarLayout {
             .align_x(Horizontal::Right)
             .into()
     }
+}
+
+pub(crate) struct ToElementCommonParams<'a, KbdM, KM, M> {
+    pub candidate_area_state: &'a CandidateAreaState,
+    pub keyboard_manager: &'a KbdM,
+    pub key_manager: &'a KM,
+    pub theme: &'a Theme,
+    pub window_id: Id,
+    pub movable: bool,
+    pub phantom: PhantomData<M>,
 }
 
 fn fa_btn<Message>(

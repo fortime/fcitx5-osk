@@ -10,7 +10,7 @@ use crate::{
     app::{KeyboardError, Message},
     config::{Config, ConfigManager, IndicatorDisplay},
     dbus::client::Fcitx5Services,
-    layout::KeyboardManager,
+    layout::{KeyboardManager, ToElementCommonParams},
     store::Store,
     window::WindowManager,
 };
@@ -195,11 +195,15 @@ where
 
     pub fn to_element(&self, id: Id) -> Element<Message> {
         self.window_manager.to_element(
-            id,
-            self.im.candidate_area_state(),
-            self,
-            &self.keyboard,
-            &self.theme,
+            ToElementCommonParams {
+                candidate_area_state: self.im.candidate_area_state(),
+                keyboard_manager: self,
+                key_manager: &self.keyboard,
+                theme: &self.theme,
+                window_id: id,
+                movable: false,
+                phantom: Default::default(),
+            }
         )
     }
 }
