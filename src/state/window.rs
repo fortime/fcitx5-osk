@@ -10,7 +10,7 @@ use crate::{
     dbus::client::{Fcitx5Services, Fcitx5VirtualKeyboardServiceProxy},
     layout::{self, KeyAreaLayout, KeyManager, KeyboardManager, ToElementCommonParams},
     state::{LayoutEvent, LayoutState},
-    widget::Movable,
+    widget::{Movable, Toggle, ToggleCondition},
     window::{WindowAppearance, WindowManager, WindowSettings},
 };
 
@@ -92,10 +92,6 @@ impl<WM> WindowState<WM> {
         }
     }
 
-    fn reset_positions(&mut self) {
-        self.positions = (None, None);
-    }
-
     fn movable(&self) -> bool {
         self.movable
     }
@@ -153,6 +149,7 @@ where
                 } else {
                     self.positions.0
                 };
+                tracing::debug!("opening window in position: {:?}", position);
                 if let Some(position) = position {
                     settings = settings.set_position(position);
                 }
@@ -226,7 +223,8 @@ where
             return WM::nothing();
         };
         tracing::debug!(
-            "moving from position[{:?}] to position[{:?}]",
+            "moving {} from position[{:?}] to position[{:?}]",
+            id,
             cur_position,
             position
         );
@@ -260,7 +258,15 @@ where
         if !movable {
             self.movable = movable;
         } else {
-            self.movable = wm.position(id).is_some();
+            self.movable = wm.placement(id) == Some(Placement::Float);
+        }
+    }
+
+    fn fix_position(&mut self, wm: &mut WM, is_portrait: bool) -> Option<Task<WM::Message>> {
+        if let Some(position) = self.position(wm, is_portrait) {
+            Some(self.mv(wm, position, is_portrait))
+        } else {
+            None
         }
     }
 }
@@ -272,6 +278,7 @@ pub enum WindowEvent {
     ClosingWindow(Id, Option<WindowStateSnapshot>, CloseOpSource),
     Closed(Id),
     Move(Id, Point),
+    SetMovable(Id, bool),
 }
 
 impl From<WindowEvent> for Message {
@@ -457,13 +464,11 @@ where
 
     fn update_screen_size(&mut self, screen_size: Size) -> bool {
         if screen_size != self.screen_size {
-            if screen_size.width != self.screen_size.height
-                || screen_size.height != self.screen_size.width
-            {
-                // not rotated, reset position
-                self.keyboard_window_state.reset_positions();
-                self.indicator_window_state.reset_positions();
-            }
+            tracing::debug!(
+                "reset positions, old size: {:?}, new size: {:?}",
+                self.screen_size,
+                screen_size
+            );
             self.screen_size = screen_size;
             true
         } else {
@@ -504,15 +509,21 @@ where
             } else {
                 keyboard_manager.open_keyboard()
             };
-            Movable::new(
-                layout::indicator_btn(self.indicator_width).on_press(message),
-                move |delta| {
-                    keyboard_manager
-                        .new_position(id, delta)
-                        .unwrap_or_else(KbdM::nothing)
-                },
-                self.movable(id),
+            let movable = self.movable(id);
+            Toggle::new(
+                Movable::new(
+                    layout::indicator_btn(self.indicator_width).on_press(message),
+                    move |delta| {
+                        keyboard_manager
+                            .new_position(id, delta)
+                            .unwrap_or_else(KbdM::nothing)
+                    },
+                    movable,
+                )
+                .on_move_end(keyboard_manager.set_movable(id, false)),
+                ToggleCondition::LongPress(Duration::from_millis(1000)),
             )
+            .on_toggle(keyboard_manager.set_movable(id, !movable))
             .into()
         }
     }
@@ -596,7 +607,10 @@ where
                         .set_opened(&mut self.wm, is_portrait);
                     task = task.chain(self.fcitx5_show().map_task());
                     if IndicatorDisplay::Auto == self.indicator_display {
-                        task = task.chain(self.close_indicator())
+                        task = task.chain(self.close_indicator());
+                    }
+                    if self.placement == Placement::Dock {
+                        task = task.chain(self.wm.fetch_screen_info());
                     }
                 } else if self.is_indicator(id) {
                     self.indicator_window_state
@@ -638,6 +652,7 @@ where
                     if Some(CloseOpSource::UserAction) == self.keyboard_window_state.set_closed() {
                         task = task.chain(self.fcitx5_hide().map_task());
                     }
+                    task = task.chain(self.wm.fetch_screen_info());
                 } else if self.is_indicator(id) {
                     self.indicator_window_state.set_closed();
                 }
@@ -657,6 +672,19 @@ where
                 }
                 task
             }
+            WindowEvent::SetMovable(id, movable) => {
+                let window_state = if self.is_keyboard(id) {
+                    Some(&mut self.keyboard_window_state)
+                } else if self.is_indicator(id) {
+                    Some(&mut self.indicator_window_state)
+                } else {
+                    None
+                };
+                if let Some(window_state) = window_state {
+                    window_state.set_movable(&self.wm, movable);
+                }
+                Message::from_nothing()
+            }
         }
     }
 
@@ -674,7 +702,7 @@ where
                 let update1 = self.update_screen_size(screen_size);
                 let update2 = self.update_scale_factor(scale_factor);
                 let is_portrait = self.is_portrait();
-                match self.to_be_opened {
+                match self.to_be_opened.take() {
                     Some(ToBeOpened::Keyboard) => {
                         let task = if update1 || update2 {
                             Task::done(WM::Message::from(ImEvent::ResetCandidateCursor.into()))
@@ -687,11 +715,11 @@ where
                             self.landscape_layout.size()
                         };
                         let window_settings = WindowSettings::new(Some(size), self.placement);
-                        return task.chain(self.keyboard_window_state.open(
+                        task.chain(self.keyboard_window_state.open(
                             &mut self.wm,
                             window_settings,
                             is_portrait,
-                        ));
+                        ))
                     }
                     Some(ToBeOpened::Indicator) => {
                         let window_settings = WindowSettings::new(
@@ -701,23 +729,34 @@ where
                             )),
                             Placement::Float,
                         );
-                        return self.indicator_window_state.open(
-                            &mut self.wm,
-                            window_settings,
-                            is_portrait,
-                        );
+                        self.indicator_window_state
+                            .open(&mut self.wm, window_settings, is_portrait)
                     }
-                    None => {}
+                    None => {
+                        let mut task = Message::from_nothing();
+                        if update1 {
+                            if let Some(t) = self
+                                .keyboard_window_state
+                                .fix_position(&mut self.wm, is_portrait)
+                            {
+                                task = task.chain(t);
+                            }
+                            if let Some(t) = self
+                                .indicator_window_state
+                                .fix_position(&mut self.wm, is_portrait)
+                            {
+                                task = task.chain(t);
+                            }
+                        }
+                        task
+                    }
                 }
             }
-            WindowManagerEvent::OpenKeyboard => return self.open_keyboard(),
-            WindowManagerEvent::CloseKeyboard(source) => return self.close_keyboard(source),
-            WindowManagerEvent::OpenIndicator => return self.open_indicator(),
-            WindowManagerEvent::UpdatePlacement(placement) => {
-                return self.update_placement(placement)
-            }
+            WindowManagerEvent::OpenKeyboard => self.open_keyboard(),
+            WindowManagerEvent::CloseKeyboard(source) => self.close_keyboard(source),
+            WindowManagerEvent::OpenIndicator => self.open_indicator(),
+            WindowManagerEvent::UpdatePlacement(placement) => self.update_placement(placement),
         }
-        Message::from_nothing()
     }
 }
 

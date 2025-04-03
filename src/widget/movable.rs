@@ -2,8 +2,12 @@ use std::time::{Duration, Instant};
 
 use iced::{
     event::Status,
-    mouse, overlay,
-    touch::{self, Finger},
+    mouse::{
+        Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
+        Interaction as MouseInteraction,
+    },
+    overlay,
+    touch::{Event as TouchEvent, Finger as TouchFinger},
     Element, Event, Length, Point, Rectangle, Size, Vector,
 };
 use iced_futures::core::{
@@ -15,7 +19,8 @@ use iced_futures::core::{
 /// Local state of the [`Movable`].
 #[derive(Default)]
 struct MovableState {
-    pointer: Option<(Option<Finger>, Point)>,
+    prev_pointer: Option<(Option<TouchFinger>, Point)>,
+    pointer: Option<(Option<TouchFinger>, Point)>,
     last: Option<Instant>,
 }
 
@@ -116,16 +121,53 @@ where
         tree: &mut Tree,
         event: Event,
         layout: Layout<'_>,
-        cursor: mouse::Cursor,
+        cursor: MouseCursor,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) -> Status {
+        let params = match event {
+            Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
+                Some((true, false, None, cursor.position()))
+            }
+            Event::Mouse(MouseEvent::ButtonReleased(MouseButton::Left)) => {
+                Some((false, false, None, None))
+            }
+            Event::Touch(TouchEvent::FingerPressed { id, position }) => {
+                Some((true, false, Some(id), Some(position)))
+            }
+            Event::Touch(TouchEvent::FingerLifted { id, .. })
+            | Event::Touch(TouchEvent::FingerLost { id, .. }) => {
+                Some((false, false, Some(id), None))
+            }
+            Event::Mouse(MouseEvent::CursorMoved { position }) => {
+                Some((false, true, None, Some(position)))
+            }
+            Event::Touch(TouchEvent::FingerMoved { id, position }) => {
+                Some((false, true, Some(id), Some(position)))
+            }
+            _ => None,
+        };
+
         if !self.movable {
+            if let Some((pressed, moved, cur_pointer, cur_position)) = params {
+                let state: &mut MovableState = tree.state.downcast_mut();
+                if pressed {
+                    if let Some(cur_position) =
+                        cur_position.filter(|p| layout.bounds().contains(*p))
+                    {
+                        state.prev_pointer = Some((cur_pointer, cur_position));
+                    }
+                } else if !moved {
+                    state
+                        .prev_pointer
+                        .take_if(|(pointer, _)| *pointer == cur_pointer);
+                }
+            }
             if let Status::Captured = self.content.as_widget_mut().on_event(
                 &mut tree.children[0],
-                event.clone(),
+                event,
                 layout,
                 cursor,
                 renderer,
@@ -136,29 +178,15 @@ where
                 return Status::Captured;
             }
         } else {
-            let (pressed, moved, cur_pointer, cur_position) = match event {
-                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                    (true, false, None, cursor.position())
-                }
-                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                    (false, false, None, None)
-                }
-                Event::Touch(touch::Event::FingerPressed { id, position }) => {
-                    (true, false, Some(id), Some(position))
-                }
-                Event::Touch(touch::Event::FingerLifted { id, .. })
-                | Event::Touch(touch::Event::FingerLost { id, .. }) => {
-                    (false, false, Some(id), None)
-                }
-                Event::Mouse(mouse::Event::CursorMoved { position }) => {
-                    (false, true, None, Some(position))
-                }
-                Event::Touch(touch::Event::FingerMoved { id, position }) => {
-                    (false, true, Some(id), Some(position))
-                }
-                _ => return Status::Ignored,
+            let Some((pressed, moved, cur_pointer, cur_position)) = params else {
+                return Status::Ignored;
             };
             let state: &mut MovableState = tree.state.downcast_mut();
+            if state.pointer.is_none() {
+                state.pointer = state.prev_pointer.take();
+            } else {
+                state.prev_pointer.take();
+            }
             if pressed {
                 if state.pointer.is_some() {
                     return Status::Ignored;
@@ -212,18 +240,18 @@ where
         &self,
         tree: &Tree,
         layout: Layout<'_>,
-        cursor: mouse::Cursor,
+        cursor: MouseCursor,
         viewport: &Rectangle,
         renderer: &Renderer,
-    ) -> mouse::Interaction {
+    ) -> MouseInteraction {
         if self.movable {
             let state: &MovableState = tree.state.downcast_ref();
             if !cursor.is_over(layout.bounds()) {
-                mouse::Interaction::None
+                MouseInteraction::None
             } else if state.pointer.is_some() {
-                mouse::Interaction::Grabbing
+                MouseInteraction::Grabbing
             } else {
-                mouse::Interaction::Grab
+                MouseInteraction::Grab
             }
         } else {
             self.content.as_widget().mouse_interaction(
@@ -243,7 +271,7 @@ where
         theme: &Theme,
         renderer_style: &renderer::Style,
         layout: Layout<'_>,
-        cursor: mouse::Cursor,
+        cursor: MouseCursor,
         viewport: &Rectangle,
     ) {
         self.content.as_widget().draw(

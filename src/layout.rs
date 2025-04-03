@@ -21,10 +21,14 @@ use serde::{
 
 use std::{
     collections::HashMap, marker::PhantomData, path::PathBuf, result::Result as StdResult,
-    sync::Arc,
+    sync::Arc, time::Duration,
 };
 
-use crate::{state::CandidateAreaState, store::IdAndConfigPath, widget::Movable};
+use crate::{
+    state::CandidateAreaState,
+    store::IdAndConfigPath,
+    widget::{Movable, Toggle, ToggleCondition},
+};
 
 pub trait KeyManager {
     type Message;
@@ -68,6 +72,8 @@ pub trait KeyboardManager {
     fn open_indicator(&self) -> Option<Self::Message>;
 
     fn new_position(&self, id: Id, delta: Vector) -> Option<Self::Message>;
+
+    fn set_movable(&self, id: Id, movable: bool) -> Self::Message;
 }
 
 #[derive(Deserialize, CopyGetters, Getters)]
@@ -559,15 +565,27 @@ impl ToolbarLayout {
         }
 
         // padding
-        row = row.push(Movable::new(
-            Column::new().width(Length::Fill),
-            move |delta| {
-                keyboard_manager
-                    .new_position(params.window_id, delta)
-                    .unwrap_or_else(KbdM::nothing)
-            },
-            params.movable,
-        ));
+        let window_id = params.window_id;
+        let movable = params.movable;
+        row = row.push(
+            Toggle::new(
+                Movable::new(
+                    Column::new()
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .push(Text::new(" ")),
+                    move |delta| {
+                        keyboard_manager
+                            .new_position(window_id, delta)
+                            .unwrap_or_else(KbdM::nothing)
+                    },
+                    movable,
+                )
+                .on_move_end(keyboard_manager.set_movable(window_id, false)),
+                ToggleCondition::LongPress(Duration::from_millis(1000)),
+            )
+            .on_toggle(keyboard_manager.set_movable(window_id, !movable)),
+        );
 
         row = row.push(
             Row::new()

@@ -194,17 +194,15 @@ where
     //}
 
     pub fn to_element(&self, id: Id) -> Element<Message> {
-        self.window_manager.to_element(
-            ToElementCommonParams {
-                candidate_area_state: self.im.candidate_area_state(),
-                keyboard_manager: self,
-                key_manager: &self.keyboard,
-                theme: &self.theme,
-                window_id: id,
-                movable: false,
-                phantom: Default::default(),
-            }
-        )
+        self.window_manager.to_element(ToElementCommonParams {
+            candidate_area_state: self.im.candidate_area_state(),
+            keyboard_manager: self,
+            key_manager: &self.keyboard,
+            theme: &self.theme,
+            window_id: id,
+            movable: false,
+            phantom: Default::default(),
+        })
     }
 }
 
@@ -282,6 +280,10 @@ where
         self.window_manager
             .position(id)
             .map(|p| Self::Message::from(WindowEvent::Move(id, p + delta)))
+    }
+
+    fn set_movable(&self, id: Id, movable: bool) -> Self::Message {
+        WindowEvent::SetMovable(id, movable).into()
     }
 }
 

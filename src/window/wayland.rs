@@ -5,7 +5,6 @@ use iced::{
     Color, Point, Size, Task, Theme,
 };
 use iced_layershell::{
-    actions::ActionCallback,
     reexport::{Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings},
     Appearance, DefaultStyle,
 };
@@ -69,14 +68,17 @@ impl WaylandWindowManager {
 
     fn open_window(&mut self, mut settings: WindowSettings) -> (Id, Task<WaylandMessage>) {
         Self::fix_settings(&mut settings, self.screen_size);
-        let mut size = settings.size.map(|s| (s.width as u32, s.height as u32));
+        let size = settings.size.map(|s| (s.width as u32, s.height as u32));
         let placement = settings.placement;
         let (anchor, exclusive_zone) = match placement {
             Placement::Dock => (Anchor::Bottom, size.map(|(_, h)| h as i32)),
             Placement::Float => {
-                // use fullscreen to emulate moving
-                size = None;
-                (Anchor::all(), None)
+                // In kwin, if you anchor all edges, and doesn't set size, the final window size
+                // will be the size of the screen subtruct the size of margin. In the meantime, if
+                // there is a exclusive zone the size of the screen will be smaller. And if the
+                // size of margin is greater than the size of the screen, kwin will close the
+                // window which makes functions, such as `set_margin`, unavailable.
+                (Anchor::Top | Anchor::Left, None)
             }
         };
         let internal = settings.internal;
@@ -127,16 +129,6 @@ impl WaylandWindowManager {
         tracing::debug!("set margin of window[{}]: {:?}", id, margin);
         Task::done(WaylandMessage::MarginChange { id, margin })
     }
-
-    //fn set_input_region(&mut self, id: Id, region: Region) -> Task<WaylandMessage> {
-    //    Task::done(WaylandMessage::SetInputRegion {
-    //        id,
-    //        callback: ActionCallback::new(move |wl_input_region| {
-    //            tracing::debug!("set input region of window[{}]: {:?}", id, region);
-    //            wl_input_region.add(region.0, region.1, region.2, region.3);
-    //        }),
-    //    })
-    //}
 }
 
 impl WindowManager for WaylandWindowManager {
@@ -157,9 +149,11 @@ impl WindowManager for WaylandWindowManager {
             self.screen_size = size;
             // We keep internal window opened until any other types of window is
             // opened. So they can be opened in the same screen.
-            iced_window::get_scale_factor(id).map(move |scale_factor| {
-                Message::from(WindowManagerEvent::ScreenInfo(size, scale_factor)).into()
-            })
+            iced_window::get_scale_factor(id)
+                .map(move |scale_factor| {
+                    Message::from(WindowManagerEvent::ScreenInfo(size, scale_factor)).into()
+                })
+                .chain(iced_window::close(id))
         } else {
             // close all internals
             let mut task = Message::from_nothing();

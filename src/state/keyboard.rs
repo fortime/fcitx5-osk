@@ -236,7 +236,9 @@ impl KeyboardState {
             KeyEventInner::Holding(key_widget_event, pressed_time) => {
                 self.hold_key(common, key_widget_event, pressed_time);
             }
-            KeyEventInner::Released => return self.release_key(common),
+            KeyEventInner::Released(key_widget_event) => {
+                return self.release_key(common, key_widget_event)
+            }
             KeyEventInner::SelectSecondary => {
                 self.change_selected_secondary(common, true);
             }
@@ -411,7 +413,11 @@ impl KeyboardState {
         task
     }
 
-    fn release_key(&mut self, common: KeyEventCommon) -> Task<Message> {
+    fn release_key(
+        &mut self,
+        common: KeyEventCommon,
+        key_widget_event: KeyWidgetEvent,
+    ) -> Task<Message> {
         let modifier_state = to_modifier_state(common.key_value);
         match modifier_state {
             s @ ModifierState::CapsLock => self.modifiers ^= s as u32,
@@ -445,68 +451,16 @@ impl KeyboardState {
                     common.key_name
                 ),
                 |s| async move {
-                    // if the key event is not handled by input method, fcitx5 will forward the key
-                    // event. For example, when you press a `k` and you are using `keyboard-us` as
-                    // the input method, fcitx5 will forward the key event to a wayland server. In
-                    // the implementation of kwin, it will only handle limited keysyms if the
-                    // wayland client doesn't support text-input-v1 or text-input-v2
-                    // (src/inputmethod.cpp:keysymReceived).
-                    //
-                    // So I add keycodes to each key, if the key event contains a key code, I will
-                    // send the key code instead of key value to fcitx5.
-                    let (keyval, keycode, modifiers) =
-                        if let Some(keycode) = key_state.selected_key_value.keycode() {
-                            // it looks like some input methods that needs keysym to work.
-                            let keyval = u32::from(key_state.selected_key_value.keysym());
-                            (keyval, keycode, 0)
-                        } else {
-                            let keyval = u32::from(key_state.selected_key_value.keysym());
-                            (keyval, 0, modifiers)
-                        };
-                    if keycode < 0 {
-                        // send a shift press event
-                        s.process_key_event(
-                            0,
-                            KEYCODE_LEFT_SHIFT,
-                            0,
-                            false,
-                            (pressed_time / 1000) as u32 - 1,
-                        )
-                        .await?;
-                    }
-                    if modifier_state == ModifierState::NoState
-                        || modifier_state == ModifierState::Shift
-                    {
-                        // press event has been sent when it is not NoState/Shift/CapsLock
-                        s.process_key_event(
-                            keyval,
-                            keycode.abs() as u32,
-                            modifiers,
-                            false,
-                            (pressed_time / 1000) as u32,
-                        )
-                        .await?;
-                    }
-                    s.process_key_event(
-                        keyval,
-                        keycode.abs() as u32,
+                    on_key_release(
+                        s,
+                        &key_state,
+                        modifier_state,
                         modifiers,
-                        true,
-                        (released_time / 1000) as u32,
+                        pressed_time,
+                        released_time,
+                        key_widget_event.cancelled,
                     )
-                    .await?;
-                    if keycode < 0 {
-                        // send a shift release event
-                        s.process_key_event(
-                            0,
-                            KEYCODE_LEFT_SHIFT,
-                            0,
-                            true,
-                            (released_time / 1000) as u32,
-                        )
-                        .await?;
-                    }
-                    Ok(Message::Nothing)
+                    .await
                 },
             )
         } else {
@@ -623,8 +577,11 @@ impl KeyManager for KeyboardState {
                         ))
                     }
                 }),
-                Some(move |_key_widget_event| {
-                    Message::from(KeyEvent::new(common.clone(), KeyEventInner::Released))
+                Some(move |key_widget_event| {
+                    Message::from(KeyEvent::new(
+                        common.clone(),
+                        KeyEventInner::Released(key_widget_event),
+                    ))
                 }),
             )
         } else {
@@ -641,6 +598,7 @@ impl KeyManager for KeyboardState {
     }
 
     fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Self::Message>> {
+        const MARGIN_U: u16 = 2;
         let (width, height) = size;
 
         let holding_key_state = self.holding_key_state.as_ref()?;
@@ -669,10 +627,10 @@ impl KeyManager for KeyboardState {
             left_x = width.checked_sub(popup_key_area_width).unwrap_or(0);
         }
         let mut top_y = bounds.y as u16;
-        if top_y > self.popup_key_height_u * unit {
-            top_y -= self.popup_key_height_u * unit;
+        if top_y > self.popup_key_height_u * unit + MARGIN_U * unit {
+            top_y -= self.popup_key_height_u * unit + MARGIN_U * unit;
         } else {
-            top_y += bounds.height as u16;
+            top_y += bounds.height as u16 + MARGIN_U * unit;
         }
 
         // calculate padding.
@@ -720,7 +678,7 @@ impl KeyEventCommon {
 enum KeyEventInner {
     Pressed(KeyWidgetEvent),
     Holding(KeyWidgetEvent, u128),
-    Released,
+    Released(KeyWidgetEvent),
     SelectSecondary,
     UnselectSecondary,
 }
@@ -753,4 +711,64 @@ fn to_modifier_state(key_value: ThinKeyValue) -> ModifierState {
         Keysym::Super_L | Keysym::Super_R => ModifierState::Super,
         _ => ModifierState::NoState,
     }
+}
+
+async fn on_key_release(
+    s: Fcitx5VirtualKeyboardBackendServiceProxy<'static>,
+    key_state: &KeyState,
+    modifier_state: ModifierState,
+    modifiers: u32,
+    pressed_time: u128,
+    released_time: u128,
+    cancelled: bool,
+) -> Result<Message> {
+    // if the key event is not handled by input method, fcitx5 will forward the key
+    // event. For example, when you press a `k` and you are using `keyboard-us` as
+    // the input method, fcitx5 will forward the key event to a wayland server. In
+    // the implementation of kwin, it will only handle limited keysyms if the
+    // wayland client doesn't support text-input-v1 or text-input-v2
+    // (src/inputmethod.cpp:keysymReceived).
+    //
+    // So I add keycodes to each key, if the key event contains a key code, I will
+    // send the key code instead of key value to fcitx5.
+    let (keyval, keycode, modifiers) = if let Some(keycode) = key_state.selected_key_value.keycode()
+    {
+        // it looks like some input methods that needs keysym to work.
+        let keyval = u32::from(key_state.selected_key_value.keysym());
+        (keyval, keycode, 0)
+    } else {
+        let keyval = u32::from(key_state.selected_key_value.keysym());
+        (keyval, 0, modifiers)
+    };
+    let send_shift = keycode < 0;
+    let keycode = keycode.abs() as u32;
+    let pressed_time = (pressed_time / 1000) as u32;
+    let released_time = (released_time / 1000) as u32;
+    let pressed_event_sent =
+        modifier_state != ModifierState::NoState && modifier_state != ModifierState::Shift;
+    if cancelled {
+        if pressed_event_sent {
+            s.process_key_event(keyval, keycode, modifiers, true, released_time)
+                .await?;
+        }
+        return Ok(Message::Nothing);
+    }
+    if send_shift {
+        // send a shift press event
+        s.process_key_event(0, KEYCODE_LEFT_SHIFT, 0, false, pressed_time - 1)
+            .await?;
+    }
+    if !pressed_event_sent {
+        // press event has been sent when it is not NoState/Shift/CapsLock
+        s.process_key_event(keyval, keycode, modifiers, false, pressed_time)
+            .await?;
+    }
+    s.process_key_event(keyval, keycode, modifiers, true, released_time)
+        .await?;
+    if send_shift {
+        // send a shift release event
+        s.process_key_event(0, KEYCODE_LEFT_SHIFT, 0, true, released_time)
+            .await?;
+    }
+    Ok(Message::Nothing)
 }
