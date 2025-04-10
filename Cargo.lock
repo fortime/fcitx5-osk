@@ -1228,6 +1228,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "x11rb",
  "xkeysym",
  "zbus 5.2.0",
  "zvariant 5.1.0",

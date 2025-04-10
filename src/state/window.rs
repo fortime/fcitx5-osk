@@ -255,11 +255,7 @@ where
             return;
         };
 
-        if !movable {
-            self.movable = movable;
-        } else {
-            self.movable = wm.placement(id) == Some(Placement::Float);
-        }
+        self.movable = movable && wm.placement(id) == Some(Placement::Float);
     }
 
     fn fix_position(&mut self, wm: &mut WM, is_portrait: bool) -> Option<Task<WM::Message>> {
@@ -470,6 +466,7 @@ where
                 screen_size
             );
             self.screen_size = screen_size;
+            self.wm.set_screen_size(self.screen_size);
             true
         } else {
             false
@@ -693,7 +690,7 @@ where
             return Message::from_nothing();
         }
         self.placement = placement;
-        todo!()
+        todo!("re opened keyboard")
     }
 
     pub fn on_event(&mut self, event: WindowManagerEvent) -> Task<WM::Message> {

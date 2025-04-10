@@ -251,16 +251,15 @@ where
     }
 
     pub fn update(&mut self, message: Message) -> Task<WM::Message> {
-        let mut task = if self.shutdown_flag.load(Ordering::Relaxed) {
+        if self.shutdown_flag.load(Ordering::Relaxed) {
             if !self.shutdown_sent {
                 self.shutdown_sent = true;
-                self.state.window_manager_mut().shutdown()
+                return self.state.window_manager_mut().shutdown();
             } else {
-                Task::done(Message::Nothing.into())
+                return iced::exit();
             }
-        } else {
-            Task::done(Message::Nothing.into())
-        };
+        }
+        let mut task = Task::done(Message::Nothing.into());
         match message {
             Message::Nothing => task = Task::none(),
             Message::Error(e) => self.handle_error_message(e),
@@ -339,7 +338,6 @@ where
             Message::ImEvent(event) => {
                 task = task.chain(self.state.on_im_event(event).map_task());
             }
-            _ => {}
         };
         task
     }
@@ -348,8 +346,17 @@ where
         self.state.window_manager().appearance(theme, id)
     }
 
-    pub fn theme(&self, _id: Id) -> Theme {
-        self.state.theme().clone()
+    pub fn theme(&self, id: Id) -> Theme {
+        // in iced, style doesn't accept id, we should return a theme with transparent background.
+        let theme = self.state.theme().clone();
+        let appearance = self.state.window_manager().appearance(&theme, id);
+        if appearance.background_color() == Color::TRANSPARENT {
+            let mut palette = theme.palette();
+            palette.background = Color::TRANSPARENT;
+            Theme::custom(String::new(), palette)
+        } else {
+            theme
+        }
     }
 }
 

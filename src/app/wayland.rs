@@ -92,7 +92,6 @@ where
     )
     .style(WaylandKeyboard::appearance)
     .theme(WaylandKeyboard::theme)
-    .scale_factor(|_, _| 1.0)
     .subscription(WaylandKeyboard::subscription)
     .settings(MainSettings {
         layer_settings: LayerShellSettings {

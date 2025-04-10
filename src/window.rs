@@ -9,6 +9,8 @@ pub trait WindowAppearance {
     fn default(theme: &Theme) -> Self;
 
     fn set_background_color(&mut self, background: Color);
+
+    fn background_color(&self) -> Color;
 }
 
 pub trait WindowManager: Default {
@@ -38,10 +40,12 @@ pub trait WindowManager: Default {
     fn fetch_screen_info(&mut self) -> Task<Self::Message>;
 
     fn appearance(&self, theme: &Theme, id: Id) -> Self::Appearance;
+
+    fn set_screen_size(&mut self, size: Size);
 }
 
-#[derive(Default)]
 pub struct WindowSettings {
+    application_id: String,
     size: Option<Size>,
     placement: Placement,
     position: Point,
@@ -51,6 +55,8 @@ pub struct WindowSettings {
 impl WindowSettings {
     pub fn new(size: Option<Size>, placement: Placement) -> Self {
         Self {
+            // TODO don't hardcode
+            application_id: "fcitx5-osk".to_string(),
             size,
             placement,
             position: Point::ORIGIN,

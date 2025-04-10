@@ -357,10 +357,10 @@ where
             (true, false, Some(id), Some(position))
         }
         Event::Touch(TouchEvent::FingerLifted { id, position }) => {
-            (false, true, Some(id), Some(position))
+            (false, false, Some(id), Some(position))
         }
         Event::Touch(TouchEvent::FingerLost { id, position }) => {
-            (false, false, Some(id), Some(position))
+            (false, true, Some(id), Some(position))
         }
         _ => return Status::Ignored,
     };
@@ -374,6 +374,12 @@ where
             (false, Some(cb), Some(position)) => {
                 let bounds = layout.bounds();
                 if bounds.contains(position) {
+                    tracing::trace!(
+                        "key[{:?}] is pressed at {:?} by finger {:?}",
+                        bounds,
+                        position,
+                        finger
+                    );
                     if !state.has_finger_pressed() {
                         shell.publish(cb(KeyEvent {
                             pressed,
@@ -391,6 +397,12 @@ where
     } else if state.is_pressed(&finger) {
         if let Some(cb) = widget.on_release_with.as_ref() {
             state.finger_released(&finger);
+            tracing::trace!(
+                "key[{:?}] is released by finger {:?}, pressed: {}",
+                layout.bounds(),
+                finger,
+                state.fingers.len(),
+            );
             if !state.has_finger_pressed() {
                 shell.publish(cb(KeyEvent {
                     pressed,
@@ -664,4 +676,3 @@ where
         Element::new(key)
     }
 }
-

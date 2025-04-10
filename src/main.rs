@@ -150,6 +150,7 @@ fn run(args: Args) -> Result<()> {
         iced::daemon(clap::crate_name!(), Keyboard::update, Keyboard::view)
             .theme(Keyboard::theme)
             .subscription(Keyboard::subscription)
+            .theme(Keyboard::theme)
             .run_with(move || {
                 (
                     keyboard,

@@ -26,8 +26,12 @@ impl WindowAppearance for Appearance {
         theme.default_style()
     }
 
-    fn set_background_color(&mut self, background_color: iced::Color) {
+    fn set_background_color(&mut self, background_color: Color) {
         self.background_color = background_color;
+    }
+
+    fn background_color(&self) -> Color {
+        self.background_color
     }
 }
 
@@ -146,14 +150,12 @@ impl WindowManager for WaylandWindowManager {
 
     fn opened(&mut self, id: Id, size: Size) -> Task<Self::Message> {
         if self.internals.contains(&id) {
-            self.screen_size = size;
             // We keep internal window opened until any other types of window is
             // opened. So they can be opened in the same screen.
             iced_window::get_scale_factor(id)
                 .map(move |scale_factor| {
                     Message::from(WindowManagerEvent::ScreenInfo(size, scale_factor)).into()
                 })
-                .chain(iced_window::close(id))
         } else {
             // close all internals
             let mut task = Message::from_nothing();
@@ -256,5 +258,9 @@ impl WindowManager for WaylandWindowManager {
         let mut appearance = Self::Appearance::default(theme);
         appearance.set_background_color(Color::TRANSPARENT);
         appearance
+    }
+
+    fn set_screen_size(&mut self, size: Size) {
+        self.screen_size = size;
     }
 }
