@@ -15,11 +15,13 @@ use crate::{
     window::WindowManager,
 };
 
+mod config;
 mod im;
 mod keyboard;
 mod layout;
 mod window;
 
+pub use config::{ConfigState, Field, FieldType, UpdateConfigEvent};
 pub use im::{CandidateAreaState, ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
 pub use layout::{LayoutEvent, LayoutState};
@@ -27,8 +29,7 @@ pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerSt
 
 #[derive(Getters, MutGetters)]
 pub struct State<WM> {
-    #[getset(get = "pub", get_mut = "pub")]
-    config_manager: ConfigManager,
+    config: ConfigState,
     #[getset(get = "pub", get_mut = "pub")]
     store: Store,
     #[getset(get = "pub", get_mut = "pub")]
@@ -56,7 +57,7 @@ where
             window_manager: WindowManagerState::new(config, key_area_layout)?,
             theme: Default::default(),
             has_fcitx5_services: false,
-            config_manager,
+            config: ConfigState::new(config_manager),
             store,
         };
         state.sync_theme();
@@ -134,13 +135,8 @@ impl<WM> State<WM> {
                     self.sync_theme();
                 }
             }
-            ThemeEvent::Update(theme) => {
-                let config = self.config_manager.as_mut();
-                if theme != *config.theme() {
-                    config.set_theme(theme);
-                    self.config_manager.try_write();
-                    self.sync_theme();
-                }
+            ThemeEvent::Updated => {
+                self.sync_theme();
             }
         }
     }
@@ -166,7 +162,7 @@ impl<WM> State<WM> {
     }
 
     pub fn config(&self) -> &Config {
-        self.config_manager.as_ref()
+        self.config.config()
     }
 }
 
@@ -174,24 +170,12 @@ impl<WM> State<WM>
 where
     WM: WindowManager,
 {
-    //pub fn update_width(&mut self, id: Id, width: u16, scale_factor: f32) -> Task<WM::Message> {
-    //    if self.layout.update_width(width, scale_factor) {
-    //        if width != self.config_manager.as_ref().width() {
-    //            self.config_manager.as_mut().set_width(width);
-    //            self.config_manager.try_write();
-    //        }
-    //        let size = self.layout.size();
-    //        if !self.window.wm_inited() {
-    //            self.window.set_wm_inited(id)
-    //        }
-    //        // After width is changed, the pages of candidate area should be changed too. Here we
-    //        // just reset it.
-    //        self.im.reset_candidate_cursor();
-    //        return self.window.resize(size);
-    //    } else {
-    //        Task::none()
-    //    }
-    //}
+    pub fn on_layout_event(&mut self, event: LayoutEvent) {
+        self.window_manager.on_layout_event(event);
+        if self.window_manager.is_setting_shown() {
+            self.config.refresh();
+        }
+    }
 
     pub fn to_element(&self, id: Id) -> Element<Message> {
         self.window_manager.to_element(ToElementCommonParams {
@@ -201,8 +185,31 @@ where
             theme: &self.theme,
             window_id: id,
             movable: false,
-            phantom: Default::default(),
         })
+    }
+}
+
+impl<WM> State<WM>
+where
+    WM: WindowManager,
+    WM::Message: From<Message> + 'static + Send + Sync,
+{
+    pub fn on_update_config_event(&mut self, event: UpdateConfigEvent) -> Task<WM::Message> {
+        if self.config.on_update_event(event.clone()) {
+            match event {
+                UpdateConfigEvent::Theme(_) => {
+                    Task::done(Message::from(ThemeEvent::Updated).into())
+                }
+                UpdateConfigEvent::LandscapeWidth(_) | UpdateConfigEvent::PortraitWidth(_) => {
+                    // After width is changed, the pages of candidate area should be changed too. Here we
+                    // just reset it.
+                    Task::done(Message::from(ImEvent::ResetCandidateCursor).into())
+                }
+                _ => Message::from_nothing(),
+            }
+        } else {
+            Message::from_nothing()
+        }
     }
 }
 
@@ -210,12 +217,6 @@ impl<WM> KeyboardManager for State<WM>
 where
     WM: WindowManager,
 {
-    type Message = Message;
-
-    fn nothing() -> Self::Message {
-        Self::Message::Nothing
-    }
-
     fn available_candidate_width(&self) -> u16 {
         self.window_manager.available_candidate_width()
     }
@@ -228,10 +229,6 @@ where
         self.config().theme()
     }
 
-    fn select_theme(&self, theme: &String) -> Self::Message {
-        ThemeEvent::Update(theme.clone()).into()
-    }
-
     fn ims(&self) -> &[String] {
         self.im.im_names()
     }
@@ -240,50 +237,36 @@ where
         self.im.im_name()
     }
 
-    fn select_im(&self, im: &String) -> Self::Message {
-        ImEvent::SelectIm(im.clone()).into()
-    }
-
-    fn toggle_setting(&self) -> Self::Message {
-        LayoutEvent::ToggleSetting.into()
-    }
-
-    fn prev_candidates_message(&self) -> Self::Message {
-        ImEvent::PrevCandidates.into()
-    }
-
-    fn next_candidates_message(&self, cursor: usize) -> Self::Message {
-        ImEvent::NextCandidates(cursor).into()
-    }
-
-    fn select_candidate_message(&self, index: usize) -> Self::Message {
-        ImEvent::SelectCandidate(index).into()
-    }
-
-    fn open_keyboard(&self) -> Self::Message {
-        WindowManagerEvent::OpenKeyboard.into()
-    }
-
-    fn close_keyboard(&self) -> Self::Message {
-        WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into()
-    }
-
-    fn open_indicator(&self) -> Option<Self::Message> {
+    fn open_indicator(&self) -> Option<Message> {
         match self.config().indicator_display() {
             IndicatorDisplay::Auto => Some(WindowManagerEvent::OpenIndicator.into()),
-            IndicatorDisplay::AlwaysOn => Some(self.close_keyboard()),
+            IndicatorDisplay::AlwaysOn => {
+                Some(WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into())
+            }
             IndicatorDisplay::AlwaysOff => None,
         }
     }
 
-    fn new_position(&self, id: Id, delta: Vector) -> Option<Self::Message> {
+    fn new_position(&self, id: Id, delta: Vector) -> Option<Message> {
         self.window_manager
             .position(id)
-            .map(|p| Self::Message::from(WindowEvent::Move(id, p + delta)))
+            .map(|p| Message::from(WindowEvent::Move(id, p + delta)))
     }
 
-    fn set_movable(&self, id: Id, movable: bool) -> Self::Message {
-        WindowEvent::SetMovable(id, movable).into()
+    fn config(&self) -> &Config {
+        self.config()
+    }
+
+    fn updatable_fields(&self) -> &[Field] {
+        self.config.updatable_fields()
+    }
+
+    fn scale_factor(&self) -> f32 {
+        self.window_manager.scale_factor()
+    }
+
+    fn unit(&self) -> u16 {
+        self.window_manager.unit()
     }
 }
 
@@ -302,7 +285,7 @@ impl From<StartEvent> for Message {
 #[derive(Clone, Debug)]
 pub enum ThemeEvent {
     Detect,
-    Update(String),
+    Updated,
 }
 
 impl From<ThemeEvent> for Message {

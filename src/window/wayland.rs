@@ -40,6 +40,7 @@ pub struct WaylandWindowManager {
     settings: HashMap<Id, WindowSettings>,
     internals: HashSet<Id>,
     screen_size: Size,
+    full_screen_size: Size,
 }
 
 type Margin = (i32, i32, i32, i32);
@@ -152,10 +153,9 @@ impl WindowManager for WaylandWindowManager {
         if self.internals.contains(&id) {
             // We keep internal window opened until any other types of window is
             // opened. So they can be opened in the same screen.
-            iced_window::get_scale_factor(id)
-                .map(move |scale_factor| {
-                    Message::from(WindowManagerEvent::ScreenInfo(size, scale_factor)).into()
-                })
+            iced_window::get_scale_factor(id).map(move |scale_factor| {
+                Message::from(WindowManagerEvent::ScreenInfo(size, scale_factor)).into()
+            })
         } else {
             // close all internals
             let mut task = Message::from_nothing();
@@ -178,6 +178,7 @@ impl WindowManager for WaylandWindowManager {
     }
 
     fn resize(&mut self, id: Id, size: Size) -> Task<Self::Message> {
+        tracing::debug!("resize window[{}] to size: {:?}", id, size);
         let old_size = if let Some(settings) = self.settings.get_mut(&id) {
             let old_size = settings.size.replace(size);
             Self::fix_settings(settings, self.screen_size);
@@ -190,23 +191,24 @@ impl WindowManager for WaylandWindowManager {
             let Some(size) = settings.size else {
                 unreachable!("size shouldn't be none");
             };
+            let mut task = Task::done(Self::Message::SizeChange {
+                id,
+                size: (size.width as u32, size.height as u32),
+            });
             if let Some(margin) = self.margin(settings) {
-                return self.set_margin(id, margin);
+                task = task.chain(self.set_margin(id, margin));
             } else {
-                let mut task = Task::done(Self::Message::SizeChange {
-                    id,
-                    size: (size.width as u32, size.height as u32),
-                });
-                if old_size.map(|s| s.height) == Some(size.height)
+                if old_size.map(|s| s.height) != Some(size.height)
                     && settings.placement == Placement::Dock
                 {
+                    tracing::debug!("changing exclusive zone to: {}", size.height);
                     task = task.chain(Task::done(Self::Message::ExclusiveZoneChange {
                         id,
                         zone_size: size.height as i32,
                     }));
                 }
-                return task;
             }
+            return task;
         }
         Message::from_nothing()
     }
@@ -260,7 +262,28 @@ impl WindowManager for WaylandWindowManager {
         appearance
     }
 
-    fn set_screen_size(&mut self, size: Size) {
+    fn set_screen_size(&mut self, size: Size) -> bool {
+        let res = self.screen_size != size;
         self.screen_size = size;
+        let exclusive_zone = self
+            .settings
+            .values()
+            .flat_map(|s| {
+                s.size
+                    // max can't apply to f32, the size of all window should be in integer.
+                    .map(|size| size.height as u32)
+                    .filter(|_| s.placement == Placement::Dock)
+            })
+            .max()
+            .unwrap_or(0);
+        self.full_screen_size = Size::new(
+            self.screen_size.width,
+            self.screen_size.height + exclusive_zone as f32,
+        );
+        res
+    }
+
+    fn full_screen_size(&self) -> Size {
+        self.full_screen_size
     }
 }

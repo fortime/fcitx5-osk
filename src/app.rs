@@ -27,7 +27,7 @@ use crate::{
     dbus::server::Fcitx5VirtualkeyboardImPanelEvent,
     state::{
         CloseOpSource, ImEvent, KeyEvent, KeyboardEvent, LayoutEvent, StartEvent, State,
-        ThemeEvent, WindowEvent, WindowManagerEvent,
+        ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     window::{WindowAppearance, WindowManager},
 };
@@ -49,6 +49,7 @@ pub enum Message {
     WindowEvent(WindowEvent),
     WindowManagerEvent(WindowManagerEvent),
     ThemeEvent(ThemeEvent),
+    UpdateConfigEvent(UpdateConfigEvent),
     Fcitx5VirtualkeyboardImPanelEvent(Fcitx5VirtualkeyboardImPanelEvent),
 }
 
@@ -162,22 +163,6 @@ impl<WM> Keyboard<WM> {
         self.state.start()
     }
 
-    fn error_dialog<T: ErrorDialogContent>(&self, e: T) -> Element<Message> {
-        let err_msg = e.err_msg();
-        let button_text = e.button_text();
-        widget::container(
-            widget::column![
-                widget::text(err_msg),
-                widget::button(widget::text(button_text)).on_press(Message::AfterError),
-            ]
-            .spacing(10)
-            .padding(10),
-        )
-        .max_width(self.state.window_manager().size().width)
-        .style(widget::container::rounded_box)
-        .into()
-    }
-
     pub fn handle_error_message(&mut self, e: KeyboardError) {
         match &e {
             KeyboardError::Error(e) => tracing::error!("Error: {e:#}"),
@@ -202,6 +187,22 @@ where
     WM::Message: From<Message> + 'static + Send + Sync,
     WM::Appearance: WindowAppearance + 'static + Send + Sync,
 {
+    fn error_dialog<T: ErrorDialogContent>(&self, e: T) -> Element<Message> {
+        let err_msg = e.err_msg();
+        let button_text = e.button_text();
+        widget::container(
+            widget::column![
+                widget::text(err_msg),
+                widget::button(widget::text(button_text)).on_press(Message::AfterError),
+            ]
+            .spacing(10)
+            .padding(10),
+        )
+        .max_width(self.state.window_manager().size().width)
+        .style(widget::container::rounded_box)
+        .into()
+    }
+
     pub fn view(&self, id: Id) -> Element<WM::Message> {
         if self.state.window_manager().is_keyboard(id) {
             let base = self.state.to_element(id);
@@ -296,19 +297,22 @@ where
                 task = task.chain(self.state.keyboard_mut().on_event(event).map_task());
             }
             Message::LayoutEvent(event) => {
-                self.state.window_manager_mut().on_layout_event(event);
+                self.state.on_layout_event(event);
             }
             Message::KeyEvent(event) => {
                 task = task.chain(self.state.keyboard_mut().on_key_event(event).map_task());
             }
             Message::WindowEvent(event) => {
-                task = task.chain(self.state.window_manager_mut().on_window_event(event))
+                task = task.chain(self.state.window_manager_mut().on_window_event(event));
             }
             Message::WindowManagerEvent(event) => {
-                task = task.chain(self.state.window_manager_mut().on_event(event))
+                task = task.chain(self.state.window_manager_mut().on_event(event));
             }
             Message::ThemeEvent(event) => {
                 self.state.on_theme_event(event);
+            }
+            Message::UpdateConfigEvent(event) => {
+                task = task.chain(self.state.on_update_config_event(event));
             }
             Message::Fcitx5VirtualkeyboardImPanelEvent(event) => {
                 match event {
@@ -330,9 +334,7 @@ where
                     Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(state) => {
                         self.state.im_mut().update_candidate_area_state(state);
                     }
-                    _ => {
-                        // TODO
-                    }
+                    _ => {}
                 }
             }
             Message::ImEvent(event) => {

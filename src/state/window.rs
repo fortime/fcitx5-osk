@@ -9,7 +9,7 @@ use crate::{
     config::{Config, IndicatorDisplay, Placement},
     dbus::client::{Fcitx5Services, Fcitx5VirtualKeyboardServiceProxy},
     layout::{self, KeyAreaLayout, KeyManager, KeyboardManager, ToElementCommonParams},
-    state::{LayoutEvent, LayoutState},
+    state::{LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
     window::{WindowAppearance, WindowManager, WindowSettings},
 };
@@ -101,7 +101,7 @@ impl<WM> WindowState<WM>
 where
     WM: WindowManager,
 {
-    fn set_opened(&mut self, wm: &mut WM, is_portrait: bool) {
+    fn set_opened(&mut self, wm: &mut WM, portrait: bool) {
         let Some(id) = self.id else {
             tracing::error!("window is closed, can't set_opened");
             return;
@@ -109,16 +109,16 @@ where
         if let InnerWindowState::Init = self.state {
             self.state = InnerWindowState::Opened;
             if Some(Placement::Float) == wm.placement(id) {
-                if is_portrait {
+                if portrait {
                     self.positions.1 = wm.position(id);
                 } else {
                     self.positions.0 = wm.position(id);
                 }
                 tracing::debug!(
-                    "update window[{}] positions: {:?}, is_portrait: {}",
+                    "update window[{}] positions: {:?}, portrait: {}",
                     id,
                     self.positions,
-                    is_portrait
+                    portrait
                 );
             }
             return;
@@ -135,7 +135,7 @@ where
         &mut self,
         wm: &mut WM,
         mut settings: WindowSettings,
-        is_portrait: bool,
+        portrait: bool,
     ) -> Task<WM::Message> {
         if let Some(id) = self.id {
             tracing::warn!("window[{}] is already shown", id);
@@ -144,7 +144,7 @@ where
             WM::nothing()
         } else {
             if settings.placement() == Placement::Float {
-                let position = if is_portrait {
+                let position = if portrait {
                     self.positions.1
                 } else {
                     self.positions.0
@@ -212,12 +212,12 @@ where
         }
     }
 
-    fn mv(&mut self, wm: &mut WM, position: Point, is_portrait: bool) -> Task<WM::Message> {
+    fn mv(&mut self, wm: &mut WM, position: Point, portrait: bool) -> Task<WM::Message> {
         let Some(id) = self.id else {
             tracing::debug!("window is closed, don't move");
             return WM::nothing();
         };
-        let Some(cur_position) = self.position(wm, is_portrait) else {
+        let Some(cur_position) = self.position(portrait) else {
             // ignore
             tracing::debug!("no position info of window[{}]", id);
             return WM::nothing();
@@ -230,7 +230,7 @@ where
         );
         let task = wm.mv(id, position);
         // use latest position
-        if is_portrait {
+        if portrait {
             self.positions.1 = wm.position(id);
         } else {
             self.positions.0 = wm.position(id);
@@ -238,14 +238,13 @@ where
         task
     }
 
-    fn position(&self, wm: &WM, is_portrait: bool) -> Option<Point> {
-        self.id.and_then(|id| {
-            let position = if is_portrait {
+    fn position(&self, portrait: bool) -> Option<Point> {
+        self.id.and_then(|_| {
+            if portrait {
                 self.positions.1
             } else {
                 self.positions.0
-            };
-            position.or_else(|| wm.position(id))
+            }
         })
     }
 
@@ -258,9 +257,12 @@ where
         self.movable = movable && wm.placement(id) == Some(Placement::Float);
     }
 
-    fn fix_position(&mut self, wm: &mut WM, is_portrait: bool) -> Option<Task<WM::Message>> {
-        if let Some(position) = self.position(wm, is_portrait) {
-            Some(self.mv(wm, position, is_portrait))
+    fn fix_position(&mut self, wm: &mut WM, portrait: bool) -> Option<Task<WM::Message>> {
+        if self.id.and_then(|id| wm.placement(id)) == Some(Placement::Dock) {
+            return None;
+        }
+        if let Some(position) = self.position(portrait) {
+            Some(self.mv(wm, position, portrait))
         } else {
             None
         }
@@ -269,7 +271,6 @@ where
 
 #[derive(Clone, Debug)]
 pub enum WindowEvent {
-    // Resize(Id, f32, u16),
     Opened(Id, Size),
     ClosingWindow(Id, Option<WindowStateSnapshot>, CloseOpSource),
     Closed(Id),
@@ -290,7 +291,6 @@ enum ToBeOpened {
 }
 
 pub struct WindowManagerState<WM> {
-    screen_size: Size,
     scale_factor: f32,
     landscape_layout: LayoutState,
     portrait_layout: LayoutState,
@@ -310,7 +310,6 @@ where
 {
     pub fn new(config: &Config, key_area_layout: Rc<KeyAreaLayout>) -> Result<Self> {
         Ok(Self {
-            screen_size: Size::new(0., 0.),
             scale_factor: 1.,
             landscape_layout: LayoutState::new(config.landscape_width(), key_area_layout.clone())?,
             portrait_layout: LayoutState::new(config.portrait_width(), key_area_layout.clone())?,
@@ -327,37 +326,13 @@ where
 }
 
 impl<WM> WindowManagerState<WM> {
-    pub fn is_portrait(&self) -> bool {
-        self.screen_size.height > self.screen_size.width
-    }
-
-    pub fn available_candidate_width(&self) -> u16 {
-        if self.is_portrait() {
-            self.portrait_layout.available_candidate_width()
-        } else {
-            self.landscape_layout.available_candidate_width()
-        }
-    }
-
     pub fn on_layout_event(&mut self, event: LayoutEvent) {
         self.landscape_layout.on_event(event.clone());
         self.portrait_layout.on_event(event);
     }
 
-    pub fn size(&self) -> Size {
-        if self.is_portrait() {
-            self.portrait_layout.size()
-        } else {
-            self.landscape_layout.size()
-        }
-    }
-
-    pub fn update_width(&mut self, width: u16, is_portrait: bool) -> bool {
-        if is_portrait {
-            self.portrait_layout.update_width(width).is_ok()
-        } else {
-            self.landscape_layout.update_width(width).is_ok()
-        }
+    pub fn scale_factor(&self) -> f32 {
+        self.scale_factor
     }
 
     fn update_scale_factor(&mut self, scale_factor: f32) -> bool {
@@ -440,6 +415,43 @@ impl<WM> WindowManagerState<WM>
 where
     WM: WindowManager,
 {
+    pub fn is_portrait(&self) -> bool {
+        let screen_size = self.wm.full_screen_size();
+        screen_size.height > screen_size.width
+    }
+
+    pub fn available_candidate_width(&self) -> u16 {
+        if self.is_portrait() {
+            self.portrait_layout.available_candidate_width()
+        } else {
+            self.landscape_layout.available_candidate_width()
+        }
+    }
+
+    pub fn is_setting_shown(&self) -> bool {
+        if self.is_portrait() {
+            self.portrait_layout.is_setting_shown()
+        } else {
+            self.landscape_layout.is_setting_shown()
+        }
+    }
+
+    pub fn size(&self) -> Size {
+        if self.is_portrait() {
+            self.portrait_layout.size()
+        } else {
+            self.landscape_layout.size()
+        }
+    }
+
+    pub fn unit(&self) -> u16 {
+        if self.is_portrait() {
+            self.portrait_layout.unit()
+        } else {
+            self.landscape_layout.unit()
+        }
+    }
+
     fn window_state(&self, id: Id) -> Option<&WindowState<WM>> {
         if self.is_keyboard(id) {
             Some(&self.keyboard_window_state)
@@ -459,52 +471,48 @@ where
     }
 
     fn update_screen_size(&mut self, screen_size: Size) -> bool {
-        if screen_size != self.screen_size {
-            tracing::debug!(
-                "reset positions, old size: {:?}, new size: {:?}",
-                self.screen_size,
-                screen_size
-            );
-            self.screen_size = screen_size;
-            self.wm.set_screen_size(self.screen_size);
-            true
-        } else {
-            false
-        }
+        let old_full_screen_size = self.wm.full_screen_size();
+        let res = self.wm.set_screen_size(screen_size);
+        let new_full_screen_size = self.wm.full_screen_size();
+        tracing::debug!(
+            "update screen size, old full size: {:?}, new full size: {:?}",
+            old_full_screen_size,
+            new_full_screen_size,
+        );
+        res
     }
 
     pub fn position(&self, id: Id) -> Option<Point> {
         self.window_state(id)
-            .and_then(|s| s.position(&self.wm, self.is_portrait()))
+            .and_then(|s| s.position(self.is_portrait()))
     }
 
     pub fn movable(&self, id: Id) -> bool {
         self.window_state(id).map(|s| s.movable()).unwrap_or(false)
     }
 
-    pub fn to_element<'a, 'b, KbdM, KM, M>(
+    pub fn to_element<'a, 'b, KbdM, KM>(
         &'a self,
-        mut params: ToElementCommonParams<'b, KbdM, KM, M>,
-    ) -> Element<'b, M>
+        mut params: ToElementCommonParams<'b, KbdM, KM>,
+    ) -> Element<'b, Message>
     where
-        KbdM: KeyboardManager<Message = M>,
-        KM: KeyManager<Message = M>,
-        M: 'b + Clone,
+        KbdM: KeyboardManager,
+        KM: KeyManager,
     {
         let id = params.window_id;
         if self.is_keyboard(id) {
             params.movable = self.movable(id);
             if self.is_portrait() {
-                self.portrait_layout.to_element(params)
+                self.portrait_layout.to_element(&params)
             } else {
-                self.landscape_layout.to_element(params)
+                self.landscape_layout.to_element(&params)
             }
         } else {
             let keyboard_manager = params.keyboard_manager;
             let message = if self.keyboard_window_state.id().is_some() {
-                keyboard_manager.close_keyboard()
+                WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into()
             } else {
-                keyboard_manager.open_keyboard()
+                WindowManagerEvent::OpenKeyboard.into()
             };
             let movable = self.movable(id);
             Toggle::new(
@@ -513,14 +521,14 @@ where
                     move |delta| {
                         keyboard_manager
                             .new_position(id, delta)
-                            .unwrap_or_else(KbdM::nothing)
+                            .unwrap_or(Message::Nothing)
                     },
                     movable,
                 )
-                .on_move_end(keyboard_manager.set_movable(id, false)),
+                .on_move_end(WindowEvent::SetMovable(id, false).into()),
                 ToggleCondition::LongPress(Duration::from_millis(1000)),
             )
-            .on_toggle(keyboard_manager.set_movable(id, !movable))
+            .on_toggle(WindowEvent::SetMovable(id, !movable).into())
             .into()
         }
     }
@@ -590,18 +598,92 @@ where
         }
     }
 
+    fn update_placement(&mut self, placement: Placement) -> Task<WM::Message> {
+        if placement == self.placement {
+            return Message::from_nothing();
+        }
+        self.placement = placement;
+        if self.keyboard_window_state.id().is_some() {
+            Task::done(Message::from(UpdateConfigEvent::Placement(placement)).into())
+                .chain(self.reopen_keyboard())
+        } else {
+            Message::from_nothing()
+        }
+    }
+
+    fn update_indicator_display(
+        &mut self,
+        indicator_display: IndicatorDisplay,
+    ) -> Task<WM::Message> {
+        if indicator_display == self.indicator_display {
+            return Message::from_nothing();
+        }
+        self.indicator_display = indicator_display;
+        let mut task = Task::done(
+            Message::from(UpdateConfigEvent::IndicatorDisplay(indicator_display)).into(),
+        );
+        match self.indicator_display {
+            IndicatorDisplay::Auto => {
+                if self.keyboard_window_state.id.is_none() {
+                    task = task.chain(self.open_indicator());
+                } else {
+                    task = task.chain(self.close_indicator());
+                }
+            }
+            IndicatorDisplay::AlwaysOn => {
+                if self.indicator_window_state.id.is_none() {
+                    task = task.chain(self.open_indicator());
+                }
+            }
+            IndicatorDisplay::AlwaysOff => {
+                if self.indicator_window_state.id.is_some() {
+                    task = task.chain(self.close_indicator());
+                }
+            }
+        }
+        task
+    }
+
+    fn reopen_keyboard(&mut self) -> Task<WM::Message> {
+        // If the keyboard is closed, it will trigger fetching screen info. After screen size is
+        // fetched, it will open a new keyboard window.
+        self.to_be_opened = Some(ToBeOpened::Keyboard);
+        self.close_keyboard(CloseOpSource::UserAction)
+    }
+
+    fn update_unit(&mut self, unit: u16) -> Task<WM::Message> {
+        let portrait = self.is_portrait();
+        let res = if portrait {
+            self.portrait_layout.update_unit(unit)
+        } else {
+            self.landscape_layout.update_unit(unit)
+        };
+
+        if let Ok(_) = res {
+            let (event, size) = if portrait {
+                let size = self.portrait_layout.size();
+                (UpdateConfigEvent::PortraitWidth(size.width as u16), size)
+            } else {
+                let size = self.landscape_layout.size();
+                (UpdateConfigEvent::LandscapeWidth(size.width as u16), size)
+            };
+            // resize and update config
+            self.keyboard_window_state
+                .resize(&mut self.wm, size)
+                .chain(Task::done(Message::from(event).into()))
+        } else {
+            Message::from_nothing()
+        }
+    }
+
     pub fn on_window_event(&mut self, event: WindowEvent) -> Task<WM::Message> {
-        let is_portrait = self.is_portrait();
+        let portrait = self.is_portrait();
         match event {
-            //WindowEvent::Resize(id, scale_factor, width) => {
-            //    tracing::debug!("scale_factor: {}", scale_factor);
-            //    return self.update_width(id, width, scale_factor);
-            //}
             WindowEvent::Opened(id, size) => {
                 let mut task = self.wm.opened(id, size);
                 if self.is_keyboard(id) {
                     self.keyboard_window_state
-                        .set_opened(&mut self.wm, is_portrait);
+                        .set_opened(&mut self.wm, portrait);
                     task = task.chain(self.fcitx5_show().map_task());
                     if IndicatorDisplay::Auto == self.indicator_display {
                         task = task.chain(self.close_indicator());
@@ -611,7 +693,7 @@ where
                     }
                 } else if self.is_indicator(id) {
                     self.indicator_window_state
-                        .set_opened(&mut self.wm, is_portrait);
+                        .set_opened(&mut self.wm, portrait);
                     if IndicatorDisplay::Auto == self.indicator_display {
                         task = task.chain(self.close_keyboard(CloseOpSource::UserAction));
                     }
@@ -665,7 +747,7 @@ where
                     None
                 };
                 if let Some(window_state) = window_state {
-                    task = task.chain(window_state.mv(&mut self.wm, position, is_portrait));
+                    task = task.chain(window_state.mv(&mut self.wm, position, portrait));
                 }
                 task
             }
@@ -685,20 +767,12 @@ where
         }
     }
 
-    fn update_placement(&mut self, placement: Placement) -> Task<WM::Message> {
-        if placement == self.placement {
-            return Message::from_nothing();
-        }
-        self.placement = placement;
-        todo!("re opened keyboard")
-    }
-
     pub fn on_event(&mut self, event: WindowManagerEvent) -> Task<WM::Message> {
         match event {
             WindowManagerEvent::ScreenInfo(screen_size, scale_factor) => {
                 let update1 = self.update_screen_size(screen_size);
                 let update2 = self.update_scale_factor(scale_factor);
-                let is_portrait = self.is_portrait();
+                let portrait = self.is_portrait();
                 match self.to_be_opened.take() {
                     Some(ToBeOpened::Keyboard) => {
                         let task = if update1 || update2 {
@@ -711,11 +785,21 @@ where
                         } else {
                             self.landscape_layout.size()
                         };
-                        let window_settings = WindowSettings::new(Some(size), self.placement);
+                        let mut window_settings = WindowSettings::new(Some(size), self.placement);
+                        // set default float position.
+                        if self.placement == Placement::Float {
+                            window_settings = window_settings.set_position(
+                                (
+                                    (screen_size.width - size.width) / 2.,
+                                    screen_size.height - size.height,
+                                )
+                                    .into(),
+                            );
+                        }
                         task.chain(self.keyboard_window_state.open(
                             &mut self.wm,
                             window_settings,
-                            is_portrait,
+                            portrait,
                         ))
                     }
                     Some(ToBeOpened::Indicator) => {
@@ -727,20 +811,20 @@ where
                             Placement::Float,
                         );
                         self.indicator_window_state
-                            .open(&mut self.wm, window_settings, is_portrait)
+                            .open(&mut self.wm, window_settings, portrait)
                     }
                     None => {
                         let mut task = Message::from_nothing();
                         if update1 {
                             if let Some(t) = self
                                 .keyboard_window_state
-                                .fix_position(&mut self.wm, is_portrait)
+                                .fix_position(&mut self.wm, portrait)
                             {
                                 task = task.chain(t);
                             }
                             if let Some(t) = self
                                 .indicator_window_state
-                                .fix_position(&mut self.wm, is_portrait)
+                                .fix_position(&mut self.wm, portrait)
                             {
                                 task = task.chain(t);
                             }
@@ -753,6 +837,10 @@ where
             WindowManagerEvent::CloseKeyboard(source) => self.close_keyboard(source),
             WindowManagerEvent::OpenIndicator => self.open_indicator(),
             WindowManagerEvent::UpdatePlacement(placement) => self.update_placement(placement),
+            WindowManagerEvent::UpdateIndicatorDisplay(indicator_display) => {
+                self.update_indicator_display(indicator_display)
+            }
+            WindowManagerEvent::UpdateUnit(unit) => self.update_unit(unit),
         }
     }
 }
@@ -832,7 +920,8 @@ pub enum WindowManagerEvent {
     OpenIndicator,
     ScreenInfo(Size, f32),
     UpdatePlacement(Placement),
-    // Resize(Id, f32, u16),
+    UpdateIndicatorDisplay(IndicatorDisplay),
+    UpdateUnit(u16),
 }
 
 impl From<WindowManagerEvent> for Message {

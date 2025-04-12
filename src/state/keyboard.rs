@@ -528,9 +528,7 @@ impl KeyboardState {
 }
 
 impl KeyManager for KeyboardState {
-    type Message = Message;
-
-    fn key(&self, key_name: Arc<str>, unit: u16, size: (u16, u16)) -> Element<Self::Message> {
+    fn key(&self, key_name: Arc<str>, unit: u16, size: (u16, u16)) -> Element<Message> {
         let (width, height) = size;
         let (inner_width, inner_height) = (
             width - TEXT_PADDING_LENGTH * 2,
@@ -542,7 +540,7 @@ impl KeyManager for KeyboardState {
             let is_caps_lock_set = ModifierState::CapsLock.is_set(self.modifiers);
             let secondary_height = inner_height / 4;
             let primary_height = inner_height - 2 * secondary_height;
-            let mut column: Column<Self::Message> = Column::new();
+            let mut column: Column<Message> = Column::new();
             let top = Text::new(key.secondary_text(is_shift_set, is_caps_lock_set));
             let middle = Text::new(key.primary_text(is_shift_set, is_caps_lock_set));
             let key_value = key.key_value(is_shift_set, is_caps_lock_set);
@@ -597,7 +595,7 @@ impl KeyManager for KeyboardState {
             .into()
     }
 
-    fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Self::Message>> {
+    fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Message>> {
         const MARGIN_U: u16 = 2;
         let (width, height) = size;
 

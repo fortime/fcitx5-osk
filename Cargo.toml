@@ -25,6 +25,7 @@ iced_graphics = "0.13.0"
 humantime-serde = "1.1.1"
 iced_font_awesome = "0.2.1"
 x11rb = { version = "0.13.1", default-features = false, features = ["dl-libxcb"] }
+strum = { version = "0.27.1", features = ["derive"] }
 
 [patch.crates-io]
 #iced_layershell = { git = "https://github.com/fortime/exwlshelleventloop.git", branch = "feat/fcitx5-osk" }

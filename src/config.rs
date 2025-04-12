@@ -11,6 +11,7 @@ use iced::futures::{
     StreamExt,
 };
 use serde::{Deserialize, Serialize};
+use strum::EnumIter;
 use tokio::fs;
 
 #[derive(Deserialize, Serialize, CopyGetters, Getters, Setters, Default, Clone)]
@@ -186,14 +187,18 @@ impl AsMut<Config> for ConfigManager {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, EnumIter, strum::Display,
+)]
 pub enum Placement {
     #[default]
     Dock,
     Float,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, EnumIter, strum::Display,
+)]
 pub enum IndicatorDisplay {
     #[default]
     Auto,

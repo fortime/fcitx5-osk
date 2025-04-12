@@ -221,7 +221,31 @@ impl WindowManager for X11WindowManager {
             Self::fix_settings(settings, self.screen_size);
             if let Some(size) = settings.size {
                 task = iced_window::resize(id, size);
+                if settings.placement == Placement::Dock {
+                    let conn = self.conn.clone();
+                    let atoms = self.atoms.clone();
+                    settings.position = (
+                        (self.screen_size.width - size.width) / 2.,
+                        self.screen_size.height - size.height,
+                    )
+                        .into();
+                    task = task.chain(iced_window::get_raw_id::<Self::Message>(id).map(
+                        move |raw_id| {
+                            let x_window_id = raw_id as xproto::Window;
+                            if let Err(err) =
+                                set_exclusive_zone(&conn, x_window_id, &atoms, size.height as u32)
+                            {
+                                tracing::error!("failed to set exclusive zone: {:?}", err);
+                            }
+                            Message::Nothing
+                        },
+                    ))
+                }
             }
+            // position may be changed after resized.
+            let new_position = settings.position;
+            let _ = settings;
+            task = task.chain(self.mv(id, new_position));
         };
         task
     }
@@ -272,8 +296,14 @@ impl WindowManager for X11WindowManager {
         appearance
     }
 
-    fn set_screen_size(&mut self, size: Size) {
+    fn set_screen_size(&mut self, size: Size) -> bool {
+        let res = self.screen_size != size;
         self.screen_size = size;
+        res
+    }
+
+    fn full_screen_size(&self) -> Size {
+        self.screen_size
     }
 }
 
@@ -359,14 +389,7 @@ fn init_window(
         .check()?;
 
         // reserve space
-        conn.change_property32(
-            xproto::PropMode::REPLACE,
-            x_window_id,
-            atoms._NET_WM_STRUT,
-            xproto::AtomEnum::CARDINAL,
-            &[0, 0, 0, exclusive_zone as u32],
-        )?
-        .check()?;
+        set_exclusive_zone(conn, x_window_id, atoms, exclusive_zone as u32)?;
     } else {
         conn.change_property32(
             xproto::PropMode::REPLACE,
@@ -389,5 +412,22 @@ fn init_window(
     )?;
     conn.flush()?;
 
+    Ok(())
+}
+
+fn set_exclusive_zone(
+    conn: &RustConnection,
+    x_window_id: xproto::Window,
+    atoms: &Atoms,
+    exclusive_zone: u32,
+) -> Result<()> {
+    conn.change_property32(
+        xproto::PropMode::REPLACE,
+        x_window_id,
+        atoms._NET_WM_STRUT,
+        xproto::AtomEnum::CARDINAL,
+        &[0, 0, 0, exclusive_zone],
+    )?
+    .check()?;
     Ok(())
 }

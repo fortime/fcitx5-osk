@@ -41,7 +41,10 @@ pub trait WindowManager: Default {
 
     fn appearance(&self, theme: &Theme, id: Id) -> Self::Appearance;
 
-    fn set_screen_size(&mut self, size: Size);
+    fn set_screen_size(&mut self, size: Size) -> bool;
+
+    /// screen size with exclusive zone
+    fn full_screen_size(&self) -> Size;
 }
 
 pub struct WindowSettings {
