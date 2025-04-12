@@ -164,7 +164,9 @@ impl ConfigState {
                     typ: OwnedEnumDesc::<IndicatorDisplay> {
                         cur_value: |km: &dyn KeyboardManager| Some(km.config().indicator_display()),
                         variants: IndicatorDisplay::iter().collect(),
-                        on_selected: |_, d| Message::from(WindowManagerEvent::UpdateIndicatorDisplay(d)),
+                        on_selected: |_, d| {
+                            Message::from(WindowManagerEvent::UpdateIndicatorDisplay(d))
+                        },
                     }
                     .into(),
                 },
