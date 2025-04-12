@@ -77,7 +77,7 @@ where
     SH: Future<Output = ()> + 'static + Send + Sync,
 {
     let default_font = if let Some(font) = config_manager.as_ref().default_font() {
-        font::load(&font)
+        font::load(font)
     } else {
         Default::default()
     };

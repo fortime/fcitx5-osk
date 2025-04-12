@@ -33,7 +33,7 @@ pub struct Movable<'a, Message, MoveCb, Theme = iced::Theme, Renderer = iced::Re
     on_move_end: Option<Message>,
 }
 
-impl<'a, Message, MoveCb, Theme, Renderer> Movable<'a, Message, MoveCb, Theme, Renderer> {
+impl<Message, MoveCb, Theme, Renderer> Movable<'_, Message, MoveCb, Theme, Renderer> {
     pub fn on_move_start(mut self, message: Message) -> Self {
         self.on_move_start = Some(message);
         self
@@ -66,8 +66,8 @@ where
     }
 }
 
-impl<'a, Message, MoveCb, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for Movable<'a, Message, MoveCb, Theme, Renderer>
+impl<Message, MoveCb, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Movable<'_, Message, MoveCb, Theme, Renderer>
 where
     Message: Clone,
     Renderer: renderer::Renderer,

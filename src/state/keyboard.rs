@@ -149,7 +149,7 @@ impl KeyboardState {
         self.font = key_area_layout
             .font()
             .as_ref()
-            .map(|n| font::load(&n))
+            .map(|n| font::load(n))
             .unwrap_or_default();
     }
 
@@ -263,7 +263,7 @@ impl KeyboardState {
                 .align_y(Vertical::Center)
                 .font(self.font)
                 .size(self.primary_text_size_u * unit),
-            holding_key_state.key_widget_event.finger.clone(),
+            holding_key_state.key_widget_event.finger,
         )
         .width(self.popup_key_width_u * unit)
         .height(self.popup_key_height_u * unit)
@@ -292,7 +292,7 @@ impl KeyboardState {
         if let Some(key_state) = self.pressed_keys.get_mut(&common.key_name) {
             let key_value = common.key_value;
             if is_select {
-                key_state.selected_key_value = key_value.clone();
+                key_state.selected_key_value = key_value;
                 holding_key_state.flags.push(key_value);
             } else {
                 let mut start = 0;
@@ -399,7 +399,7 @@ impl KeyboardState {
                         };
                     s.process_key_event(
                         keyval,
-                        keycode.abs() as u32,
+                        keycode.unsigned_abs() as u32,
                         modifiers,
                         false,
                         (pressed_time / 1000) as u32,
@@ -421,7 +421,7 @@ impl KeyboardState {
         let modifier_state = to_modifier_state(common.key_value);
         match modifier_state {
             s @ ModifierState::CapsLock => self.modifiers ^= s as u32,
-            s @ _ => self.modifiers &= !(s as u32),
+            s => self.modifiers &= !(s as u32),
         };
 
         if let Some(key_state) = self.pressed_keys.remove(&common.key_name) {
@@ -622,7 +622,7 @@ impl KeyManager for KeyboardState {
         let bounds = &holding_key_state.key_widget_event.bounds;
         let mut left_x = bounds.x as u16;
         if left_x + popup_key_area_width > width {
-            left_x = width.checked_sub(popup_key_area_width).unwrap_or(0);
+            left_x = width.saturating_sub(popup_key_area_width);
         }
         let mut top_y = bounds.y as u16;
         if top_y > self.popup_key_height_u * unit + MARGIN_U * unit {
@@ -739,7 +739,7 @@ async fn on_key_release(
         (keyval, 0, modifiers)
     };
     let send_shift = keycode < 0;
-    let keycode = keycode.abs() as u32;
+    let keycode = keycode.unsigned_abs() as u32;
     let pressed_time = (pressed_time / 1000) as u32;
     let released_time = (released_time / 1000) as u32;
     let pressed_event_sent =

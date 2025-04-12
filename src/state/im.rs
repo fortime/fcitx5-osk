@@ -133,7 +133,7 @@ impl ImState {
     fn sync_input_methods_and_current_im(&self) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_controller_service(),
-            format!("get input method group info and current im failed"),
+            "get input method group info and current im failed".to_string(),
             |s| async move {
                 // if we fetch input methods and current input method in two message, in some cases, we will update current input method first. And it will fail because there is no input methods. So we put them in a call.
                 let group_info = s.full_input_method_group_info("").await?;
@@ -152,7 +152,7 @@ impl ImState {
     fn sync_current_input_method(&self) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_controller_service(),
-            format!("get current input method failed"),
+            "get current input method failed".to_string(),
             |s| async move {
                 let input_method = s.current_input_method().await?;
                 Ok(ImEvent::UpdateCurrentIm(input_method).into())
@@ -163,7 +163,7 @@ impl ImState {
     fn select_im(&self, im: String) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_controller_service(),
-            format!("select im failed"),
+            "select im failed".to_string(),
             |s| async move {
                 s.set_current_im(&im).await?;
                 Ok(Message::Nothing)
@@ -185,7 +185,7 @@ impl ImState {
     fn prev_page(&self, page_index: i32) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_virtual_keyboard_backend_service(),
-            format!("prev page failed"),
+            "prev page failed".to_string(),
             |s| async move {
                 s.prev_page(page_index).await?;
                 Ok(Message::Nothing)
@@ -196,7 +196,7 @@ impl ImState {
     fn next_page(&self, page_index: i32) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_virtual_keyboard_backend_service(),
-            format!("next page failed"),
+            "next page failed".to_string(),
             |s| async move {
                 s.next_page(page_index).await?;
                 Ok(Message::Nothing)

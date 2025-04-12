@@ -47,12 +47,10 @@ impl<'de> Deserialize<'de> for KeyValue {
         let raw: RawKeyValue = Deserialize::deserialize(deserializer)?;
         let keysym = if let Some(ks) = raw.keysym {
             Keysym::from(ks)
+        } else if let Some(c) = raw.character {
+            Keysym::from_char(c)
         } else {
-            if let Some(c) = raw.character {
-                Keysym::from_char(c)
-            } else {
-                return Err(Error::missing_field(&"ks or c"));
-            }
+            return Err(Error::missing_field("ks or c"));
         };
         let symbol = if let Some(symbol) = raw.symbol {
             symbol
@@ -121,7 +119,7 @@ impl Key {
 
     pub fn key_value(&self, shift: bool, caps_lock: bool) -> ThinKeyValue {
         let key_value = if Self::is_shifted(shift, caps_lock) {
-            self.raw.secondaries.get(0).unwrap_or(&self.raw.primary)
+            self.raw.secondaries.first().unwrap_or(&self.raw.primary)
         } else {
             &self.raw.primary
         };
@@ -172,7 +170,7 @@ impl<'de> Deserialize<'de> for Key {
             .join(" ");
         let shifted_primary_text = raw
             .secondaries
-            .get(0)
+            .first()
             .map(|k| k.symbol().to_string())
             .unwrap_or_else(|| primary_text.clone());
         let shifted_secondary_text = if raw.secondaries.is_empty() {

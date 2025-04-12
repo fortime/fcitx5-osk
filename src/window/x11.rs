@@ -165,7 +165,7 @@ impl WindowManager for X11WindowManager {
                 let size = Size::new(position.x * 2., position.y * 2.);
                 iced_window::get_scale_factor(id)
                     .map(move |scale_factor| {
-                        Message::from(WindowManagerEvent::ScreenInfo(size, scale_factor)).into()
+                        Message::from(WindowManagerEvent::ScreenInfo(size, scale_factor))
                     })
                     .chain(iced_window::close(id))
             })

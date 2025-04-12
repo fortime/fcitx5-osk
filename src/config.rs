@@ -129,12 +129,7 @@ impl ConfigManager {
         };
         let path = path.clone();
         let bg = async move {
-            loop {
-                let mut latest = if let Some(c) = rx.next().await {
-                    c
-                } else {
-                    break;
-                };
+            while let Some(mut latest) = rx.next().await {
                 let closed = loop {
                     match rx.try_next() {
                         Ok(Some(c)) => latest = c,
@@ -166,7 +161,7 @@ impl ConfigManager {
                 return false;
             }
         };
-        if let Err(_) = self.writer.unbounded_send(content) {
+        if self.writer.unbounded_send(content).is_err() {
             tracing::warn!("failed to write config, channel is closed");
             false
         } else {

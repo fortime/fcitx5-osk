@@ -102,7 +102,6 @@ impl WaylandWindowManager {
                     keyboard_interactivity: KeyboardInteractivity::None,
                     use_last_output: !internal,
                     events_transparent: internal,
-                    ..Default::default()
                 },
                 id,
             }),
@@ -197,16 +196,14 @@ impl WindowManager for WaylandWindowManager {
             });
             if let Some(margin) = self.margin(settings) {
                 task = task.chain(self.set_margin(id, margin));
-            } else {
-                if old_size.map(|s| s.height) != Some(size.height)
-                    && settings.placement == Placement::Dock
-                {
-                    tracing::debug!("changing exclusive zone to: {}", size.height);
-                    task = task.chain(Task::done(Self::Message::ExclusiveZoneChange {
-                        id,
-                        zone_size: size.height as i32,
-                    }));
-                }
+            } else if old_size.map(|s| s.height) != Some(size.height)
+                && settings.placement == Placement::Dock
+            {
+                tracing::debug!("changing exclusive zone to: {}", size.height);
+                task = task.chain(Task::done(Self::Message::ExclusiveZoneChange {
+                    id,
+                    zone_size: size.height as i32,
+                }));
             }
             return task;
         }

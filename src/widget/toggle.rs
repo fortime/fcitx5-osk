@@ -60,7 +60,7 @@ pub struct Toggle<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     on_toggle: Option<Message>,
 }
 
-impl<'a, Message, Theme, Renderer> Toggle<'a, Message, Theme, Renderer> {
+impl<Message, Theme, Renderer> Toggle<'_, Message, Theme, Renderer> {
     pub fn on_toggle(mut self, on_toggle: Message) -> Self {
         self.on_toggle = Some(on_toggle);
         self
@@ -85,8 +85,8 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for Toggle<'a, Message, Theme, Renderer>
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Toggle<'_, Message, Theme, Renderer>
 where
     Message: Clone,
     Renderer: renderer::Renderer,
@@ -146,9 +146,9 @@ where
         viewport: &Rectangle,
     ) -> Status {
         let mut status = Status::Ignored;
-        loop {
+        'out: {
             let Some(on_toggle) = &self.on_toggle else {
-                break;
+                break 'out;
             };
 
             let state: &mut ToggleState = tree.state.downcast_mut();
@@ -179,17 +179,18 @@ where
                 }
                 ToggleCondition::DoubleDown => Duration::from_millis(10),
             };
-            if let Some(_) = state
+            if state
                 .last
                 .take_if(|last| now.duration_since(*last) > duration)
+                .is_some()
             {
                 shell.publish(on_toggle.clone());
                 state.toggled = true;
-                break;
+                break 'out;
             }
 
             let Some((pressed, pointer, position)) = params else {
-                break;
+                break 'out;
             };
 
             if pressed {
@@ -197,17 +198,15 @@ where
                     .map(|p| layout.bounds().contains(p))
                     .unwrap_or(false)
                 {
-                    break;
+                    break 'out;
                 }
 
                 state.pointers.insert(pointer);
-            } else {
-                if state.pointers.remove(&pointer) {
-                    state.toggled = !state.pointers.is_empty();
-                    if state.toggled {
-                        // Don't sent release event to children.
-                        status = Status::Captured;
-                    }
+            } else if state.pointers.remove(&pointer) {
+                state.toggled = !state.pointers.is_empty();
+                if state.toggled {
+                    // Don't sent release event to children.
+                    status = Status::Captured;
                 }
             }
             let expected_pointer_num = match state.condition {
@@ -225,7 +224,6 @@ where
             } else if pointer_num != expected_pointer_num {
                 state.last = None;
             }
-            break;
         }
 
         if status == Status::Ignored {

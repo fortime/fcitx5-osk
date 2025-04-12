@@ -109,7 +109,7 @@ impl ErrorDialogContent for &KeyboardError {
     }
 }
 
-impl<'a> ErrorDialogContent for &'a str {
+impl ErrorDialogContent for &str {
     fn err_msg(&self) -> String {
         self.to_string()
     }
@@ -281,7 +281,7 @@ where
                     let tx = tx.clone();
                     tokio::spawn(async move {
                         while !tx.is_closed() {
-                            if let Err(_) = tx.unbounded_send(ThemeEvent::Detect.into()) {
+                            if tx.unbounded_send(ThemeEvent::Detect.into()).is_err() {
                                 tracing::warn!(
                                     "failed to send ThemeEvent::Check message, close the task"
                                 );

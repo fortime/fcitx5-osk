@@ -140,11 +140,7 @@ impl KeyAreaLayout {
         (self.width_u() * unit, self.height_u() * unit)
     }
 
-    pub fn to_element<'a, 'b, KM>(
-        &'a self,
-        unit: u16,
-        manager: &'b KM,
-    ) -> impl Into<Element<'b, Message>>
+    pub fn to_element<'b, KM>(&self, unit: u16, manager: &'b KM) -> impl Into<Element<'b, Message>>
     where
         KM: KeyManager,
     {
@@ -237,11 +233,7 @@ impl KeyRow {
         self.height_u
     }
 
-    fn to_element<'a, 'b, KM>(
-        &'a self,
-        unit: u16,
-        manager: &'b KM,
-    ) -> impl Into<Element<'b, Message>>
+    fn to_element<'b, KM>(&self, unit: u16, manager: &'b KM) -> impl Into<Element<'b, Message>>
     where
         KM: KeyManager,
     {
@@ -277,8 +269,8 @@ impl KeyRowElement {
         }
     }
 
-    fn to_element<'a, 'b, KM>(
-        &'a self,
+    fn to_element<'b, KM>(
+        &self,
         max_height_u: u16,
         unit: u16,
         manager: &'b KM,
@@ -307,9 +299,7 @@ impl KeyRowElement {
                     width_u * unit,
                     height_u * unit
                 );
-                manager
-                    .key(name.clone(), unit, (width_u * unit, height_u * unit))
-                    .into()
+                manager.key(name.clone(), unit, (width_u * unit, height_u * unit))
             }
         }
     }
@@ -453,7 +443,7 @@ impl ToolbarLayout {
         // as least 1
         for candidate in &candidate_list[..consumed.max(1)] {
             candidate_row = candidate_row.push(
-                candidate_btn(&candidate, font, font_size, max_width)
+                candidate_btn(candidate, font, font_size, max_width)
                     .on_press(ImEvent::SelectCandidate(index).into()),
             );
             index += 1;

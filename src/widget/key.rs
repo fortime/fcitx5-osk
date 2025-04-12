@@ -54,7 +54,7 @@ pub trait AsThemeRef {
 
 impl AsThemeRef for iced::Theme {
     fn as_ref(&self) -> &iced::Theme {
-        &self
+        self
     }
 }
 
@@ -155,8 +155,8 @@ where
     }
 }
 
-impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for Key<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
+impl<Message, PressCb, ReleaseCb, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for Key<'_, Message, PressCb, ReleaseCb, Theme, Renderer>
 where
     Message: Clone,
     PressCb: 'static + Fn(KeyEvent) -> Message,
@@ -366,33 +366,30 @@ where
     };
 
     if pressed {
-        match (
+        if let (false, Some(cb), Some(position)) = (
             state.is_pressed(&finger),
             widget.on_press_with.as_ref(),
             position,
         ) {
-            (false, Some(cb), Some(position)) => {
-                let bounds = layout.bounds();
-                if bounds.contains(position) {
-                    tracing::trace!(
-                        "key[{:?}] is pressed at {:?} by finger {:?}",
+            let bounds = layout.bounds();
+            if bounds.contains(position) {
+                tracing::trace!(
+                    "key[{:?}] is pressed at {:?} by finger {:?}",
+                    bounds,
+                    position,
+                    finger
+                );
+                if !state.has_finger_pressed() {
+                    shell.publish(cb(KeyEvent {
+                        pressed,
+                        cancelled,
+                        finger,
                         bounds,
-                        position,
-                        finger
-                    );
-                    if !state.has_finger_pressed() {
-                        shell.publish(cb(KeyEvent {
-                            pressed,
-                            cancelled,
-                            finger,
-                            bounds,
-                        }));
-                    }
-                    state.finger_pressed(finger);
-                    return Status::Captured;
+                    }));
                 }
+                state.finger_pressed(finger);
+                return Status::Captured;
             }
-            _ => {}
         }
     } else if state.is_pressed(&finger) {
         if let Some(cb) = widget.on_release_with.as_ref() {
@@ -435,7 +432,7 @@ pub struct PopupKey<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
     on_exit: Option<Message>,
 }
 
-impl<'a, Message, Theme, Renderer> PopupKey<'a, Message, Theme, Renderer> {
+impl<Message, Theme, Renderer> PopupKey<'_, Message, Theme, Renderer> {
     /// The message to emit on a enter event.
     #[must_use]
     pub fn on_enter(mut self, message: Message) -> Self {
@@ -489,8 +486,8 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for PopupKey<'a, Message, Theme, Renderer>
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for PopupKey<'_, Message, Theme, Renderer>
 where
     Message: Clone,
     Theme: AsThemeRef,

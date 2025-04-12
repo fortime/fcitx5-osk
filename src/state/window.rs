@@ -239,7 +239,7 @@ where
     }
 
     fn position(&self, portrait: bool) -> Option<Point> {
-        self.id.and_then(|_| {
+        self.id.and({
             if portrait {
                 self.positions.1
             } else {
@@ -261,11 +261,8 @@ where
         if self.id.and_then(|id| wm.placement(id)) == Some(Placement::Dock) {
             return None;
         }
-        if let Some(position) = self.position(portrait) {
-            Some(self.mv(wm, position, portrait))
-        } else {
-            None
-        }
+        self.position(portrait)
+            .map(|position| self.mv(wm, position, portrait))
     }
 }
 
@@ -360,7 +357,7 @@ impl<WM> WindowManagerState<WM> {
             }
             (Ok(old), Err(_)) => {
                 // reset landscape to old layout
-                if let Err(_) = self.landscape_layout.update_scale_factor(old) {
+                if self.landscape_layout.update_scale_factor(old).is_err() {
                     // should't be failed
                     unreachable!("reset landscape to old scale factor failed");
                 }
@@ -368,7 +365,7 @@ impl<WM> WindowManagerState<WM> {
             }
             (Err(_), Ok(old)) => {
                 // reset portrait to old layout
-                if let Err(_) = self.portrait_layout.update_scale_factor(old) {
+                if self.portrait_layout.update_scale_factor(old).is_err() {
                     // should't be failed
                     unreachable!("reset portrait to old scale factor failed");
                 }
@@ -387,7 +384,7 @@ impl<WM> WindowManagerState<WM> {
             (Ok(_), Ok(_)) => true,
             (Ok(old), Err(_)) => {
                 // reset landscape to old layout
-                if let Err(_) = self.landscape_layout.update_key_area_layout(old) {
+                if self.landscape_layout.update_key_area_layout(old).is_err() {
                     // should't be failed
                     unreachable!("reset landscape to old layout failed");
                 }
@@ -395,7 +392,7 @@ impl<WM> WindowManagerState<WM> {
             }
             (Err(_), Ok(old)) => {
                 // reset portrait to old layout
-                if let Err(_) = self.portrait_layout.update_key_area_layout(old) {
+                if self.portrait_layout.update_key_area_layout(old).is_err() {
                     // should't be failed
                     unreachable!("reset portrait to old layout failed");
                 }
@@ -491,8 +488,8 @@ where
         self.window_state(id).map(|s| s.movable()).unwrap_or(false)
     }
 
-    pub fn to_element<'a, 'b, KbdM, KM>(
-        &'a self,
+    pub fn to_element<'b, KbdM, KM>(
+        &self,
         mut params: ToElementCommonParams<'b, KbdM, KM>,
     ) -> Element<'b, Message>
     where
@@ -659,7 +656,7 @@ where
             self.landscape_layout.update_unit(unit)
         };
 
-        if let Ok(_) = res {
+        if res.is_ok() {
             let (event, size) = if portrait {
                 let size = self.portrait_layout.size();
                 (UpdateConfigEvent::PortraitWidth(size.width as u16), size)
@@ -853,8 +850,7 @@ where
 {
     pub fn appearance(&self, theme: &Theme, id: Id) -> WM::Appearance {
         if self.is_keyboard(id) {
-            let appearance = WM::Appearance::default(theme);
-            appearance
+            WM::Appearance::default(theme)
         } else if self.is_indicator(id) {
             let mut appearance = WM::Appearance::default(theme);
             appearance.set_background_color(Color::TRANSPARENT);
@@ -882,7 +878,7 @@ impl<WM> WindowManagerState<WM> {
     fn _fcitx5_toggle(&self) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_virtual_keyboard_service(),
-            format!("send toggle event failed"),
+            "send toggle event failed".to_string(),
             |s| async move {
                 s.toggle_virtual_keyboard().await?;
                 Ok(Message::Nothing)
@@ -893,7 +889,7 @@ impl<WM> WindowManagerState<WM> {
     fn fcitx5_show(&self) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_virtual_keyboard_service(),
-            format!("send show event failed"),
+            "send show event failed".to_string(),
             |s| async move {
                 s.show_virtual_keyboard().await?;
                 Ok(Message::Nothing)
@@ -904,7 +900,7 @@ impl<WM> WindowManagerState<WM> {
     fn fcitx5_hide(&self) -> Task<Message> {
         super::call_fcitx5(
             self.fcitx5_virtual_keyboard_service(),
-            format!("send hide event failed"),
+            "send hide event failed".to_string(),
             |s| async move {
                 s.hide_virtual_keyboard().await?;
                 Ok(Message::Nothing)
