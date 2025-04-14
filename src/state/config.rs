@@ -1,3 +1,4 @@
+use iced::Theme;
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -9,18 +10,30 @@ use crate::{
 use super::WindowManagerEvent;
 
 macro_rules! on_update_event {
-    ($event:ident, $config:expr, $(($variant:tt => $field:tt, $set:tt)),*  $(,)?) => {
+    ($event:ident, $config:expr, $(($variant:tt => $eq:expr, $set:tt)),*  $(,)?) => {
         match $event {
-            $(UpdateConfigEvent::$variant($field) => {
-                if $config.$field().eq(&$field) {
+            $(UpdateConfigEvent::$variant(v) => {
+                if $eq($config, &v) {
                     false
                 } else {
-                    $config.$set($field);
+                    $config.$set(v);
                     true
                 }
             },)*
         }
     }
+}
+
+macro_rules! config_eq {
+    ($field:tt) => {
+        |c: &Config, v| c.$field().eq(v)
+    };
+}
+
+macro_rules! option_config_eq {
+    ($field:tt) => {
+        |c: &Config, v| c.$field().filter(|f| (*f).eq(v)).is_some()
+    };
 }
 
 pub struct StepDesc<T> {
@@ -64,10 +77,31 @@ impl<T> OwnedEnumDesc<T> {
     }
 }
 
+pub struct EnumDesc<T> {
+    cur_value: fn(&dyn KeyboardManager) -> Option<&T>,
+    variants: Vec<T>,
+    on_selected: fn(&dyn KeyboardManager, T) -> Message,
+}
+
+impl<T> EnumDesc<T> {
+    pub fn cur_value<'a>(&self, km: &'a dyn KeyboardManager) -> Option<&'a T> {
+        (self.cur_value)(km)
+    }
+
+    pub fn variants(&self) -> &[T] {
+        &self.variants
+    }
+
+    pub fn on_selected(&self, km: &dyn KeyboardManager, selected: T) -> Message {
+        (self.on_selected)(km, selected)
+    }
+}
+
 pub enum FieldType {
     StepU16(StepDesc<u16>),
     OwnedEnumPlacement(OwnedEnumDesc<Placement>),
     OwnedEnumIndicatorDisplay(OwnedEnumDesc<IndicatorDisplay>),
+    EnumString(EnumDesc<String>),
 }
 
 impl From<StepDesc<u16>> for FieldType {
@@ -85,6 +119,12 @@ impl From<OwnedEnumDesc<Placement>> for FieldType {
 impl From<OwnedEnumDesc<IndicatorDisplay>> for FieldType {
     fn from(value: OwnedEnumDesc<IndicatorDisplay>) -> Self {
         Self::OwnedEnumIndicatorDisplay(value)
+    }
+}
+
+impl From<EnumDesc<String>> for FieldType {
+    fn from(value: EnumDesc<String>) -> Self {
+        Self::EnumString(value)
     }
 }
 
@@ -116,6 +156,10 @@ pub struct ConfigState {
 
 impl ConfigState {
     pub fn new(config_manager: ConfigManager) -> Self {
+        let themes = Theme::ALL
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
         Self {
             config_manager,
             updatable_fields: vec![
@@ -170,6 +214,26 @@ impl ConfigState {
                     }
                     .into(),
                 },
+                Field {
+                    name: "Dark Theme",
+                    id: "dark_theme",
+                    typ: EnumDesc::<String> {
+                        cur_value: |km: &dyn KeyboardManager| km.config().dark_theme(),
+                        variants: themes.clone(),
+                        on_selected: |_, d| Message::from(UpdateConfigEvent::DarkTheme(d)),
+                    }
+                    .into(),
+                },
+                Field {
+                    name: "Light Theme",
+                    id: "light_theme",
+                    typ: EnumDesc::<String> {
+                        cur_value: |km: &dyn KeyboardManager| km.config().light_theme(),
+                        variants: themes,
+                        on_selected: |_, d| Message::from(UpdateConfigEvent::LightTheme(d)),
+                    }
+                    .into(),
+                },
             ],
         }
     }
@@ -191,11 +255,13 @@ impl ConfigState {
         let updated = on_update_event!(
             event,
             config,
-            (LandscapeWidth => landscape_width, set_landscape_width),
-            (PortraitWidth => portrait_width, set_portrait_width),
-            (Placement => placement, set_placement),
-            (IndicatorDisplay => indicator_display, set_indicator_display),
-            (Theme => theme, set_theme)
+            (LandscapeWidth => config_eq!(landscape_width), set_landscape_width),
+            (PortraitWidth => config_eq!(portrait_width), set_portrait_width),
+            (Placement => config_eq!(placement), set_placement),
+            (IndicatorDisplay => config_eq!(indicator_display), set_indicator_display),
+            (Theme => config_eq!(theme), set_theme),
+            (DarkTheme => option_config_eq!(dark_theme), set_dark_theme),
+            (LightTheme => option_config_eq!(light_theme), set_light_theme),
         );
         if updated {
             self.config_manager.try_write();
@@ -211,6 +277,8 @@ pub enum UpdateConfigEvent {
     Placement(Placement),
     IndicatorDisplay(IndicatorDisplay),
     Theme(String),
+    DarkTheme(String),
+    LightTheme(String),
 }
 
 impl From<UpdateConfigEvent> for Message {

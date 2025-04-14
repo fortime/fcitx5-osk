@@ -79,12 +79,20 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn dark_theme(&self) -> Option<&str> {
-        self.dark_theme.as_deref()
+    pub fn dark_theme(&self) -> Option<&String> {
+        self.dark_theme.as_ref()
     }
 
-    pub fn light_theme(&self) -> Option<&str> {
-        self.light_theme.as_deref()
+    pub fn set_dark_theme(&mut self, theme: String) {
+        self.dark_theme = Some(theme);
+    }
+
+    pub fn light_theme(&self) -> Option<&String> {
+        self.light_theme.as_ref()
+    }
+
+    pub fn set_light_theme(&mut self, theme: String) {
+        self.light_theme = Some(theme);
     }
 }
 

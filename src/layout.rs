@@ -27,7 +27,8 @@ use crate::{
     app::Message,
     config::Config,
     state::{
-        CandidateAreaState, Field, FieldType, ImEvent, LayoutEvent, UpdateConfigEvent, WindowEvent,
+        CandidateAreaState, EnumDesc, Field, FieldType, ImEvent, LayoutEvent, OwnedEnumDesc,
+        StepDesc, UpdateConfigEvent, WindowEvent,
     },
     store::IdAndConfigPath,
     widget::{Movable, Toggle, ToggleCondition},
@@ -667,6 +668,72 @@ pub struct ToElementCommonParams<'a, KbdM, KM> {
     pub movable: bool,
 }
 
+trait ToElementFieldType {
+    fn to_element<'a>(
+        &'a self,
+        km: &'a dyn KeyboardManager,
+        text_size: u16,
+    ) -> Element<'a, Message>;
+}
+
+impl<T> ToElementFieldType for EnumDesc<T>
+where
+    T: ToString + PartialEq + Clone,
+{
+    fn to_element<'a>(
+        &'a self,
+        km: &'a dyn KeyboardManager,
+        text_size: u16,
+    ) -> Element<'a, Message> {
+        PickList::new(self.variants(), self.cur_value(km), |selected| {
+            self.on_selected(km, selected)
+        })
+        .text_size(text_size)
+        .into()
+    }
+}
+
+impl<T> ToElementFieldType for OwnedEnumDesc<T>
+where
+    T: ToString + PartialEq + Clone,
+{
+    fn to_element<'a>(
+        &'a self,
+        km: &'a dyn KeyboardManager,
+        text_size: u16,
+    ) -> Element<'a, Message> {
+        PickList::new(self.variants(), self.cur_value(km), |selected| {
+            self.on_selected(km, selected)
+        })
+        .text_size(text_size)
+        .into()
+    }
+}
+
+impl<T> ToElementFieldType for StepDesc<T>
+where
+    T: ToString,
+{
+    fn to_element<'a>(
+        &'a self,
+        km: &'a dyn KeyboardManager,
+        text_size: u16,
+    ) -> Element<'a, Message> {
+        let cur_value = self.cur_value(km);
+        Row::new()
+            .align_y(Vertical::Center)
+            .spacing(text_size)
+            .push(
+                Button::new(Text::new("-").size(text_size)).on_press_with(|| self.on_decreased(km)),
+            )
+            .push(Text::new(cur_value.to_string()).size(text_size))
+            .push(
+                Button::new(Text::new("+").size(text_size)).on_press_with(|| self.on_increased(km)),
+            )
+            .into()
+    }
+}
+
 fn fa_btn<Message>(
     name: &str,
     icon_font: IconFont,
@@ -713,35 +780,9 @@ fn field_value_element<'a>(
     text_size: u16,
 ) -> Element<'a, Message> {
     match field.typ() {
-        FieldType::StepU16(step_desc) => {
-            let cur_value = step_desc.cur_value(km);
-            Row::new()
-                .align_y(Vertical::Center)
-                .spacing(text_size)
-                .push(
-                    Button::new(Text::new("-").size(text_size))
-                        .on_press_with(|| step_desc.on_decreased(km)),
-                )
-                .push(Text::new(cur_value.to_string()).size(text_size))
-                .push(
-                    Button::new(Text::new("+").size(text_size))
-                        .on_press_with(|| step_desc.on_increased(km)),
-                )
-                .into()
-        }
-        FieldType::OwnedEnumPlacement(enum_desc) => {
-            PickList::new(enum_desc.variants(), enum_desc.cur_value(km), |selected| {
-                enum_desc.on_selected(km, selected)
-            })
-            .text_size(text_size)
-            .into()
-        }
-        FieldType::OwnedEnumIndicatorDisplay(enum_desc) => {
-            PickList::new(enum_desc.variants(), enum_desc.cur_value(km), |selected| {
-                enum_desc.on_selected(km, selected)
-            })
-            .text_size(text_size)
-            .into()
-        }
+        FieldType::StepU16(step_desc) => step_desc.to_element(km, text_size),
+        FieldType::OwnedEnumPlacement(enum_desc) => enum_desc.to_element(km, text_size),
+        FieldType::OwnedEnumIndicatorDisplay(enum_desc) => enum_desc.to_element(km, text_size),
+        FieldType::EnumString(enum_desc) => enum_desc.to_element(km, text_size),
     }
 }

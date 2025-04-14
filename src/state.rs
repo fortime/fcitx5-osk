@@ -21,7 +21,9 @@ mod keyboard;
 mod layout;
 mod window;
 
-pub use config::{ConfigState, Field, FieldType, UpdateConfigEvent};
+pub use config::{
+    ConfigState, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc, UpdateConfigEvent,
+};
 pub use im::{CandidateAreaState, ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
 pub use layout::{LayoutEvent, LayoutState};
