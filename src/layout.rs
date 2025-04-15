@@ -734,15 +734,19 @@ where
     }
 }
 
-fn fa_btn<Message>(
-    name: &str,
+fn fa_btn<'a, Message: 'a>(
+    name: &'a str,
     icon_font: IconFont,
     font_size: u16,
     color: Color,
-) -> Button<Message> {
-    Button::new(FaIcon::new(name, icon_font).size(font_size).color(color))
-        .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
-        .padding(0)
+) -> Button<'a, Message> {
+    Button::new(
+        Container::new(FaIcon::new(name, icon_font).size(font_size).color(color))
+            .height(Length::Fill)
+            .align_y(Vertical::Center),
+    )
+    .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
+    .padding(0)
 }
 
 fn candidate_btn<Message>(
