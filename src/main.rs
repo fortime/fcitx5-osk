@@ -12,16 +12,11 @@ use std::{
 };
 
 use anyhow::Result;
-use app::{Keyboard, Message};
 use clap::Parser;
 use config::{Config, ConfigManager};
-use iced::Task;
 use tokio::signal::unix::{signal, Signal, SignalKind};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use window::{
-    wayland,
-    x11::{self, X11WindowManager},
-};
+use window::{wayland, x11};
 
 mod app;
 mod config;
@@ -145,23 +140,12 @@ fn run(args: Args) -> Result<()> {
             shutdown_flag,
         )?;
     } else if x11::is_available() {
-        let keyboard = Keyboard::<X11WindowManager>::new(config_manager, shutdown_flag)?;
-
-        iced::daemon(clap::crate_name!(), Keyboard::update, Keyboard::view)
-            .theme(Keyboard::theme)
-            .subscription(Keyboard::subscription)
-            .theme(Keyboard::theme)
-            .run_with(move || {
-                (
-                    keyboard,
-                    // calculate size
-                    Task::future(async move {
-                        tokio::spawn(signal_handle);
-                        tokio::spawn(config_write_bg);
-                        Message::Nothing
-                    }),
-                )
-            })?;
+        app::x11::start(
+            config_manager,
+            config_write_bg,
+            signal_handle,
+            shutdown_flag,
+        )?;
     } else {
         anyhow::bail!("No Wayland or X11 Environment");
     }
