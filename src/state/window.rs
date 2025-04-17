@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, rc::Rc, time::Duration};
+use std::{marker::PhantomData, mem, rc::Rc, time::Duration};
 
 use anyhow::Result;
 use iced::{window::Id, Color, Element, Font, Point, Size, Task, Theme};
@@ -287,14 +287,23 @@ enum ToBeOpened {
     Indicator,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Normal,
+    ExternalDock,
+}
+
 pub struct WindowManagerState<WM> {
     scale_factor: f32,
     landscape_layout: LayoutState,
     portrait_layout: LayoutState,
     keyboard_window_state: WindowState<WM>,
     indicator_window_state: WindowState<WM>,
+    mode: Mode,
+    /// a value sync with config file
     placement: Placement,
     indicator_width: u16,
+    /// a value sync with config file
     indicator_display: IndicatorDisplay,
     to_be_opened: Option<ToBeOpened>,
     fcitx5_services: Option<Fcitx5Services>,
@@ -312,6 +321,7 @@ where
             portrait_layout: LayoutState::new(config.portrait_width(), key_area_layout.clone())?,
             keyboard_window_state: Default::default(),
             indicator_window_state: Default::default(),
+            mode: Mode::Normal,
             placement: config.placement(),
             indicator_width: config.indicator_width(),
             indicator_display: config.indicator_display(),
@@ -405,6 +415,20 @@ impl<WM> WindowManagerState<WM> {
     pub fn update_candidate_font(&mut self, font: Font) {
         self.landscape_layout.update_candidate_font(font);
         self.portrait_layout.update_candidate_font(font);
+    }
+
+    pub fn placement(&self) -> Placement {
+        match self.mode {
+            Mode::Normal => self.placement,
+            Mode::ExternalDock => Placement::Dock,
+        }
+    }
+
+    pub fn indicator_display(&self) -> IndicatorDisplay {
+        match self.mode {
+            Mode::Normal => self.indicator_display,
+            Mode::ExternalDock => IndicatorDisplay::AlwaysOff,
+        }
     }
 }
 
@@ -550,7 +574,7 @@ where
     }
 
     pub fn open_indicator(&mut self) -> Task<WM::Message> {
-        match self.indicator_display {
+        match self.indicator_display() {
             IndicatorDisplay::Auto | IndicatorDisplay::AlwaysOn => {
                 if self.indicator_window_state.id().is_none() {
                     self.to_be_opened = Some(ToBeOpened::Indicator);
@@ -591,8 +615,8 @@ where
                 .map_task(),
             CloseOpSource::UserAction => {
                 let mut task = self.keyboard_window_state.close(&mut self.wm, source);
-                if (IndicatorDisplay::Auto == self.indicator_display
-                    || IndicatorDisplay::AlwaysOn == self.indicator_display)
+                if (self.indicator_display() == IndicatorDisplay::Auto
+                    || self.indicator_display() == IndicatorDisplay::AlwaysOn)
                     && self.indicator_window_state.id().is_none()
                 {
                     task = self.open_indicator().chain(task);
@@ -602,14 +626,32 @@ where
         }
     }
 
-    fn update_placement(&mut self, placement: Placement) -> Task<WM::Message> {
-        if placement == self.placement {
+    fn update_mode(&mut self, mut mode: Mode) -> Task<WM::Message> {
+        if self.mode == mode {
             return Message::from_nothing();
         }
-        self.placement = placement;
-        if self.keyboard_window_state.id().is_some() {
-            Task::done(Message::from(UpdateConfigEvent::Placement(placement)).into())
-                .chain(self.reopen_keyboard())
+        mem::swap(&mut self.mode, &mut mode);
+        match self.mode {
+            Mode::Normal => {
+                let mut task = self.reset_indicator();
+                if self.keyboard_window_state.id().is_some() {
+                    task = task.chain(self.reopen_keyboard());
+                }
+                task
+            }
+            Mode::ExternalDock => self.open_keyboard().chain(self.close_indicator()),
+        }
+    }
+
+    fn update_placement(&mut self, placement: Placement) -> Task<WM::Message> {
+        if self.placement != placement {
+            let mut task =
+                Task::done(Message::from(UpdateConfigEvent::Placement(placement)).into());
+            self.placement = placement;
+            if self.keyboard_window_state.id().is_some() {
+                task = task.chain(self.reopen_keyboard())
+            }
+            task
         } else {
             Message::from_nothing()
         }
@@ -619,29 +661,35 @@ where
         &mut self,
         indicator_display: IndicatorDisplay,
     ) -> Task<WM::Message> {
-        if indicator_display == self.indicator_display {
-            return Message::from_nothing();
+        if self.indicator_display != indicator_display {
+            let task = Task::done(
+                Message::from(UpdateConfigEvent::IndicatorDisplay(indicator_display)).into(),
+            );
+            self.indicator_display = indicator_display;
+            task.chain(self.reset_indicator())
+        } else {
+            Message::from_nothing()
         }
-        self.indicator_display = indicator_display;
-        let mut task = Task::done(
-            Message::from(UpdateConfigEvent::IndicatorDisplay(indicator_display)).into(),
-        );
-        match self.indicator_display {
+    }
+
+    fn reset_indicator(&mut self) -> Task<WM::Message> {
+        let mut task = Message::from_nothing();
+        match self.indicator_display() {
             IndicatorDisplay::Auto => {
                 if self.keyboard_window_state.id.is_none() {
-                    task = task.chain(self.open_indicator());
+                    task = self.open_indicator();
                 } else {
-                    task = task.chain(self.close_indicator());
+                    task = self.close_indicator();
                 }
             }
             IndicatorDisplay::AlwaysOn => {
                 if self.indicator_window_state.id.is_none() {
-                    task = task.chain(self.open_indicator());
+                    task = self.open_indicator();
                 }
             }
             IndicatorDisplay::AlwaysOff => {
                 if self.indicator_window_state.id.is_some() {
-                    task = task.chain(self.close_indicator());
+                    task = self.close_indicator();
                 }
             }
         }
@@ -689,16 +737,16 @@ where
                     self.keyboard_window_state
                         .set_opened(&mut self.wm, portrait);
                     task = task.chain(self.fcitx5_show().map_task());
-                    if IndicatorDisplay::Auto == self.indicator_display {
+                    if self.indicator_display() == IndicatorDisplay::Auto {
                         task = task.chain(self.close_indicator());
                     }
-                    if self.placement == Placement::Dock {
+                    if self.placement() == Placement::Dock {
                         task = task.chain(self.wm.fetch_screen_info());
                     }
                 } else if self.is_indicator(id) {
                     self.indicator_window_state
                         .set_opened(&mut self.wm, portrait);
-                    if IndicatorDisplay::Auto == self.indicator_display {
+                    if self.indicator_display() == IndicatorDisplay::Auto {
                         task = task.chain(self.close_keyboard(CloseOpSource::UserAction));
                     }
                 }
@@ -707,8 +755,8 @@ where
             WindowEvent::ClosingWindow(id, snapshot, source) => {
                 let mut task = Message::from_nothing();
                 let window_state = if self.is_keyboard(id) {
-                    if (IndicatorDisplay::Auto == self.indicator_display
-                        || IndicatorDisplay::AlwaysOn == self.indicator_display)
+                    if (self.indicator_display() == IndicatorDisplay::Auto
+                        || self.indicator_display() == IndicatorDisplay::AlwaysOn)
                         && self.indicator_window_state.id().is_none()
                     {
                         task = self.open_indicator();
@@ -789,9 +837,9 @@ where
                         } else {
                             self.landscape_layout.size()
                         };
-                        let mut window_settings = WindowSettings::new(Some(size), self.placement);
+                        let mut window_settings = WindowSettings::new(Some(size), self.placement());
                         // set default float position.
-                        if self.placement == Placement::Float {
+                        if self.placement() == Placement::Float {
                             window_settings = window_settings.set_position(
                                 (
                                     (screen_size.width - size.width) / 2.,
@@ -840,6 +888,7 @@ where
             WindowManagerEvent::OpenKeyboard => self.open_keyboard(),
             WindowManagerEvent::CloseKeyboard(source) => self.close_keyboard(source),
             WindowManagerEvent::OpenIndicator => self.open_indicator(),
+            WindowManagerEvent::UpdateMode(mode) => self.update_mode(mode),
             WindowManagerEvent::UpdatePlacement(placement) => self.update_placement(placement),
             WindowManagerEvent::UpdateIndicatorDisplay(indicator_display) => {
                 self.update_indicator_display(indicator_display)
@@ -922,6 +971,7 @@ pub enum WindowManagerEvent {
     CloseKeyboard(CloseOpSource),
     OpenIndicator,
     ScreenInfo(Size, f32),
+    UpdateMode(Mode),
     UpdatePlacement(Placement),
     UpdateIndicatorDisplay(IndicatorDisplay),
     UpdateUnit(u16),
