@@ -539,7 +539,14 @@ where
     pub fn shutdown(&mut self) -> Task<WM::Message> {
         // in fcitx5, calling hideVirtualKeyboardForcibly doesn't set InputMethodMode::PhysicalKeyboard. it causes that if we doesn't press any physical keys fcitx5 will still kept in InputMethodMode::VirtualKeyboard and its icon in tray will be gone.
         // self.fcitx5_hide().chain(iced::exit()).map_task()
-        iced::exit()
+        let mut task = self
+            .keyboard_window_state
+            .close(&mut self.wm, CloseOpSource::UserAction);
+        task = task.chain(
+            self.indicator_window_state
+                .close(&mut self.wm, CloseOpSource::UserAction),
+        );
+        task.chain(iced::exit())
     }
 
     pub fn open_indicator(&mut self) -> Task<WM::Message> {
