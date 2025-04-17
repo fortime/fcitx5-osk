@@ -685,11 +685,20 @@ where
         km: &'a dyn KeyboardManager,
         text_size: u16,
     ) -> Element<'a, Message> {
-        PickList::new(self.variants(), self.cur_value(km), |selected| {
-            self.on_selected(km, selected)
-        })
-        .text_size(text_size)
-        .into()
+        if self.is_enabled(km) {
+            PickList::new(self.variants(), self.cur_value(km), |selected| {
+                self.on_selected(km, selected)
+            })
+            .text_size(text_size)
+            .into()
+        } else {
+            Text::new(
+                self.cur_value(km)
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
+            )
+            .into()
+        }
     }
 }
 
@@ -702,11 +711,21 @@ where
         km: &'a dyn KeyboardManager,
         text_size: u16,
     ) -> Element<'a, Message> {
-        PickList::new(self.variants(), self.cur_value(km), |selected| {
-            self.on_selected(km, selected)
-        })
-        .text_size(text_size)
-        .into()
+        if self.is_enabled(km) {
+            PickList::new(self.variants(), self.cur_value(km), |selected| {
+                self.on_selected(km, selected)
+            })
+            .text_size(text_size)
+            .into()
+        } else {
+            Text::new(
+                self.cur_value(km)
+                    .map(|t| t.to_string())
+                    .unwrap_or_default(),
+            )
+            .size(text_size)
+            .into()
+        }
     }
 }
 
@@ -723,13 +742,9 @@ where
         Row::new()
             .align_y(Vertical::Center)
             .spacing(text_size)
-            .push(
-                Button::new(Text::new("-").size(text_size)).on_press_with(|| self.on_decreased(km)),
-            )
+            .push(Button::new(Text::new("-").size(text_size)).on_press_maybe(self.on_decreased(km)))
             .push(Text::new(cur_value.to_string()).size(text_size))
-            .push(
-                Button::new(Text::new("+").size(text_size)).on_press_with(|| self.on_increased(km)),
-            )
+            .push(Button::new(Text::new("+").size(text_size)).on_press_maybe(self.on_increased(km)))
             .into()
     }
 }

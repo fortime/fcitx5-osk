@@ -39,8 +39,8 @@ macro_rules! option_config_eq {
 pub struct StepDesc<T> {
     cur_value: fn(&dyn KeyboardManager) -> T,
     step: fn(&dyn KeyboardManager) -> T,
-    on_increased: fn(&dyn KeyboardManager, T, T) -> Message,
-    on_decreased: fn(&dyn KeyboardManager, T, T) -> Message,
+    on_increased: fn(&dyn KeyboardManager, T, T) -> Option<Message>,
+    on_decreased: fn(&dyn KeyboardManager, T, T) -> Option<Message>,
 }
 
 impl<T> StepDesc<T> {
@@ -48,11 +48,11 @@ impl<T> StepDesc<T> {
         (self.cur_value)(km)
     }
 
-    pub fn on_increased(&self, km: &dyn KeyboardManager) -> Message {
+    pub fn on_increased(&self, km: &dyn KeyboardManager) -> Option<Message> {
         (self.on_increased)(km, self.cur_value(km), (self.step)(km))
     }
 
-    pub fn on_decreased(&self, km: &dyn KeyboardManager) -> Message {
+    pub fn on_decreased(&self, km: &dyn KeyboardManager) -> Option<Message> {
         (self.on_decreased)(km, self.cur_value(km), (self.step)(km))
     }
 }
@@ -60,6 +60,7 @@ impl<T> StepDesc<T> {
 pub struct OwnedEnumDesc<T> {
     cur_value: fn(&dyn KeyboardManager) -> Option<T>,
     variants: Vec<T>,
+    is_enabled: fn(&dyn KeyboardManager) -> bool,
     on_selected: fn(&dyn KeyboardManager, T) -> Message,
 }
 
@@ -72,6 +73,10 @@ impl<T> OwnedEnumDesc<T> {
         &self.variants
     }
 
+    pub fn is_enabled(&self, km: &dyn KeyboardManager) -> bool {
+        (self.is_enabled)(km)
+    }
+
     pub fn on_selected(&self, km: &dyn KeyboardManager, selected: T) -> Message {
         (self.on_selected)(km, selected)
     }
@@ -80,6 +85,7 @@ impl<T> OwnedEnumDesc<T> {
 pub struct EnumDesc<T> {
     cur_value: fn(&dyn KeyboardManager) -> Option<&T>,
     variants: Vec<T>,
+    is_enabled: fn(&dyn KeyboardManager) -> bool,
     on_selected: fn(&dyn KeyboardManager, T) -> Message,
 }
 
@@ -90,6 +96,10 @@ impl<T> EnumDesc<T> {
 
     pub fn variants(&self) -> &[T] {
         &self.variants
+    }
+
+    pub fn is_enabled(&self, km: &dyn KeyboardManager) -> bool {
+        (self.is_enabled)(km)
     }
 
     pub fn on_selected(&self, km: &dyn KeyboardManager, selected: T) -> Message {
@@ -180,13 +190,17 @@ impl ConfigState {
                             step
                         },
                         on_increased: |_, cur_value, delta| {
-                            Message::from(WindowManagerEvent::UpdateUnit(cur_value + delta))
+                            Some(Message::from(WindowManagerEvent::UpdateUnit(
+                                cur_value + delta,
+                            )))
                         },
                         on_decreased: |_, cur_value, delta| {
                             if cur_value > delta {
-                                Message::from(WindowManagerEvent::UpdateUnit(cur_value - delta))
+                                Some(Message::from(WindowManagerEvent::UpdateUnit(
+                                    cur_value - delta,
+                                )))
                             } else {
-                                Message::Nothing
+                                None
                             }
                         },
                     }
@@ -198,7 +212,10 @@ impl ConfigState {
                     typ: OwnedEnumDesc::<Placement> {
                         cur_value: |km: &dyn KeyboardManager| Some(km.config().placement()),
                         variants: Placement::iter().collect(),
-                        on_selected: |_, p| Message::from(WindowManagerEvent::UpdatePlacement(p)),
+                        is_enabled: |_| true,
+                        on_selected: |_, p| {
+                            Message::from(WindowManagerEvent::UpdatePlacement(p))
+                        },
                     }
                     .into(),
                 },
@@ -208,6 +225,7 @@ impl ConfigState {
                     typ: OwnedEnumDesc::<IndicatorDisplay> {
                         cur_value: |km: &dyn KeyboardManager| Some(km.config().indicator_display()),
                         variants: IndicatorDisplay::iter().collect(),
+                        is_enabled: |_| true,
                         on_selected: |_, d| {
                             Message::from(WindowManagerEvent::UpdateIndicatorDisplay(d))
                         },
@@ -220,6 +238,7 @@ impl ConfigState {
                     typ: EnumDesc::<String> {
                         cur_value: |km: &dyn KeyboardManager| km.config().dark_theme(),
                         variants: themes.clone(),
+                        is_enabled: |_| true,
                         on_selected: |_, d| Message::from(UpdateConfigEvent::DarkTheme(d)),
                     }
                     .into(),
@@ -230,6 +249,7 @@ impl ConfigState {
                     typ: EnumDesc::<String> {
                         cur_value: |km: &dyn KeyboardManager| km.config().light_theme(),
                         variants: themes,
+                        is_enabled: |_| true,
                         on_selected: |_, d| Message::from(UpdateConfigEvent::LightTheme(d)),
                     }
                     .into(),
