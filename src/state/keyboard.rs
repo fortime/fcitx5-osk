@@ -26,7 +26,7 @@ use crate::{
     },
     font,
     key_set::{Key, KeyValue, ThinKeyValue},
-    layout::{KeyAreaLayout, KeyManager},
+    layout::KeyAreaLayout,
     store::Store,
     widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
 };
@@ -323,6 +323,120 @@ impl KeyboardState {
             tracing::warn!("not pressed: {}", common.key_name);
         }
     }
+
+    pub fn key(&self, key_name: Arc<str>, unit: u16, size: (u16, u16)) -> Element<Message> {
+        let (width, height) = size;
+        let (inner_width, inner_height) = (
+            width - TEXT_PADDING_LENGTH * 2,
+            height - TEXT_PADDING_LENGTH * 2,
+        );
+
+        let (content, press_cb, release_cb) = if let Some(key) = self.keys.get(&*key_name) {
+            let is_shift_set = ModifierState::Shift.is_set(self.modifiers);
+            let is_caps_lock_set = ModifierState::CapsLock.is_set(self.modifiers);
+            let secondary_height = inner_height / 4;
+            let primary_height = inner_height - 2 * secondary_height;
+            let mut column: Column<Message> = Column::new();
+            let top = Text::new(key.secondary_text(is_shift_set, is_caps_lock_set));
+            let middle = Text::new(key.primary_text(is_shift_set, is_caps_lock_set));
+            let key_value = key.key_value(is_shift_set, is_caps_lock_set);
+            column = column
+                .push(
+                    top.width(inner_width)
+                        .height(secondary_height)
+                        .font(self.font)
+                        .size((self.secondary_text_size_u * unit) as f32)
+                        .align_y(Vertical::Center)
+                        .align_x(Horizontal::Right),
+                )
+                .push(
+                    middle
+                        .width(inner_width)
+                        .height(primary_height)
+                        .font(self.font)
+                        .size((self.primary_text_size_u * unit) as f32)
+                        .align_y(Vertical::Center)
+                        .align_x(Horizontal::Center),
+                );
+            let id = self.id;
+            let common = KeyEventCommon::new(id, key_name, key_value);
+            (
+                Element::from(column),
+                Some({
+                    let common = common.clone();
+                    move |key_widget_event| {
+                        Message::from(KeyEvent::new(
+                            common.clone(),
+                            KeyEventInner::Pressed(key_widget_event),
+                        ))
+                    }
+                }),
+                Some(move |key_widget_event| {
+                    Message::from(KeyEvent::new(
+                        common.clone(),
+                        KeyEventInner::Released(key_widget_event),
+                    ))
+                }),
+            )
+        } else {
+            tracing::debug!("{key_name} is not found");
+            (Element::from(Text::new("")), None, None)
+        };
+        KeyWidget::new(content)
+            .on_press_with(press_cb)
+            .on_release_with(release_cb)
+            .padding(Padding::new(TEXT_PADDING_LENGTH as f32))
+            .width(width)
+            .height(height)
+            .into()
+    }
+
+    pub fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Message>> {
+        const MARGIN_U: u16 = 2;
+        let (width, height) = size;
+
+        let holding_key_state = self.holding_key_state.as_ref()?;
+
+        let is_shift_set = ModifierState::Shift.is_set(self.modifiers);
+        let is_caps_lock_set = ModifierState::CapsLock.is_set(self.modifiers);
+
+        let key = &holding_key_state.key;
+        let mut row = Row::new();
+        let mut skip = 0;
+        let mut popup_key_area_width = 0;
+        if Key::is_shifted(is_shift_set, is_caps_lock_set) {
+            row = row.push(self.new_popup_key(holding_key_state, key.primary(), unit));
+            skip = 1;
+            popup_key_area_width += self.popup_key_width_u * unit;
+        }
+        for secondary in key.secondaries().iter().skip(skip) {
+            row = row.push(self.new_popup_key(holding_key_state, secondary, unit));
+            popup_key_area_width += self.popup_key_width_u * unit;
+        }
+
+        // calculate position.
+        let bounds = &holding_key_state.key_widget_event.bounds;
+        let mut left_x = bounds.x as u16;
+        if left_x + popup_key_area_width > width {
+            left_x = width.saturating_sub(popup_key_area_width);
+        }
+        let mut top_y = bounds.y as u16;
+        if top_y > self.popup_key_height_u * unit + MARGIN_U * unit {
+            top_y -= self.popup_key_height_u * unit + MARGIN_U * unit;
+        } else {
+            top_y += bounds.height as u16 + MARGIN_U * unit;
+        }
+
+        // calculate padding.
+        let padding = Padding::default().left(left_x as f32).top(top_y as f32);
+        Some(
+            Container::new(row)
+                .padding(padding)
+                .width(width)
+                .height(height)
+                .into(),
+        )
+    }
 }
 
 // call fcitx5
@@ -524,122 +638,6 @@ impl KeyboardState {
         } else {
             Message::nothing()
         }
-    }
-}
-
-impl KeyManager for KeyboardState {
-    fn key(&self, key_name: Arc<str>, unit: u16, size: (u16, u16)) -> Element<Message> {
-        let (width, height) = size;
-        let (inner_width, inner_height) = (
-            width - TEXT_PADDING_LENGTH * 2,
-            height - TEXT_PADDING_LENGTH * 2,
-        );
-
-        let (content, press_cb, release_cb) = if let Some(key) = self.keys.get(&*key_name) {
-            let is_shift_set = ModifierState::Shift.is_set(self.modifiers);
-            let is_caps_lock_set = ModifierState::CapsLock.is_set(self.modifiers);
-            let secondary_height = inner_height / 4;
-            let primary_height = inner_height - 2 * secondary_height;
-            let mut column: Column<Message> = Column::new();
-            let top = Text::new(key.secondary_text(is_shift_set, is_caps_lock_set));
-            let middle = Text::new(key.primary_text(is_shift_set, is_caps_lock_set));
-            let key_value = key.key_value(is_shift_set, is_caps_lock_set);
-            column = column
-                .push(
-                    top.width(inner_width)
-                        .height(secondary_height)
-                        .font(self.font)
-                        .size((self.secondary_text_size_u * unit) as f32)
-                        .align_y(Vertical::Center)
-                        .align_x(Horizontal::Right),
-                )
-                .push(
-                    middle
-                        .width(inner_width)
-                        .height(primary_height)
-                        .font(self.font)
-                        .size((self.primary_text_size_u * unit) as f32)
-                        .align_y(Vertical::Center)
-                        .align_x(Horizontal::Center),
-                );
-            let id = self.id;
-            let common = KeyEventCommon::new(id, key_name, key_value);
-            (
-                Element::from(column),
-                Some({
-                    let common = common.clone();
-                    move |key_widget_event| {
-                        Message::from(KeyEvent::new(
-                            common.clone(),
-                            KeyEventInner::Pressed(key_widget_event),
-                        ))
-                    }
-                }),
-                Some(move |key_widget_event| {
-                    Message::from(KeyEvent::new(
-                        common.clone(),
-                        KeyEventInner::Released(key_widget_event),
-                    ))
-                }),
-            )
-        } else {
-            tracing::debug!("{key_name} is not found");
-            (Element::from(Text::new("")), None, None)
-        };
-        KeyWidget::new(content)
-            .on_press_with(press_cb)
-            .on_release_with(release_cb)
-            .padding(Padding::new(TEXT_PADDING_LENGTH as f32))
-            .width(width)
-            .height(height)
-            .into()
-    }
-
-    fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Message>> {
-        const MARGIN_U: u16 = 2;
-        let (width, height) = size;
-
-        let holding_key_state = self.holding_key_state.as_ref()?;
-
-        let is_shift_set = ModifierState::Shift.is_set(self.modifiers);
-        let is_caps_lock_set = ModifierState::CapsLock.is_set(self.modifiers);
-
-        let key = &holding_key_state.key;
-        let mut row = Row::new();
-        let mut skip = 0;
-        let mut popup_key_area_width = 0;
-        if Key::is_shifted(is_shift_set, is_caps_lock_set) {
-            row = row.push(self.new_popup_key(holding_key_state, key.primary(), unit));
-            skip = 1;
-            popup_key_area_width += self.popup_key_width_u * unit;
-        }
-        for secondary in key.secondaries().iter().skip(skip) {
-            row = row.push(self.new_popup_key(holding_key_state, secondary, unit));
-            popup_key_area_width += self.popup_key_width_u * unit;
-        }
-
-        // calculate position.
-        let bounds = &holding_key_state.key_widget_event.bounds;
-        let mut left_x = bounds.x as u16;
-        if left_x + popup_key_area_width > width {
-            left_x = width.saturating_sub(popup_key_area_width);
-        }
-        let mut top_y = bounds.y as u16;
-        if top_y > self.popup_key_height_u * unit + MARGIN_U * unit {
-            top_y -= self.popup_key_height_u * unit + MARGIN_U * unit;
-        } else {
-            top_y += bounds.height as u16 + MARGIN_U * unit;
-        }
-
-        // calculate padding.
-        let padding = Padding::default().left(left_x as f32).top(top_y as f32);
-        Some(
-            Container::new(row)
-                .padding(padding)
-                .width(width)
-                .height(height)
-                .into(),
-        )
     }
 }
 

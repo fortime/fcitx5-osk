@@ -27,7 +27,7 @@ use crate::{
     dbus::server::Fcitx5VirtualkeyboardImPanelEvent,
     state::{
         CloseOpSource, ImEvent, KeyEvent, KeyboardEvent, LayoutEvent, StartEvent, State,
-        ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
+        StateExtractor, ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     window::{WindowAppearance, WindowManager},
 };

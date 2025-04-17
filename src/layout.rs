@@ -11,7 +11,7 @@ use iced::{
         Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text,
     },
     window::Id,
-    Color, Element, Font, Length, Theme, Vector,
+    Color, Element, Font, Length,
 };
 use iced_font_awesome::{FaIcon, IconFont};
 use serde::{
@@ -25,44 +25,14 @@ use std::{
 
 use crate::{
     app::Message,
-    config::Config,
+    config::IndicatorDisplay,
     state::{
-        CandidateAreaState, EnumDesc, Field, FieldType, ImEvent, LayoutEvent, OwnedEnumDesc,
-        StepDesc, UpdateConfigEvent, WindowEvent,
+        CloseOpSource, EnumDesc, Field, FieldType, ImEvent, LayoutEvent, OwnedEnumDesc,
+        StateExtractor, StepDesc, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     store::IdAndConfigPath,
     widget::{Movable, Toggle, ToggleCondition},
 };
-
-pub trait KeyManager {
-    fn key(&self, key_name: Arc<str>, unit: u16, size: (u16, u16)) -> Element<Message>;
-
-    fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Message>>;
-}
-
-pub trait KeyboardManager {
-    fn available_candidate_width(&self) -> u16;
-
-    fn themes(&self) -> &[String];
-
-    fn selected_theme(&self) -> &String;
-
-    fn ims(&self) -> &[String];
-
-    fn selected_im(&self) -> Option<&String>;
-
-    fn open_indicator(&self) -> Option<Message>;
-
-    fn new_position(&self, id: Id, delta: Vector) -> Option<Message>;
-
-    fn config(&self) -> &Config;
-
-    fn updatable_fields(&self) -> &[Field];
-
-    fn scale_factor(&self) -> f32;
-
-    fn unit(&self) -> u16;
-}
 
 #[derive(Deserialize, CopyGetters, Getters)]
 pub struct KeyAreaLayout {
@@ -141,16 +111,17 @@ impl KeyAreaLayout {
         (self.width_u() * unit, self.height_u() * unit)
     }
 
-    pub fn to_element<'b, KM>(&self, unit: u16, manager: &'b KM) -> impl Into<Element<'b, Message>>
-    where
-        KM: KeyManager,
-    {
+    pub fn to_element<'b>(
+        &self,
+        unit: u16,
+        state: &'b dyn StateExtractor,
+    ) -> impl Into<Element<'b, Message>> {
         let mut col = Column::new()
             .spacing(self.spacing_u * unit)
             .align_x(Horizontal::Center);
 
         for key_row in &self.elements {
-            col = col.push(key_row.to_element(unit, manager));
+            col = col.push(key_row.to_element(unit, state));
         }
 
         col
@@ -234,16 +205,17 @@ impl KeyRow {
         self.height_u
     }
 
-    fn to_element<'b, KM>(&self, unit: u16, manager: &'b KM) -> impl Into<Element<'b, Message>>
-    where
-        KM: KeyManager,
-    {
+    fn to_element<'b>(
+        &self,
+        unit: u16,
+        state: &'b dyn StateExtractor,
+    ) -> impl Into<Element<'b, Message>> {
         let mut row = Row::new()
             .spacing(self.spacing_u * unit)
             .align_y(Vertical::Center)
             .height(self.height_u * unit);
         for element in &self.elements {
-            row = row.push(element.to_element(self.height_u, unit, manager));
+            row = row.push(element.to_element(self.height_u, unit, state));
         }
         row
     }
@@ -270,15 +242,12 @@ impl KeyRowElement {
         }
     }
 
-    fn to_element<'b, KM>(
+    fn to_element<'b>(
         &self,
         max_height_u: u16,
         unit: u16,
-        manager: &'b KM,
-    ) -> Element<'b, Message>
-    where
-        KM: KeyManager,
-    {
+        state: &'b dyn StateExtractor,
+    ) -> Element<'b, Message> {
         match self {
             KeyRowElement::Padding(width_u) => Space::with_width(width_u * unit).into(),
             KeyRowElement::Key {
@@ -300,7 +269,9 @@ impl KeyRowElement {
                     width_u * unit,
                     height_u * unit
                 );
-                manager.key(name.clone(), unit, (width_u * unit, height_u * unit))
+                state
+                    .keyboard()
+                    .key(name.clone(), unit, (width_u * unit, height_u * unit))
             }
         }
     }
@@ -372,42 +343,35 @@ impl ToolbarLayout {
         self.height_u
     }
 
-    pub fn to_element<'a, 'b, KbdM, KM>(
+    pub fn to_element<'a, 'b>(
         &'a self,
-        params: &'a ToElementCommonParams<'b, KbdM, KM>,
+        params: &'a ToElementCommonParams<'b>,
         unit: u16,
         candidate_font: Font,
         font_size_u: u16,
-    ) -> Element<'b, Message>
-    where
-        KbdM: KeyboardManager,
-    {
-        if params.candidate_area_state.has_candidate() {
+    ) -> Element<'b, Message> {
+        if params.state.im().candidate_area_state().has_candidate() {
             self.to_candidate_element(params, unit, candidate_font, font_size_u)
         } else {
             self.to_toolbar_element(params, unit, font_size_u)
         }
     }
 
-    fn to_candidate_element<'a, 'b, KbdM, KM>(
+    fn to_candidate_element<'a, 'b>(
         &'a self,
-        params: &'a ToElementCommonParams<'b, KbdM, KM>,
+        params: &'a ToElementCommonParams<'b>,
         unit: u16,
         font: Font,
         font_size_u: u16,
-    ) -> Element<'b, Message>
-    where
-        KbdM: KeyboardManager,
-    {
-        let theme = params.theme;
-        let keyboard_manager = params.keyboard_manager;
-        let state = params.candidate_area_state;
+    ) -> Element<'b, Message> {
+        let theme = params.state.theme();
+        let state = params.state.im().candidate_area_state();
         let spacing = 2 * unit;
         let font_size = font_size_u * unit;
         let color = theme.extended_palette().background.weak.text;
         let disabled_color = theme.extended_palette().background.weak.color;
 
-        let mut available_candidate_width = keyboard_manager.available_candidate_width();
+        let mut available_candidate_width = params.state.available_candidate_width();
         // minus the size of < and > and their spacing
         available_candidate_width -= 2 * font_size;
         let candidate_list = state.candidate_list();
@@ -427,7 +391,7 @@ impl ToolbarLayout {
             let mut consumed = 0;
             let mut max_width = 0;
             for candidate in candidate_list {
-                // TODO Simply assume one char consumes 2 * font_size. Calculate the width in the
+                // TODO Simply assume one char consumes 1 * font_size. Calculate the width in the
                 // future.
                 let width = candidate.chars().count() as u16;
                 if max_width.max(width) * (consumed + 1) * char_width + consumed * spacing
@@ -510,17 +474,14 @@ impl ToolbarLayout {
             .into()
     }
 
-    fn to_toolbar_element<'a, 'b, KbdM, KM>(
+    fn to_toolbar_element<'a, 'b>(
         &'a self,
-        params: &'a ToElementCommonParams<'b, KbdM, KM>,
+        params: &'a ToElementCommonParams<'b>,
         unit: u16,
         font_size_u: u16,
-    ) -> Element<'b, Message>
-    where
-        KbdM: KeyboardManager,
-    {
-        let theme = params.theme;
-        let keyboard_manager = params.keyboard_manager;
+    ) -> Element<'b, Message> {
+        let state = params.state;
+        let theme = state.theme();
         let color = theme.extended_palette().background.weak.text;
         let font_size = font_size_u * unit;
         let mut row = Row::new()
@@ -528,7 +489,14 @@ impl ToolbarLayout {
             .align_y(Vertical::Center)
             .spacing(unit * 2);
 
-        if let Some(message) = keyboard_manager.open_indicator() {
+        let indicator_message = match state.config().indicator_display() {
+            IndicatorDisplay::Auto => Some(WindowManagerEvent::OpenIndicator.into()),
+            IndicatorDisplay::AlwaysOn => {
+                Some(WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into())
+            }
+            IndicatorDisplay::AlwaysOff => None,
+        };
+        if let Some(message) = indicator_message {
             row = row.push(
                 fa_btn(
                     "down-left-and-up-right-to-center",
@@ -542,7 +510,7 @@ impl ToolbarLayout {
 
         // padding
         let window_id = params.window_id;
-        let movable = params.movable;
+        let movable = state.movable(window_id);
         row = row.push(
             Toggle::new(
                 Movable::new(
@@ -551,8 +519,8 @@ impl ToolbarLayout {
                         .height(Length::Fill)
                         .push(Text::new(" ")),
                     move |delta| {
-                        keyboard_manager
-                            .new_position(window_id, delta)
+                        state
+                            .new_position_message(window_id, delta)
                             .unwrap_or(Message::Nothing)
                     },
                     movable,
@@ -573,11 +541,9 @@ impl ToolbarLayout {
                         .color(color),
                 )
                 .push(
-                    PickList::new(
-                        keyboard_manager.ims(),
-                        keyboard_manager.selected_im(),
-                        |im| ImEvent::SelectIm(im).into(),
-                    )
+                    PickList::new(state.im().im_names(), state.im().im_name(), |im| {
+                        ImEvent::SelectIm(im).into()
+                    })
                     .text_size(font_size),
                 ),
         );
@@ -592,8 +558,8 @@ impl ToolbarLayout {
                 )
                 .push(
                     PickList::new(
-                        keyboard_manager.themes(),
-                        Some(keyboard_manager.selected_theme()),
+                        state.store().theme_names(),
+                        Some(state.config().theme()),
                         |theme| UpdateConfigEvent::Theme(theme).into(),
                     )
                     .text_size(font_size),
@@ -614,20 +580,18 @@ impl ToolbarLayout {
 pub struct SettingLayout;
 
 impl SettingLayout {
-    pub fn to_element<'a, 'b, KbdM, KM>(
+    pub fn to_element<'a, 'b>(
         &'a self,
-        params: &'a ToElementCommonParams<'b, KbdM, KM>,
+        params: &'a ToElementCommonParams<'b>,
         unit: u16,
         font_size_u: u16,
-    ) -> Element<'b, Message>
-    where
-        KbdM: KeyboardManager,
-    {
+    ) -> Element<'b, Message> {
+        let state = params.state;
         let text_size = font_size_u * unit;
         let height = text_size + 4 * unit;
         let mut name_column = Column::new();
         let mut value_column = Column::new().width(Length::Fill);
-        for field in params.keyboard_manager.updatable_fields() {
+        for field in state.updatable_fields() {
             name_column = name_column.push(
                 Container::new(
                     Text::new(field.name())
@@ -637,12 +601,7 @@ impl SettingLayout {
                 .center_y(height),
             );
             value_column = value_column.push(
-                Container::new(field_value_element(
-                    params.keyboard_manager,
-                    field,
-                    text_size,
-                ))
-                .center_y(height),
+                Container::new(field_value_element(state, field, text_size)).center_y(height),
             );
         }
         Container::new(Scrollable::with_direction(
@@ -659,19 +618,15 @@ impl SettingLayout {
     }
 }
 
-pub struct ToElementCommonParams<'a, KbdM, KM> {
-    pub candidate_area_state: &'a CandidateAreaState,
-    pub keyboard_manager: &'a KbdM,
-    pub key_manager: &'a KM,
-    pub theme: &'a Theme,
+pub struct ToElementCommonParams<'a> {
+    pub state: &'a dyn StateExtractor,
     pub window_id: Id,
-    pub movable: bool,
 }
 
 trait ToElementFieldType {
     fn to_element<'a>(
         &'a self,
-        km: &'a dyn KeyboardManager,
+        state: &'a dyn StateExtractor,
         text_size: u16,
     ) -> Element<'a, Message>;
 }
@@ -682,18 +637,18 @@ where
 {
     fn to_element<'a>(
         &'a self,
-        km: &'a dyn KeyboardManager,
+        state: &'a dyn StateExtractor,
         text_size: u16,
     ) -> Element<'a, Message> {
-        if self.is_enabled(km) {
-            PickList::new(self.variants(), self.cur_value(km), |selected| {
-                self.on_selected(km, selected)
+        if self.is_enabled(state) {
+            PickList::new(self.variants(), self.cur_value(state), |selected| {
+                self.on_selected(state, selected)
             })
             .text_size(text_size)
             .into()
         } else {
             Text::new(
-                self.cur_value(km)
+                self.cur_value(state)
                     .map(|t| t.to_string())
                     .unwrap_or_default(),
             )
@@ -708,18 +663,18 @@ where
 {
     fn to_element<'a>(
         &'a self,
-        km: &'a dyn KeyboardManager,
+        state: &'a dyn StateExtractor,
         text_size: u16,
     ) -> Element<'a, Message> {
-        if self.is_enabled(km) {
-            PickList::new(self.variants(), self.cur_value(km), |selected| {
-                self.on_selected(km, selected)
+        if self.is_enabled(state) {
+            PickList::new(self.variants(), self.cur_value(state), |selected| {
+                self.on_selected(state, selected)
             })
             .text_size(text_size)
             .into()
         } else {
             Text::new(
-                self.cur_value(km)
+                self.cur_value(state)
                     .map(|t| t.to_string())
                     .unwrap_or_default(),
             )
@@ -735,16 +690,22 @@ where
 {
     fn to_element<'a>(
         &'a self,
-        km: &'a dyn KeyboardManager,
+        state: &'a dyn StateExtractor,
         text_size: u16,
     ) -> Element<'a, Message> {
-        let cur_value = self.cur_value(km);
+        let cur_value = self.cur_value(state);
         Row::new()
             .align_y(Vertical::Center)
             .spacing(text_size)
-            .push(Button::new(Text::new("-").size(text_size)).on_press_maybe(self.on_decreased(km)))
+            .push(
+                Button::new(Text::new("-").size(text_size))
+                    .on_press_maybe(self.on_decreased(state)),
+            )
             .push(Text::new(cur_value.to_string()).size(text_size))
-            .push(Button::new(Text::new("+").size(text_size)).on_press_maybe(self.on_increased(km)))
+            .push(
+                Button::new(Text::new("+").size(text_size))
+                    .on_press_maybe(self.on_increased(state)),
+            )
             .into()
     }
 }
@@ -794,14 +755,14 @@ where
 }
 
 fn field_value_element<'a>(
-    km: &'a dyn KeyboardManager,
+    state: &'a dyn StateExtractor,
     field: &'a Field,
     text_size: u16,
 ) -> Element<'a, Message> {
     match field.typ() {
-        FieldType::StepU16(step_desc) => step_desc.to_element(km, text_size),
-        FieldType::OwnedEnumPlacement(enum_desc) => enum_desc.to_element(km, text_size),
-        FieldType::OwnedEnumIndicatorDisplay(enum_desc) => enum_desc.to_element(km, text_size),
-        FieldType::EnumString(enum_desc) => enum_desc.to_element(km, text_size),
+        FieldType::StepU16(step_desc) => step_desc.to_element(state, text_size),
+        FieldType::OwnedEnumPlacement(enum_desc) => enum_desc.to_element(state, text_size),
+        FieldType::OwnedEnumIndicatorDisplay(enum_desc) => enum_desc.to_element(state, text_size),
+        FieldType::EnumString(enum_desc) => enum_desc.to_element(state, text_size),
     }
 }

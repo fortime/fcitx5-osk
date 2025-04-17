@@ -8,9 +8,9 @@ use zbus::Result as ZbusResult;
 
 use crate::{
     app::{KeyboardError, Message},
-    config::{Config, ConfigManager, IndicatorDisplay},
+    config::{Config, ConfigManager},
     dbus::client::Fcitx5Services,
-    layout::{KeyboardManager, ToElementCommonParams},
+    layout::ToElementCommonParams,
     store::Store,
     window::WindowManager,
 };
@@ -24,7 +24,7 @@ mod window;
 pub use config::{
     ConfigState, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc, UpdateConfigEvent,
 };
-pub use im::{CandidateAreaState, ImEvent, ImState};
+pub use im::{ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
 pub use layout::{LayoutEvent, LayoutState};
 pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerState};
@@ -32,11 +32,11 @@ pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerSt
 #[derive(Getters, MutGetters)]
 pub struct State<WM> {
     config: ConfigState,
-    #[getset(get = "pub", get_mut = "pub")]
+    #[getset(get_mut = "pub")]
     store: Store,
-    #[getset(get = "pub", get_mut = "pub")]
+    #[getset(get_mut = "pub")]
     keyboard: KeyboardState,
-    #[getset(get = "pub", get_mut = "pub")]
+    #[getset(get_mut = "pub")]
     im: ImState,
     #[getset(get = "pub", get_mut = "pub")]
     window_manager: WindowManagerState<WM>,
@@ -122,12 +122,8 @@ impl<WM> State<WM> {
         }
     }
 
-    pub fn theme(&self) -> &Theme {
-        &self.theme
-    }
-
     fn is_auto_theme(&self) -> bool {
-        self.config().theme().eq_ignore_ascii_case("auto")
+        self.config.config().theme().eq_ignore_ascii_case("auto")
     }
 
     pub fn on_theme_event(&mut self, event: ThemeEvent) {
@@ -144,7 +140,7 @@ impl<WM> State<WM> {
     }
 
     fn sync_theme(&mut self) {
-        let config = self.config();
+        let config = self.config.config();
         let mut default_theme = Default::default();
         let theme = if !self.is_auto_theme() {
             self.store.theme(config.theme())
@@ -162,10 +158,6 @@ impl<WM> State<WM> {
         };
         self.theme = theme.cloned().unwrap_or(default_theme);
     }
-
-    pub fn config(&self) -> &Config {
-        self.config.config()
-    }
 }
 
 impl<WM> State<WM>
@@ -181,12 +173,8 @@ where
 
     pub fn to_element(&self, id: Id) -> Element<Message> {
         self.window_manager.to_element(ToElementCommonParams {
-            candidate_area_state: self.im.candidate_area_state(),
-            keyboard_manager: self,
-            key_manager: &self.keyboard,
-            theme: &self.theme,
+            state: self,
             window_id: id,
-            movable: false,
         })
     }
 }
@@ -215,52 +203,65 @@ where
     }
 }
 
-impl<WM> KeyboardManager for State<WM>
+/// Use dyn for reducing the need for writing generic type.
+pub trait StateExtractor {
+    fn store(&self) -> &Store;
+
+    fn keyboard(&self) -> &KeyboardState;
+
+    fn im(&self) -> &ImState;
+
+    fn theme(&self) -> &Theme;
+
+    fn config(&self) -> &Config;
+
+    fn updatable_fields(&self) -> &[Field];
+
+    fn available_candidate_width(&self) -> u16;
+
+    fn movable(&self, window_id: Id) -> bool;
+
+    fn scale_factor(&self) -> f32;
+
+    fn unit(&self) -> u16;
+
+    fn new_position_message(&self, id: Id, delta: Vector) -> Option<Message>;
+}
+
+impl<WM> StateExtractor for State<WM>
 where
     WM: WindowManager,
 {
-    fn available_candidate_width(&self) -> u16 {
-        self.window_manager.available_candidate_width()
+    fn store(&self) -> &Store {
+        &self.store
     }
 
-    fn themes(&self) -> &[String] {
-        self.store.theme_names()
+    fn keyboard(&self) -> &KeyboardState {
+        &self.keyboard
     }
 
-    fn selected_theme(&self) -> &String {
-        self.config().theme()
+    fn im(&self) -> &ImState {
+        &self.im
     }
 
-    fn ims(&self) -> &[String] {
-        self.im.im_names()
-    }
-
-    fn selected_im(&self) -> Option<&String> {
-        self.im.im_name()
-    }
-
-    fn open_indicator(&self) -> Option<Message> {
-        match self.config().indicator_display() {
-            IndicatorDisplay::Auto => Some(WindowManagerEvent::OpenIndicator.into()),
-            IndicatorDisplay::AlwaysOn => {
-                Some(WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into())
-            }
-            IndicatorDisplay::AlwaysOff => None,
-        }
-    }
-
-    fn new_position(&self, id: Id, delta: Vector) -> Option<Message> {
-        self.window_manager
-            .position(id)
-            .map(|p| Message::from(WindowEvent::Move(id, p + delta)))
+    fn theme(&self) -> &Theme {
+        &self.theme
     }
 
     fn config(&self) -> &Config {
-        self.config()
+        self.config.config()
     }
 
     fn updatable_fields(&self) -> &[Field] {
         self.config.updatable_fields()
+    }
+
+    fn available_candidate_width(&self) -> u16 {
+        self.window_manager.available_candidate_width()
+    }
+
+    fn movable(&self, window_id: Id) -> bool {
+        self.window_manager.movable(window_id)
     }
 
     fn scale_factor(&self) -> f32 {
@@ -269,6 +270,12 @@ where
 
     fn unit(&self) -> u16 {
         self.window_manager.unit()
+    }
+
+    fn new_position_message(&self, id: Id, delta: Vector) -> Option<Message> {
+        self.window_manager
+            .position(id)
+            .map(|p| Message::from(WindowEvent::Move(id, p + delta)))
     }
 }
 

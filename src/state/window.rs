@@ -8,7 +8,7 @@ use crate::{
     app::{MapTask, Message},
     config::{Config, IndicatorDisplay, Placement},
     dbus::client::{Fcitx5Services, Fcitx5VirtualKeyboardServiceProxy},
-    layout::{self, KeyAreaLayout, KeyManager, KeyboardManager, ToElementCommonParams},
+    layout::{self, KeyAreaLayout, ToElementCommonParams},
     state::{LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
     window::{WindowAppearance, WindowManager, WindowSettings},
@@ -512,24 +512,16 @@ where
         self.window_state(id).map(|s| s.movable()).unwrap_or(false)
     }
 
-    pub fn to_element<'b, KbdM, KM>(
-        &self,
-        mut params: ToElementCommonParams<'b, KbdM, KM>,
-    ) -> Element<'b, Message>
-    where
-        KbdM: KeyboardManager,
-        KM: KeyManager,
-    {
+    pub fn to_element<'b>(&self, params: ToElementCommonParams<'b>) -> Element<'b, Message> {
         let id = params.window_id;
         if self.is_keyboard(id) {
-            params.movable = self.movable(id);
             if self.is_portrait() {
                 self.portrait_layout.to_element(&params)
             } else {
                 self.landscape_layout.to_element(&params)
             }
         } else {
-            let keyboard_manager = params.keyboard_manager;
+            let state = params.state;
             let message = if self.keyboard_window_state.id().is_some() {
                 WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into()
             } else {
@@ -540,8 +532,8 @@ where
                 Movable::new(
                     layout::indicator_btn(self.indicator_width).on_press(message),
                     move |delta| {
-                        keyboard_manager
-                            .new_position(id, delta)
+                        state
+                            .new_position_message(id, delta)
                             .unwrap_or(Message::Nothing)
                     },
                     movable,

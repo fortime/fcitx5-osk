@@ -9,10 +9,7 @@ use iced::{
 
 use crate::{
     app::Message,
-    layout::{
-        KeyAreaLayout, KeyManager, KeyboardManager, SettingLayout, ToElementCommonParams,
-        ToolbarLayout,
-    },
+    layout::{KeyAreaLayout, SettingLayout, ToElementCommonParams, ToolbarLayout},
 };
 
 pub struct LayoutState {
@@ -160,15 +157,11 @@ impl LayoutState {
         self.setting_shown
     }
 
-    pub fn to_element<'a, 'b, KbdM, KM>(
+    pub fn to_element<'a, 'b>(
         &'a self,
-        params: &'a ToElementCommonParams<'b, KbdM, KM>,
-    ) -> Element<'b, Message>
-    where
-        KbdM: KeyboardManager,
-        KM: KeyManager,
-    {
-        let key_manager = params.key_manager;
+        params: &'a ToElementCommonParams<'b>,
+    ) -> Element<'b, Message> {
+        let state = params.state;
         let size = self.size();
         let mut keyboard = Column::new()
             .align_x(Horizontal::Center)
@@ -193,12 +186,12 @@ impl LayoutState {
                 .height(self.key_area_layout.height_u() * self.unit),
             )
         } else {
-            keyboard.push(self.key_area_layout.to_element(self.unit, key_manager))
+            keyboard.push(self.key_area_layout.to_element(self.unit, params.state))
         };
         // we let keyboard in a stack even there is no overlay, so the widget tree always has the
         // same level. Otherwise, the state will be clear if the level is changed.
         let mut stack = widget::stack![keyboard];
-        stack = stack.push_maybe(key_manager.popup_overlay(self.unit, self.size));
+        stack = stack.push_maybe(state.keyboard().popup_overlay(self.unit, self.size));
         stack.into()
     }
 

@@ -4,10 +4,9 @@ use strum::IntoEnumIterator;
 use crate::{
     app::Message,
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
-    layout::KeyboardManager,
 };
 
-use super::WindowManagerEvent;
+use super::{StateExtractor, WindowManagerEvent};
 
 macro_rules! on_update_event {
     ($event:ident, $config:expr, $(($variant:tt => $eq:expr, $set:tt)),*  $(,)?) => {
@@ -37,73 +36,73 @@ macro_rules! option_config_eq {
 }
 
 pub struct StepDesc<T> {
-    cur_value: fn(&dyn KeyboardManager) -> T,
-    step: fn(&dyn KeyboardManager) -> T,
-    on_increased: fn(&dyn KeyboardManager, T, T) -> Option<Message>,
-    on_decreased: fn(&dyn KeyboardManager, T, T) -> Option<Message>,
+    cur_value: fn(&dyn StateExtractor) -> T,
+    step: fn(&dyn StateExtractor) -> T,
+    on_increased: fn(&dyn StateExtractor, T, T) -> Option<Message>,
+    on_decreased: fn(&dyn StateExtractor, T, T) -> Option<Message>,
 }
 
 impl<T> StepDesc<T> {
-    pub fn cur_value(&self, km: &dyn KeyboardManager) -> T {
-        (self.cur_value)(km)
+    pub fn cur_value(&self, state: &dyn StateExtractor) -> T {
+        (self.cur_value)(state)
     }
 
-    pub fn on_increased(&self, km: &dyn KeyboardManager) -> Option<Message> {
-        (self.on_increased)(km, self.cur_value(km), (self.step)(km))
+    pub fn on_increased(&self, state: &dyn StateExtractor) -> Option<Message> {
+        (self.on_increased)(state, self.cur_value(state), (self.step)(state))
     }
 
-    pub fn on_decreased(&self, km: &dyn KeyboardManager) -> Option<Message> {
-        (self.on_decreased)(km, self.cur_value(km), (self.step)(km))
+    pub fn on_decreased(&self, state: &dyn StateExtractor) -> Option<Message> {
+        (self.on_decreased)(state, self.cur_value(state), (self.step)(state))
     }
 }
 
 pub struct OwnedEnumDesc<T> {
-    cur_value: fn(&dyn KeyboardManager) -> Option<T>,
+    cur_value: fn(&dyn StateExtractor) -> Option<T>,
     variants: Vec<T>,
-    is_enabled: fn(&dyn KeyboardManager) -> bool,
-    on_selected: fn(&dyn KeyboardManager, T) -> Message,
+    is_enabled: fn(&dyn StateExtractor) -> bool,
+    on_selected: fn(&dyn StateExtractor, T) -> Message,
 }
 
 impl<T> OwnedEnumDesc<T> {
-    pub fn cur_value(&self, km: &dyn KeyboardManager) -> Option<T> {
-        (self.cur_value)(km)
+    pub fn cur_value(&self, state: &dyn StateExtractor) -> Option<T> {
+        (self.cur_value)(state)
     }
 
     pub fn variants(&self) -> &[T] {
         &self.variants
     }
 
-    pub fn is_enabled(&self, km: &dyn KeyboardManager) -> bool {
-        (self.is_enabled)(km)
+    pub fn is_enabled(&self, state: &dyn StateExtractor) -> bool {
+        (self.is_enabled)(state)
     }
 
-    pub fn on_selected(&self, km: &dyn KeyboardManager, selected: T) -> Message {
-        (self.on_selected)(km, selected)
+    pub fn on_selected(&self, state: &dyn StateExtractor, selected: T) -> Message {
+        (self.on_selected)(state, selected)
     }
 }
 
 pub struct EnumDesc<T> {
-    cur_value: fn(&dyn KeyboardManager) -> Option<&T>,
+    cur_value: fn(&dyn StateExtractor) -> Option<&T>,
     variants: Vec<T>,
-    is_enabled: fn(&dyn KeyboardManager) -> bool,
-    on_selected: fn(&dyn KeyboardManager, T) -> Message,
+    is_enabled: fn(&dyn StateExtractor) -> bool,
+    on_selected: fn(&dyn StateExtractor, T) -> Message,
 }
 
 impl<T> EnumDesc<T> {
-    pub fn cur_value<'a>(&self, km: &'a dyn KeyboardManager) -> Option<&'a T> {
-        (self.cur_value)(km)
+    pub fn cur_value<'a>(&self, state: &'a dyn StateExtractor) -> Option<&'a T> {
+        (self.cur_value)(state)
     }
 
     pub fn variants(&self) -> &[T] {
         &self.variants
     }
 
-    pub fn is_enabled(&self, km: &dyn KeyboardManager) -> bool {
-        (self.is_enabled)(km)
+    pub fn is_enabled(&self, state: &dyn StateExtractor) -> bool {
+        (self.is_enabled)(state)
     }
 
-    pub fn on_selected(&self, km: &dyn KeyboardManager, selected: T) -> Message {
-        (self.on_selected)(km, selected)
+    pub fn on_selected(&self, state: &dyn StateExtractor, selected: T) -> Message {
+        (self.on_selected)(state, selected)
     }
 }
 
@@ -177,9 +176,9 @@ impl ConfigState {
                     name: "Size(unit)",
                     id: "size",
                     typ: StepDesc::<u16> {
-                        cur_value: |km: &dyn KeyboardManager| km.unit(),
-                        step: |km: &dyn KeyboardManager| {
-                            let scale_factor = km.scale_factor();
+                        cur_value: |state: &dyn StateExtractor| state.unit(),
+                        step: |state: &dyn StateExtractor| {
+                            let scale_factor = state.scale_factor();
                             let mut step = 1;
                             loop {
                                 if (scale_factor * step as f32).fract() == 0.0 {
@@ -210,12 +209,10 @@ impl ConfigState {
                     name: "Placement",
                     id: "placement",
                     typ: OwnedEnumDesc::<Placement> {
-                        cur_value: |km: &dyn KeyboardManager| Some(km.config().placement()),
+                        cur_value: |state: &dyn StateExtractor| Some(state.config().placement()),
                         variants: Placement::iter().collect(),
                         is_enabled: |_| true,
-                        on_selected: |_, p| {
-                            Message::from(WindowManagerEvent::UpdatePlacement(p))
-                        },
+                        on_selected: |_, p| Message::from(WindowManagerEvent::UpdatePlacement(p)),
                     }
                     .into(),
                 },
@@ -223,7 +220,9 @@ impl ConfigState {
                     name: "Indicator Display",
                     id: "indicator_display",
                     typ: OwnedEnumDesc::<IndicatorDisplay> {
-                        cur_value: |km: &dyn KeyboardManager| Some(km.config().indicator_display()),
+                        cur_value: |state: &dyn StateExtractor| {
+                            Some(state.config().indicator_display())
+                        },
                         variants: IndicatorDisplay::iter().collect(),
                         is_enabled: |_| true,
                         on_selected: |_, d| {
@@ -236,7 +235,7 @@ impl ConfigState {
                     name: "Dark Theme",
                     id: "dark_theme",
                     typ: EnumDesc::<String> {
-                        cur_value: |km: &dyn KeyboardManager| km.config().dark_theme(),
+                        cur_value: |state: &dyn StateExtractor| state.config().dark_theme(),
                         variants: themes.clone(),
                         is_enabled: |_| true,
                         on_selected: |_, d| Message::from(UpdateConfigEvent::DarkTheme(d)),
@@ -247,7 +246,7 @@ impl ConfigState {
                     name: "Light Theme",
                     id: "light_theme",
                     typ: EnumDesc::<String> {
-                        cur_value: |km: &dyn KeyboardManager| km.config().light_theme(),
+                        cur_value: |state: &dyn StateExtractor| state.config().light_theme(),
                         variants: themes,
                         is_enabled: |_| true,
                         on_selected: |_, d| Message::from(UpdateConfigEvent::LightTheme(d)),
