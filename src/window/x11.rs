@@ -22,7 +22,7 @@ use crate::{
     config::Placement,
     has_text_within_env,
     state::WindowManagerEvent,
-    window::{WindowAppearance, WindowManager, WindowSettings},
+    window::{WindowAppearance, WindowManager, WindowManagerMode, WindowSettings},
 };
 
 x11rb::atom_manager! {
@@ -304,6 +304,16 @@ impl WindowManager for X11WindowManager {
 
     fn full_screen_size(&self) -> Size {
         self.screen_size
+    }
+
+    /// ignore mode in x11
+    fn set_mode(&mut self, _: WindowManagerMode) -> bool {
+        false
+    }
+
+    /// always returns WindowManagerMode::Normal
+    fn mode(&self) -> WindowManagerMode {
+        Default::default()
     }
 }
 

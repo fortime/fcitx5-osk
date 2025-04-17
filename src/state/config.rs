@@ -4,7 +4,8 @@ use strum::IntoEnumIterator;
 use crate::{
     app::Message,
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
-    state::{StateExtractor, WindowManagerEvent, WindowManagerMode},
+    state::{StateExtractor, WindowManagerEvent},
+    window::WindowManagerMode,
 };
 
 macro_rules! on_update_event {

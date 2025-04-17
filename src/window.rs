@@ -45,6 +45,17 @@ pub trait WindowManager: Default {
 
     /// screen size with exclusive zone
     fn full_screen_size(&self) -> Size;
+
+    fn set_mode(&mut self, mode: WindowManagerMode) -> bool;
+
+    fn mode(&self) -> WindowManagerMode;
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WindowManagerMode {
+    #[default]
+    Normal,
+    ExternalDock,
 }
 
 pub struct WindowSettings {

@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem, rc::Rc, time::Duration};
+use std::{marker::PhantomData, rc::Rc, time::Duration};
 
 use anyhow::Result;
 use iced::{window::Id, Color, Element, Font, Point, Size, Task, Theme};
@@ -11,7 +11,7 @@ use crate::{
     layout::{self, KeyAreaLayout, ToElementCommonParams},
     state::{LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
-    window::{WindowAppearance, WindowManager, WindowSettings},
+    window::{WindowAppearance, WindowManager, WindowManagerMode, WindowSettings},
 };
 
 use super::ImEvent;
@@ -287,19 +287,12 @@ enum ToBeOpened {
     Indicator,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Normal,
-    ExternalDock,
-}
-
 pub struct WindowManagerState<WM> {
     scale_factor: f32,
     landscape_layout: LayoutState,
     portrait_layout: LayoutState,
     keyboard_window_state: WindowState<WM>,
     indicator_window_state: WindowState<WM>,
-    mode: Mode,
     /// a value sync with config file
     placement: Placement,
     indicator_width: u16,
@@ -321,7 +314,6 @@ where
             portrait_layout: LayoutState::new(config.portrait_width(), key_area_layout.clone())?,
             keyboard_window_state: Default::default(),
             indicator_window_state: Default::default(),
-            mode: Mode::Normal,
             placement: config.placement(),
             indicator_width: config.indicator_width(),
             indicator_display: config.indicator_display(),
@@ -416,24 +408,6 @@ impl<WM> WindowManagerState<WM> {
         self.landscape_layout.update_candidate_font(font);
         self.portrait_layout.update_candidate_font(font);
     }
-
-    pub fn placement(&self) -> Placement {
-        match self.mode {
-            Mode::Normal => self.placement,
-            Mode::ExternalDock => Placement::Dock,
-        }
-    }
-
-    pub fn indicator_display(&self) -> IndicatorDisplay {
-        match self.mode {
-            Mode::Normal => self.indicator_display,
-            Mode::ExternalDock => IndicatorDisplay::AlwaysOff,
-        }
-    }
-
-    pub fn mode(&self) -> Mode {
-        self.mode
-    }
 }
 
 impl<WM> WindowManagerState<WM>
@@ -514,6 +488,24 @@ where
 
     pub fn movable(&self, id: Id) -> bool {
         self.window_state(id).map(|s| s.movable()).unwrap_or(false)
+    }
+
+    pub fn placement(&self) -> Placement {
+        match self.mode() {
+            WindowManagerMode::Normal => self.placement,
+            WindowManagerMode::ExternalDock => Placement::Dock,
+        }
+    }
+
+    pub fn indicator_display(&self) -> IndicatorDisplay {
+        match self.mode() {
+            WindowManagerMode::Normal => self.indicator_display,
+            WindowManagerMode::ExternalDock => IndicatorDisplay::AlwaysOff,
+        }
+    }
+
+    pub fn mode(&self) -> WindowManagerMode {
+        self.wm.mode()
     }
 
     pub fn to_element<'b>(&self, params: ToElementCommonParams<'b>) -> Element<'b, Message> {
@@ -622,20 +614,19 @@ where
         }
     }
 
-    fn update_mode(&mut self, mut mode: Mode) -> Task<WM::Message> {
-        if self.mode == mode {
+    fn update_mode(&mut self, mode: WindowManagerMode) -> Task<WM::Message> {
+        if !self.wm.set_mode(mode) {
             return Message::from_nothing();
         }
-        mem::swap(&mut self.mode, &mut mode);
-        match self.mode {
-            Mode::Normal => {
+        match self.mode() {
+            WindowManagerMode::Normal => {
                 let mut task = self.reset_indicator();
                 if self.keyboard_window_state.id().is_some() {
                     task = task.chain(self.reopen_keyboard());
                 }
                 task
             }
-            Mode::ExternalDock => self.open_keyboard().chain(self.close_indicator()),
+            WindowManagerMode::ExternalDock => self.open_keyboard().chain(self.close_indicator()),
         }
     }
 
@@ -967,7 +958,7 @@ pub enum WindowManagerEvent {
     CloseKeyboard(CloseOpSource),
     OpenIndicator,
     ScreenInfo(Size, f32),
-    UpdateMode(Mode),
+    UpdateMode(WindowManagerMode),
     UpdatePlacement(Placement),
     UpdateIndicatorDisplay(IndicatorDisplay),
     UpdateUnit(u16),

@@ -5,7 +5,9 @@ use iced::{
     Color, Point, Size, Task, Theme,
 };
 use iced_layershell::{
-    reexport::{Anchor, KeyboardInteractivity, Layer, NewLayerShellSettings},
+    reexport::{
+        Anchor, KeyboardInteractivity, Layer, NewInputPanelSettings, NewLayerShellSettings,
+    },
     Appearance, DefaultStyle,
 };
 
@@ -14,7 +16,7 @@ use crate::{
     config::Placement,
     has_text_within_env,
     state::WindowManagerEvent,
-    window::{WindowAppearance, WindowManager, WindowSettings},
+    window::{WindowAppearance, WindowManager, WindowManagerMode, WindowSettings},
 };
 
 pub fn is_available() -> bool {
@@ -41,6 +43,7 @@ pub struct WaylandWindowManager {
     internals: HashSet<Id>,
     screen_size: Size,
     full_screen_size: Size,
+    mode: WindowManagerMode,
 }
 
 type Margin = (i32, i32, i32, i32);
@@ -90,22 +93,36 @@ impl WaylandWindowManager {
         let margin = self.margin(&settings);
         let id = Id::unique();
         self.settings.insert(id, settings);
-        (
-            id,
-            Task::done(WaylandMessage::NewLayerShell {
-                settings: NewLayerShellSettings {
-                    size,
-                    exclusive_zone,
-                    anchor,
-                    layer: Layer::Top,
-                    margin,
-                    keyboard_interactivity: KeyboardInteractivity::None,
-                    use_last_output: !internal,
-                    events_transparent: internal,
-                },
+        if self.mode == WindowManagerMode::ExternalDock && placement == Placement::Dock {
+            // create input panel surface, so that it can be shown by kwin in lock screen
+            (
                 id,
-            }),
-        )
+                Task::done(WaylandMessage::NewInputPanel {
+                    settings: NewInputPanelSettings {
+                        size: size.expect("size should not be none in dock mode"),
+                        use_last_output: !internal,
+                    },
+                    id,
+                }),
+            )
+        } else {
+            (
+                id,
+                Task::done(WaylandMessage::NewLayerShell {
+                    settings: NewLayerShellSettings {
+                        size,
+                        exclusive_zone,
+                        anchor,
+                        layer: Layer::Top,
+                        margin,
+                        keyboard_interactivity: KeyboardInteractivity::None,
+                        use_last_output: !internal,
+                        events_transparent: internal,
+                    },
+                    id,
+                }),
+            )
+        }
     }
 
     fn margin(&self, settings: &WindowSettings) -> Option<Margin> {
@@ -282,5 +299,18 @@ impl WindowManager for WaylandWindowManager {
 
     fn full_screen_size(&self) -> Size {
         self.full_screen_size
+    }
+
+    fn set_mode(&mut self, mode: WindowManagerMode) -> bool {
+        if self.mode != mode {
+            self.mode = mode;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn mode(&self) -> WindowManagerMode {
+        self.mode
     }
 }

@@ -12,7 +12,7 @@ use crate::{
     dbus::client::Fcitx5Services,
     layout::ToElementCommonParams,
     store::Store,
-    window::WindowManager,
+    window::{WindowManager, WindowManagerMode},
 };
 
 mod config;
@@ -27,9 +27,7 @@ pub use config::{
 pub use im::{ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
 pub use layout::{LayoutEvent, LayoutState};
-pub use window::{
-    CloseOpSource, Mode as WindowManagerMode, WindowEvent, WindowManagerEvent, WindowManagerState,
-};
+pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerState};
 
 #[derive(Getters, MutGetters)]
 pub struct State<WM> {
