@@ -8,7 +8,7 @@ use zbus::Result as ZbusResult;
 
 use crate::{
     app::{KeyboardError, Message},
-    config::{Config, ConfigManager},
+    config::{Config, ConfigManager, IndicatorDisplay, Placement},
     dbus::client::Fcitx5Services,
     layout::ToElementCommonParams,
     store::Store,
@@ -27,7 +27,9 @@ pub use config::{
 pub use im::{ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
 pub use layout::{LayoutEvent, LayoutState};
-pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerState};
+pub use window::{
+    CloseOpSource, Mode as WindowManagerMode, WindowEvent, WindowManagerEvent, WindowManagerState,
+};
 
 #[derive(Getters, MutGetters)]
 pub struct State<WM> {
@@ -226,6 +228,12 @@ pub trait StateExtractor {
     fn unit(&self) -> u16;
 
     fn new_position_message(&self, id: Id, delta: Vector) -> Option<Message>;
+
+    fn window_manager_mode(&self) -> WindowManagerMode;
+
+    fn placement(&self) -> Placement;
+
+    fn indicator_display(&self) -> IndicatorDisplay;
 }
 
 impl<WM> StateExtractor for State<WM>
@@ -276,6 +284,18 @@ where
         self.window_manager
             .position(id)
             .map(|p| Message::from(WindowEvent::Move(id, p + delta)))
+    }
+
+    fn window_manager_mode(&self) -> WindowManagerMode {
+        self.window_manager.mode()
+    }
+
+    fn placement(&self) -> Placement {
+        self.window_manager.placement()
+    }
+
+    fn indicator_display(&self) -> IndicatorDisplay {
+        self.window_manager.indicator_display()
     }
 }
 

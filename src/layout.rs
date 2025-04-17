@@ -489,7 +489,7 @@ impl ToolbarLayout {
             .align_y(Vertical::Center)
             .spacing(unit * 2);
 
-        let indicator_message = match state.config().indicator_display() {
+        let indicator_message = match state.indicator_display() {
             IndicatorDisplay::Auto => Some(WindowManagerEvent::OpenIndicator.into()),
             IndicatorDisplay::AlwaysOn => {
                 Some(WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into())

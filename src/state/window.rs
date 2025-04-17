@@ -430,6 +430,10 @@ impl<WM> WindowManagerState<WM> {
             Mode::ExternalDock => IndicatorDisplay::AlwaysOff,
         }
     }
+
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
 }
 
 impl<WM> WindowManagerState<WM>

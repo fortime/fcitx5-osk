@@ -4,9 +4,8 @@ use strum::IntoEnumIterator;
 use crate::{
     app::Message,
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
+    state::{StateExtractor, WindowManagerEvent, WindowManagerMode},
 };
-
-use super::{StateExtractor, WindowManagerEvent};
 
 macro_rules! on_update_event {
     ($event:ident, $config:expr, $(($variant:tt => $eq:expr, $set:tt)),*  $(,)?) => {
@@ -209,9 +208,11 @@ impl ConfigState {
                     name: "Placement",
                     id: "placement",
                     typ: OwnedEnumDesc::<Placement> {
-                        cur_value: |state: &dyn StateExtractor| Some(state.config().placement()),
+                        cur_value: |state: &dyn StateExtractor| Some(state.placement()),
                         variants: Placement::iter().collect(),
-                        is_enabled: |_| true,
+                        is_enabled: |state: &dyn StateExtractor| {
+                            state.window_manager_mode() == WindowManagerMode::Normal
+                        },
                         on_selected: |_, p| Message::from(WindowManagerEvent::UpdatePlacement(p)),
                     }
                     .into(),
@@ -220,11 +221,11 @@ impl ConfigState {
                     name: "Indicator Display",
                     id: "indicator_display",
                     typ: OwnedEnumDesc::<IndicatorDisplay> {
-                        cur_value: |state: &dyn StateExtractor| {
-                            Some(state.config().indicator_display())
-                        },
+                        cur_value: |state: &dyn StateExtractor| Some(state.indicator_display()),
                         variants: IndicatorDisplay::iter().collect(),
-                        is_enabled: |_| true,
+                        is_enabled: |state: &dyn StateExtractor| {
+                            state.window_manager_mode() == WindowManagerMode::Normal
+                        },
                         on_selected: |_, d| {
                             Message::from(WindowManagerEvent::UpdateIndicatorDisplay(d))
                         },
