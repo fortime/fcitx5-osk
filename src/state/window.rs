@@ -26,6 +26,7 @@ pub struct WindowStateSnapshot {
 pub enum CloseOpSource {
     Fcitx5,
     UserAction,
+    DbusController,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -601,7 +602,7 @@ where
 
     pub fn close_keyboard(&mut self, source: CloseOpSource) -> Task<WM::Message> {
         match source {
-            CloseOpSource::Fcitx5 => self
+            CloseOpSource::Fcitx5 | CloseOpSource::DbusController => self
                 .keyboard_window_state
                 .close_with_delay(Duration::from_millis(1000), source)
                 .map_task(),

@@ -19,20 +19,23 @@ use iced::{
     Color, Element, Event as IcedEvent, Subscription, Task, Theme,
 };
 use iced_futures::event;
-use tokio::time;
+use tokio::{sync::oneshot, time};
 use zbus::Connection;
 
 use crate::{
     config::{ConfigManager, IndicatorDisplay},
     dbus::{
         client::Fcitx5Services,
-        server::{Fcitx5VirtualkeyboardImPanelEvent, Fcitx5VirtualkeyboardImPanelService},
+        server::{
+            Fcitx5OskService, Fcitx5VirtualkeyboardImPanelEvent,
+            Fcitx5VirtualkeyboardImPanelService, ImPanelEvent, SocketEnv,
+        },
     },
     state::{
         CloseOpSource, ImEvent, KeyEvent, KeyboardEvent, LayoutEvent, State, StateExtractor,
         ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
-    window::{WindowAppearance, WindowManager},
+    window::{self, WindowAppearance, WindowManager},
 };
 
 pub mod wayland;
@@ -52,6 +55,7 @@ pub enum Message {
     ThemeEvent(ThemeEvent),
     UpdateConfigEvent(UpdateConfigEvent),
     Fcitx5VirtualkeyboardImPanelEvent(Fcitx5VirtualkeyboardImPanelEvent),
+    ImPanelEvent(ImPanelEvent),
 }
 
 impl Message {
@@ -153,6 +157,7 @@ where
     pub fn new(
         config_manager: ConfigManager,
         fcitx5_services: Fcitx5Services,
+        wait_for_socket: bool,
         shutdown_flag: Arc<AtomicBool>,
     ) -> Result<(Self, Task<Message>)> {
         let (tx, rx) = mpsc::unbounded();
@@ -165,27 +170,7 @@ where
                 shutdown_flag: shutdown_flag.clone(),
                 shutdown_sent: false,
             },
-            Task::future(async move {
-                tokio::spawn({
-                    let tx = tx.clone();
-                    let shutdown_flag = shutdown_flag.clone();
-                    async move {
-                        if let Err(e) = start_dbus_services(tx.clone(), shutdown_flag.clone()).await
-                        {
-                            tracing::error!("failed to start dbus services: {:?}, exit", e);
-                            if tx
-                                .unbounded_send(KeyboardError::Fatal(Arc::new(e)).into())
-                                .is_err()
-                            {
-                                tracing::error!("failed to send fatal message");
-                                shutdown_flag.store(true, Ordering::Relaxed);
-                            }
-                        }
-                    }
-                });
-                tokio::spawn(start_detect_theme(tx, shutdown_flag));
-                Message::from(WindowManagerEvent::OpenIndicator)
-            }),
+            Task::future(init(tx, wait_for_socket, shutdown_flag)),
         ))
     }
 }
@@ -350,6 +335,23 @@ where
                     _ => {}
                 }
             }
+            Message::ImPanelEvent(event) => {
+                match event {
+                    ImPanelEvent::Show => {
+                        task = task.chain(self.state.window_manager_mut().open_keyboard());
+                    }
+                    ImPanelEvent::Hide => {
+                        // always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated.
+                        self.state.keyboard_mut().set_fcitx5_hidden();
+                        // Unlike hiding request from Fcitx5, we always think that request from DbusController should be followed.
+                        task = task.chain(
+                            self.state
+                                .window_manager_mut()
+                                .close_keyboard(CloseOpSource::DbusController),
+                        );
+                    }
+                }
+            }
             Message::ImEvent(event) => {
                 task = task.chain(self.state.on_im_event(event).map_task());
             }
@@ -401,6 +403,53 @@ fn modal<'a>(
     .into()
 }
 
+async fn init(
+    tx: UnboundedSender<Message>,
+    wait_for_socket: bool,
+    shutdown_flag: Arc<AtomicBool>,
+) -> Message {
+    let (socket_env_tx, socket_env_rx) = oneshot::channel();
+
+    tokio::spawn({
+        let tx = tx.clone();
+        let shutdown_flag = shutdown_flag.clone();
+        async move {
+            if let Err(e) =
+                start_dbus_services(tx.clone(), socket_env_tx, shutdown_flag.clone()).await
+            {
+                tracing::error!("failed to start dbus services: {:?}, exit", e);
+                if tx
+                    .unbounded_send(KeyboardError::Fatal(Arc::new(e)).into())
+                    .is_err()
+                {
+                    tracing::error!("failed to send fatal message");
+                    shutdown_flag.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+    });
+
+    tokio::spawn(start_detect_theme(tx, shutdown_flag.clone()));
+
+    if wait_for_socket {
+        unsafe {
+            // No Safety Guarantee, multi_thread runtime has been started.
+            // It is high probability that data race of env won't be happened.
+            match socket_env_rx.await {
+                Ok(SocketEnv::WaylandSocket(s)) => window::wayland::set_env(Some(&s), None),
+                Ok(SocketEnv::WaylandDisplay(s)) => window::wayland::set_env(None, Some(&s)),
+                Ok(SocketEnv::X11Display(s)) => window::x11::set_env(Some(&s)),
+                Err(_) => {
+                    tracing::error!("failed to receive socket env");
+                    shutdown_flag.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    Message::from(WindowManagerEvent::OpenIndicator)
+}
+
 async fn start_detect_theme(tx: UnboundedSender<Message>, shutdown_flag: Arc<AtomicBool>) {
     while !shutdown_flag.load(Ordering::Relaxed) {
         if tx.unbounded_send(ThemeEvent::Detect.into()).is_err() {
@@ -413,13 +462,21 @@ async fn start_detect_theme(tx: UnboundedSender<Message>, shutdown_flag: Arc<Ato
 
 async fn start_dbus_services(
     tx: UnboundedSender<Message>,
+    socket_env_tx: oneshot::Sender<SocketEnv>,
     shutdown_flag: Arc<AtomicBool>,
 ) -> Result<()> {
     let conn = Connection::session().await?;
-    let s = Fcitx5VirtualkeyboardImPanelService::new(tx.clone());
-    s.start(&conn)
+    let fcitx5_service = Fcitx5VirtualkeyboardImPanelService::new(tx.clone());
+    fcitx5_service
+        .start(&conn)
         .await
         .context("failed to start fcitx5 dbus service")?;
+    let fcitx5_osk_service =
+        Fcitx5OskService::new(tx.clone(), socket_env_tx, shutdown_flag.clone());
+    fcitx5_osk_service
+        .start(&conn)
+        .await
+        .context("failed to start fcitx5 osk dbus service")?;
     while !shutdown_flag.load(Ordering::Relaxed) {
         time::sleep(Duration::from_millis(500)).await;
     }

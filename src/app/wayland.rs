@@ -36,9 +36,15 @@ impl WaylandKeyboard {
     pub fn new(
         config_manager: ConfigManager,
         fcitx5_services: Fcitx5Services,
+        wait_for_socket: bool,
         shutdown_flag: Arc<AtomicBool>,
     ) -> Result<(Self, Task<Message>)> {
-        let (inner, task) = Keyboard::new(config_manager, fcitx5_services, shutdown_flag)?;
+        let (inner, task) = Keyboard::new(
+            config_manager,
+            fcitx5_services,
+            wait_for_socket,
+            shutdown_flag,
+        )?;
         Ok((Self { inner }, task))
     }
 }
@@ -74,6 +80,7 @@ impl WaylandKeyboard {
 pub fn start(
     config_manager: ConfigManager,
     init_task: Task<Message>,
+    wait_for_socket: bool,
     shutdown_flag: Arc<AtomicBool>,
 ) -> Result<()> {
     let default_font = if let Some(font) = config_manager.as_ref().default_font() {
@@ -102,8 +109,13 @@ pub fn start(
     .run_with(move || {
         let fcitx5_services = super::run_async(Fcitx5Services::new())
             .expect("unable to create a fcitx5 service clients");
-        let (keyboard, task) = WaylandKeyboard::new(config_manager, fcitx5_services, shutdown_flag)
-            .expect("unable to create a WaylandKeyboard");
+        let (keyboard, task) = WaylandKeyboard::new(
+            config_manager,
+            fcitx5_services,
+            wait_for_socket,
+            shutdown_flag,
+        )
+        .expect("unable to create a WaylandKeyboard");
         (keyboard, init_task.chain(task).map_task())
     })?;
     Ok(())

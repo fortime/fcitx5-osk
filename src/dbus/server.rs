@@ -1,11 +1,21 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use getset::{CopyGetters, Getters};
 use iced::futures::channel::mpsc::UnboundedSender;
+use serde::Deserialize;
+use tokio::sync::oneshot;
 use tracing::instrument;
 use zbus::{fdo::Error, interface, Connection};
+use zvariant::Type;
 
-use crate::{app::Message, state::ImEvent};
+use crate::{
+    app::Message,
+    state::{ImEvent, WindowManagerEvent},
+    window::WindowManagerMode,
+};
 
 ///According to codes in fcitx5:src/ui/virtualkeyboard/virtualkeyboard.cpp
 ///
@@ -164,4 +174,112 @@ pub struct CandidateAreaState {
     #[allow(unused)]
     #[getset(get_copy = "pub")]
     global_cursor_index: i32,
+}
+
+pub struct Fcitx5OskService {
+    tx: UnboundedSender<Message>,
+    socket_env_tx: Option<oneshot::Sender<SocketEnv>>,
+    shutdown_flag: Arc<AtomicBool>,
+}
+
+impl Fcitx5OskService {
+    const SERVICE_NAME: &'static str = "fyi.fortime.Fcitx5Osk";
+
+    pub fn new(
+        tx: UnboundedSender<Message>,
+        socket_env_tx: oneshot::Sender<SocketEnv>,
+        shutdown_flag: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            tx,
+            socket_env_tx: Some(socket_env_tx),
+            shutdown_flag,
+        }
+    }
+
+    pub async fn start(self, conn: &Connection) -> Result<(), Error> {
+        conn.object_server()
+            .at(Self::CONTROLLER_OBJECT_PATH, self)
+            .await?;
+        conn.request_name(Self::SERVICE_NAME).await?;
+        Ok(())
+    }
+
+    fn send<Event>(&self, event: Event) -> Result<(), Error>
+    where
+        Event: Into<Message>,
+    {
+        self.tx.unbounded_send(event.into()).map_err(|_| {
+            Error::Failed("the channel has been closed, unable to handle the request".to_string())
+        })
+    }
+}
+
+#[interface(name = "fyi.fortime.Fcitx5Osk.Controller")]
+impl Fcitx5OskService {
+    const CONTROLLER_OBJECT_PATH: &'static str = "/fyi/fortime/Fcitx5Osk/Controller";
+
+    #[instrument(level = "debug", skip(self), err, ret)]
+    async fn show(&self) -> Result<(), Error> {
+        self.send(ImPanelEvent::Show)
+    }
+
+    #[instrument(level = "debug", skip(self), err, ret)]
+    async fn hide(&self) -> Result<(), Error> {
+        self.send(ImPanelEvent::Hide)
+    }
+
+    #[instrument(level = "debug", skip(self), err, ret)]
+    async fn change_mode(&self, mode: Mode) -> Result<(), Error> {
+        let mode = match mode {
+            Mode::Normal => WindowManagerMode::Normal,
+            Mode::ExternalDock => WindowManagerMode::ExternalDock,
+        };
+        self.send(WindowManagerEvent::UpdateMode(mode))
+    }
+
+    /// Socket can be open once only.
+    #[instrument(level = "debug", skip(self), err, ret)]
+    async fn open_socket(&mut self, socket_env: SocketEnv) -> Result<(), Error> {
+        if let Some(socket_env_tx) = self.socket_env_tx.take() {
+            if socket_env_tx.send(socket_env).is_ok() {
+                return Ok(());
+            }
+        }
+        // if socket_env can't be sent, it will trigger a shutdown. fcitx5-osk-wayland-launcher
+        // will start a new one.
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    #[instrument(level = "debug", skip(self), err, ret)]
+    async fn shutdown(&mut self) -> Result<(), Error> {
+        self.shutdown_flag.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+}
+
+#[derive(Deserialize, Type, PartialEq, Debug)]
+enum Mode {
+    Normal,
+    ExternalDock,
+}
+
+#[derive(Clone, Debug)]
+pub enum ImPanelEvent {
+    Show,
+    Hide,
+}
+
+impl From<ImPanelEvent> for Message {
+    fn from(value: ImPanelEvent) -> Self {
+        Self::ImPanelEvent(value)
+    }
+}
+
+#[derive(Deserialize, Type, PartialEq, Debug)]
+pub enum SocketEnv {
+    WaylandSocket(String),
+    WaylandDisplay(String),
+    X11Display(String),
 }

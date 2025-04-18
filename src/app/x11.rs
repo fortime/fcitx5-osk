@@ -13,6 +13,7 @@ use crate::{
 pub fn start(
     config_manager: ConfigManager,
     init_task: Task<Message>,
+    wait_for_socket: bool,
     shutdown_flag: Arc<AtomicBool>,
 ) -> Result<()> {
     iced::daemon(clap::crate_name!(), Keyboard::update, Keyboard::view)
@@ -21,9 +22,13 @@ pub fn start(
         .run_with(move || {
             let fcitx5_services = super::run_async(Fcitx5Services::new())
                 .expect("unable to create a fcitx5 service clients");
-            let (keyboard, task) =
-                Keyboard::<X11WindowManager>::new(config_manager, fcitx5_services, shutdown_flag)
-                    .expect("unable to create a X11Keyboard");
+            let (keyboard, task) = Keyboard::<X11WindowManager>::new(
+                config_manager,
+                fcitx5_services,
+                wait_for_socket,
+                shutdown_flag,
+            )
+            .expect("unable to create a X11Keyboard");
             (keyboard, init_task.chain(task))
         })?;
     Ok(())

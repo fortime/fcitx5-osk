@@ -162,7 +162,12 @@ fn run(args: Args) -> Result<()> {
     });
 
     if args.force_wayland || (!args.force_x11 && wayland::is_available()) {
-        app::wayland::start(config_manager, init_task, shutdown_flag)?;
+        app::wayland::start(
+            config_manager,
+            init_task,
+            args.wait_for_socket,
+            shutdown_flag,
+        )?;
     } else if args.force_x11 || x11::is_available() {
         if args.force_x11 {
             // unset wayland env, otherwise, winit will use wayland to open windows.
@@ -171,7 +176,12 @@ fn run(args: Args) -> Result<()> {
                 wayland::set_env(None, None);
             }
         }
-        app::x11::start(config_manager, init_task, shutdown_flag)?;
+        app::x11::start(
+            config_manager,
+            init_task,
+            args.wait_for_socket,
+            shutdown_flag,
+        )?;
     } else {
         anyhow::bail!("No Wayland or X11 Environment");
     }

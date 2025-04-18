@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    env,
     sync::Arc,
 };
 
@@ -319,6 +320,10 @@ impl WindowManager for X11WindowManager {
 
 pub fn is_available() -> bool {
     has_text_within_env("DISPLAY")
+}
+
+pub unsafe fn set_env(display: Option<&str>) {
+    env::set_var("Display", display.unwrap_or(""));
 }
 
 fn xcb_connection() -> Result<(RustConnection, usize)> {
