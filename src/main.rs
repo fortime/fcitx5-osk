@@ -42,6 +42,18 @@ struct Args {
         default_value = "~/.config/fcitx5-osk/config.toml"
     )]
     config: PathBuf,
+
+    /// Force the program running on wayland.
+    #[arg(long, default_missing_value = "true")]
+    force_wayland: bool,
+
+    /// Force the program running on x11.
+    #[arg(long, default_missing_value = "true")]
+    force_x11: bool,
+
+    /// Waiting DISPLAY, WAYLAND_DISPLAY, WAYLAND_SOCKET from dbus.
+    #[arg(long, default_missing_value = "true")]
+    wait_for_socket: bool,
 }
 
 pub struct Signals(Vec<(SignalKind, Signal)>);
@@ -149,9 +161,16 @@ fn run(args: Args) -> Result<()> {
         Message::Nothing
     });
 
-    if wayland::is_available() {
+    if args.force_wayland || (!args.force_x11 && wayland::is_available()) {
         app::wayland::start(config_manager, init_task, shutdown_flag)?;
-    } else if x11::is_available() {
+    } else if args.force_x11 || x11::is_available() {
+        if args.force_x11 {
+            // unset wayland env, otherwise, winit will use wayland to open windows.
+            unsafe {
+                // Safety, currently there is no other thread running, except console_subscriber.
+                wayland::set_env(None, None);
+            }
+        }
         app::x11::start(config_manager, init_task, shutdown_flag)?;
     } else {
         anyhow::bail!("No Wayland or X11 Environment");

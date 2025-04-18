@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    env,
+};
 
 use iced::{
     window::{self as iced_window, Id},
@@ -21,6 +24,11 @@ use crate::{
 
 pub fn is_available() -> bool {
     has_text_within_env("WAYLAND_DISPLAY") || has_text_within_env("WAYLAND_SOCKET")
+}
+
+pub unsafe fn set_env(socket: Option<&str>, display: Option<&str>) {
+    env::set_var("WAYLAND_SOCKET", socket.unwrap_or(""));
+    env::set_var("WAYLAND_DISPLAY", display.unwrap_or(""));
 }
 
 impl WindowAppearance for Appearance {
