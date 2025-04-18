@@ -1,33 +1,36 @@
 use std::{
-    pin::Pin,
+    cell::RefCell,
+    future::Future,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    task::{Context, Poll},
     time::Duration,
 };
 
-use anyhow::{Error, Result};
+use anyhow::{Context, Error, Result};
 use iced::{
     futures::{
         channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Stream, StreamExt,
+        stream,
     },
     widget::{self, Column},
     window::{Event as IcedWindowEvent, Id},
     Color, Element, Event as IcedEvent, Subscription, Task, Theme,
 };
 use iced_futures::event;
-use pin_project::pin_project;
 use tokio::time;
+use zbus::Connection;
 
 use crate::{
     config::{ConfigManager, IndicatorDisplay},
-    dbus::server::Fcitx5VirtualkeyboardImPanelEvent,
+    dbus::{
+        client::Fcitx5Services,
+        server::{Fcitx5VirtualkeyboardImPanelEvent, Fcitx5VirtualkeyboardImPanelService},
+    },
     state::{
-        CloseOpSource, ImEvent, KeyEvent, KeyboardEvent, LayoutEvent, StartEvent, State,
-        StateExtractor, ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
+        CloseOpSource, ImEvent, KeyEvent, KeyboardEvent, LayoutEvent, State, StateExtractor,
+        ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     window::{WindowAppearance, WindowManager},
 };
@@ -38,8 +41,6 @@ pub mod x11;
 #[derive(Clone, Debug)]
 pub enum Message {
     Nothing,
-    StartEvent(StartEvent),
-    NewSubscription(UnboundedSender<Message>),
     KeyboardEvent(KeyboardEvent),
     Error(KeyboardError),
     AfterError,
@@ -139,6 +140,7 @@ impl KeyboardError {
 
 pub struct Keyboard<WM> {
     state: State<WM>,
+    rx: RefCell<Option<UnboundedReceiver<Message>>>,
     error: Option<KeyboardError>,
     shutdown_flag: Arc<AtomicBool>,
     shutdown_sent: bool,
@@ -148,21 +150,47 @@ impl<WM> Keyboard<WM>
 where
     WM: Default,
 {
-    pub fn new(config_manager: ConfigManager, shutdown_flag: Arc<AtomicBool>) -> Result<Self> {
-        Ok(Self {
-            state: State::new(config_manager)?,
-            error: None,
-            shutdown_flag,
-            shutdown_sent: false,
-        })
+    pub fn new(
+        config_manager: ConfigManager,
+        fcitx5_services: Fcitx5Services,
+        shutdown_flag: Arc<AtomicBool>,
+    ) -> Result<(Self, Task<Message>)> {
+        let (tx, rx) = mpsc::unbounded();
+        let state = State::new(config_manager, fcitx5_services)?;
+        Ok((
+            Self {
+                state,
+                rx: RefCell::new(Some(rx)),
+                error: None,
+                shutdown_flag: shutdown_flag.clone(),
+                shutdown_sent: false,
+            },
+            Task::future(async move {
+                tokio::spawn({
+                    let tx = tx.clone();
+                    let shutdown_flag = shutdown_flag.clone();
+                    async move {
+                        if let Err(e) = start_dbus_services(tx.clone(), shutdown_flag.clone()).await
+                        {
+                            tracing::error!("failed to start dbus services: {:?}, exit", e);
+                            if tx
+                                .unbounded_send(KeyboardError::Fatal(Arc::new(e)).into())
+                                .is_err()
+                            {
+                                tracing::error!("failed to send fatal message");
+                                shutdown_flag.store(true, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                });
+                tokio::spawn(start_detect_theme(tx, shutdown_flag));
+                Message::from(WindowManagerEvent::OpenIndicator)
+            }),
+        ))
     }
 }
 
 impl<WM> Keyboard<WM> {
-    pub fn start(&mut self) -> Task<Message> {
-        self.state.start()
-    }
-
     pub fn handle_error_message(&mut self, e: KeyboardError) {
         match &e {
             KeyboardError::Error(e) => tracing::error!("Error: {e:#}"),
@@ -219,40 +247,49 @@ where
         }
     }
 
+    /// subscription will be called after each batch updates, iced will check if streams in it has
+    /// been changed.
     pub fn subscription(&self) -> Subscription<WM::Message> {
-        Subscription::batch(vec![
-            event::listen_with(|event, status, id| {
-                tracing::trace!("event: {}, {:?}, {:?}", id, status, event);
-                match event {
-                    IcedEvent::Window(IcedWindowEvent::Opened {
-                        position: _position,
-                        size,
-                    }) => {
-                        // ignore position, position isn't supported in wayland
-                        Some(WindowEvent::Opened(id, size).into())
-                    }
-                    IcedEvent::Window(IcedWindowEvent::Closed) => {
-                        tracing::debug!("closed: {}", id);
-                        Some(WindowEvent::Closed(id).into())
-                    }
-                    IcedEvent::Keyboard(event) => {
-                        tracing::debug!("keyboard event: {:?}", event);
-                        None
-                    }
-                    _ => None,
+        let mut subscriptions = vec![event::listen_with(|event, status, id| {
+            tracing::trace!("event: {}, {:?}, {:?}", id, status, event);
+            match event {
+                IcedEvent::Window(IcedWindowEvent::Opened {
+                    position: _position,
+                    size,
+                }) => {
+                    // ignore position, position isn't supported in wayland
+                    Some(Message::from(WindowEvent::Opened(id, size)))
                 }
-            }),
-            Subscription::run(move || {
-                let (tx, rx) = mpsc::unbounded();
+                IcedEvent::Window(IcedWindowEvent::Closed) => {
+                    tracing::debug!("closed: {}", id);
+                    Some(Message::from(WindowEvent::Closed(id)))
+                }
+                IcedEvent::Keyboard(event) => {
+                    tracing::debug!("keyboard event: {:?}", event);
+                    None
+                }
+                _ => None,
+            }
+        })];
 
-                MessageStream { tx: Some(tx), rx }
-            }),
-        ])
-        .map(|m| m.into())
+        const EXTERNAL_SUBSCRIPTION_ID: &str = "external";
+        if let Some(rx) = self.rx.borrow_mut().take() {
+            subscriptions.push(Subscription::run_with_id(EXTERNAL_SUBSCRIPTION_ID, rx));
+        } else {
+            // should always return a subscription with the same id, otherwise, the first one will
+            // be dropped.
+            subscriptions.push(Subscription::run_with_id(
+                EXTERNAL_SUBSCRIPTION_ID,
+                stream::empty(),
+            ));
+        }
+
+        Subscription::batch(subscriptions).map(|m| m.into())
     }
 
     pub fn update(&mut self, message: Message) -> Task<WM::Message> {
         if self.shutdown_flag.load(Ordering::Relaxed) {
+            tracing::warn!("message[{:?}] is ignored after shutdown", message);
             if !self.shutdown_sent {
                 self.shutdown_sent = true;
                 return self.state.window_manager_mut().shutdown();
@@ -268,30 +305,6 @@ where
                 if let Some(KeyboardError::Fatal(_)) = self.error.take() {
                     task = task.chain(self.state.window_manager_mut().shutdown());
                 }
-            }
-            Message::StartEvent(event) => match event {
-                StartEvent::Start => task = task.chain(self.start().map_task()),
-                StartEvent::StartedDbusClients(services) => {
-                    self.state.set_dbus_clients(services);
-                    task = task.chain(self.state.window_manager_mut().open_indicator());
-                }
-            },
-            Message::NewSubscription(tx) => {
-                {
-                    let tx = tx.clone();
-                    tokio::spawn(async move {
-                        while !tx.is_closed() {
-                            if tx.unbounded_send(ThemeEvent::Detect.into()).is_err() {
-                                tracing::warn!(
-                                    "failed to send ThemeEvent::Check message, close the task"
-                                );
-                                break;
-                            }
-                            time::sleep(Duration::from_secs(1)).await;
-                        }
-                    });
-                }
-                task = task.chain(self.state.keyboard_mut().start_dbus_service(tx).map_task());
             }
             Message::KeyboardEvent(event) => {
                 task = task.chain(self.state.keyboard_mut().on_event(event).map_task());
@@ -362,23 +375,6 @@ where
     }
 }
 
-#[pin_project]
-struct MessageStream {
-    tx: Option<UnboundedSender<Message>>,
-    rx: UnboundedReceiver<Message>,
-}
-
-impl Stream for MessageStream {
-    type Item = Message;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(tx) = self.tx.take() {
-            return Poll::Ready(Some(Message::NewSubscription(tx)));
-        }
-        self.project().rx.poll_next_unpin(cx)
-    }
-}
-
 fn modal<'a>(
     base: Element<'a, Message>,
     content: Element<'a, Message>,
@@ -403,4 +399,50 @@ fn modal<'a>(
         )
     ]
     .into()
+}
+
+async fn start_detect_theme(tx: UnboundedSender<Message>, shutdown_flag: Arc<AtomicBool>) {
+    while !shutdown_flag.load(Ordering::Relaxed) {
+        if tx.unbounded_send(ThemeEvent::Detect.into()).is_err() {
+            tracing::warn!("failed to send ThemeEvent::Check message, close the task");
+            break;
+        }
+        time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+async fn start_dbus_services(
+    tx: UnboundedSender<Message>,
+    shutdown_flag: Arc<AtomicBool>,
+) -> Result<()> {
+    let conn = Connection::session().await?;
+    let s = Fcitx5VirtualkeyboardImPanelService::new(tx.clone());
+    s.start(&conn)
+        .await
+        .context("failed to start fcitx5 dbus service")?;
+    while !shutdown_flag.load(Ordering::Relaxed) {
+        time::sleep(Duration::from_millis(500)).await;
+    }
+    // trigger shutdown check
+    if tx.unbounded_send(Message::Nothing).is_err() {
+        tracing::error!("failed to send message, shutdown may be stopped");
+    }
+    tracing::info!("close the connection of dbus services");
+    if let Err(e) = conn.close().await {
+        tracing::warn!("failed to close the connection of dbus services: {:?}", e);
+    }
+    Ok(())
+}
+
+/// this function should be run in multi_thread runtime, otherwise, it will be deadlocked.
+fn run_async<T, F>(f: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: Future<Output = Result<T>> + 'static + Send,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    tokio::spawn(async move {
+        tx.send(f.await).expect("unable to send the result");
+    });
+    rx.recv()?
 }

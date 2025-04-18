@@ -4,7 +4,6 @@ use anyhow::{Error, Result};
 use dark_light::Mode;
 use getset::{Getters, MutGetters};
 use iced::{window::Id, Element, Task, Theme, Vector};
-use zbus::Result as ZbusResult;
 
 use crate::{
     app::{KeyboardError, Message},
@@ -41,24 +40,27 @@ pub struct State<WM> {
     #[getset(get = "pub", get_mut = "pub")]
     window_manager: WindowManagerState<WM>,
     theme: Theme,
-    has_fcitx5_services: bool,
 }
 
 impl<WM> State<WM>
 where
     WM: Default,
 {
-    pub fn new(config_manager: ConfigManager) -> Result<Self> {
+    pub fn new(config_manager: ConfigManager, fcitx5_services: Fcitx5Services) -> Result<Self> {
         let config = config_manager.as_ref();
         let store = Store::new(config)?;
         // key_area_layout will be updated when cur_im is updated.
         let key_area_layout = store.key_area_layout("");
         let mut state = Self {
-            keyboard: KeyboardState::new(config.holding_timeout(), &key_area_layout, &store),
-            im: Default::default(),
-            window_manager: WindowManagerState::new(config, key_area_layout)?,
+            keyboard: KeyboardState::new(
+                config.holding_timeout(),
+                &key_area_layout,
+                &store,
+                fcitx5_services.clone(),
+            ),
+            im: ImState::new(fcitx5_services.clone()),
+            window_manager: WindowManagerState::new(config, key_area_layout, fcitx5_services)?,
             theme: Default::default(),
-            has_fcitx5_services: false,
             config: ConfigState::new(config_manager),
             store,
         };
@@ -68,30 +70,6 @@ where
 }
 
 impl<WM> State<WM> {
-    pub fn start(&mut self) -> Task<Message> {
-        if self.has_fcitx5_services {
-            Task::done(Message::Nothing)
-        } else {
-            Task::perform(Fcitx5Services::new(), |res: ZbusResult<_>| match res {
-                Ok(services) => StartEvent::StartedDbusClients(services).into(),
-                Err(e) => fatal_with_context(e, "failed to create dbus clients"),
-            })
-        }
-    }
-
-    pub fn set_dbus_clients(&mut self, fcitx5_services: Fcitx5Services) -> bool {
-        if self.has_fcitx5_services {
-            false
-        } else {
-            self.keyboard.set_dbus_clients(fcitx5_services.clone());
-            self.im.set_dbus_clients(fcitx5_services.clone());
-            self.window_manager
-                .set_dbus_clients(fcitx5_services.clone());
-            self.has_fcitx5_services = true;
-            true
-        }
-    }
-
     fn update_cur_im(&mut self, im_name: &str) -> bool {
         let key_area_layout = self.store.key_area_layout_by_im(im_name);
         let res = self
@@ -298,18 +276,6 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub enum StartEvent {
-    Start,
-    StartedDbusClients(Fcitx5Services),
-}
-
-impl From<StartEvent> for Message {
-    fn from(value: StartEvent) -> Self {
-        Self::StartEvent(value)
-    }
-}
-
-#[derive(Clone, Debug)]
 pub enum ThemeEvent {
     Detect,
     Updated,
@@ -321,7 +287,7 @@ impl From<ThemeEvent> for Message {
     }
 }
 
-fn call_fcitx5<S, M, FN, F>(service: Option<&S>, err_msg: M, f: FN) -> Task<Message>
+fn call_fcitx5<S, M, FN, F>(service: &S, err_msg: M, f: FN) -> Task<Message>
 where
     S: Clone,
     M: Into<String>,
@@ -329,17 +295,11 @@ where
     F: Future<Output = Result<Message>> + 'static + Send,
 {
     let err_msg = err_msg.into();
-    if let Some(service) = service {
-        let service = service.clone();
-        Task::perform(f(service), move |r| match r {
-            Err(e) => error_with_context(e, err_msg.clone()),
-            Ok(t) => t,
-        })
-    } else {
-        Task::done(fatal(anyhow::anyhow!(
-            "dbus client hasn't been initialized"
-        )))
-    }
+    let service = service.clone();
+    Task::perform(f(service), move |r| match r {
+        Err(e) => error_with_context(e, err_msg.clone()),
+        Ok(t) => t,
+    })
 }
 
 fn _error<E>(e: E) -> Message
@@ -357,6 +317,7 @@ where
     KeyboardError::Error(Arc::new(e.into().context(err_msg.into()))).into()
 }
 
+#[allow(unused)]
 fn fatal<E>(e: E) -> Message
 where
     E: Into<Error>,
@@ -364,6 +325,7 @@ where
     KeyboardError::Fatal(Arc::new(e.into())).into()
 }
 
+#[allow(unused)]
 fn fatal_with_context<E, M>(e: E, err_msg: M) -> Message
 where
     E: Into<Error>,

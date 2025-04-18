@@ -12,8 +12,10 @@ use std::{
 };
 
 use anyhow::Result;
+use app::Message;
 use clap::Parser;
 use config::{Config, ConfigManager};
+use iced::Task;
 use tokio::signal::unix::{signal, Signal, SignalKind};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use window::{wayland, x11};
@@ -82,6 +84,13 @@ pub async fn try_default_signals() -> Result<Signals> {
 
 fn init_log(config: &Config) -> Result<()> {
     let subscriber = tracing_subscriber::registry().with(EnvFilter::from_default_env());
+    #[cfg(debug_assertions)]
+    let subscriber = subscriber.with(
+        console_subscriber::ConsoleLayer::builder()
+            .with_default_env()
+            .spawn(),
+    );
+
     if config.log_timestamp().unwrap_or(true) {
         subscriber.with(fmt::layer()).try_init()?;
     } else {
@@ -132,20 +141,18 @@ fn run(args: Args) -> Result<()> {
         }
     };
 
+    // this task will be run before x11/wayland connection is created.
+    let init_task = Task::future(async move {
+        tokio::spawn(signal_handle);
+        tokio::spawn(config_write_bg);
+
+        Message::Nothing
+    });
+
     if wayland::is_available() {
-        app::wayland::start(
-            config_manager,
-            config_write_bg,
-            signal_handle,
-            shutdown_flag,
-        )?;
+        app::wayland::start(config_manager, init_task, shutdown_flag)?;
     } else if x11::is_available() {
-        app::x11::start(
-            config_manager,
-            config_write_bg,
-            signal_handle,
-            shutdown_flag,
-        )?;
+        app::x11::start(config_manager, init_task, shutdown_flag)?;
     } else {
         anyhow::bail!("No Wayland or X11 Environment");
     }

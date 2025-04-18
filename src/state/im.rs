@@ -13,16 +13,25 @@ use crate::{
     },
 };
 
-#[derive(Default)]
 pub struct ImState {
     cur_im: Option<Rc<InputMethodInfo>>,
     ims: HashMap<String, Rc<InputMethodInfo>>,
     im_names: Vec<String>,
     candidate_area_state: CandidateAreaState,
-    fcitx5_services: Option<Fcitx5Services>,
+    fcitx5_services: Fcitx5Services,
 }
 
 impl ImState {
+    pub fn new(fcitx5_services: Fcitx5Services) -> Self {
+        Self {
+            cur_im: Default::default(),
+            ims: Default::default(),
+            im_names: Default::default(),
+            candidate_area_state: Default::default(),
+            fcitx5_services,
+        }
+    }
+
     fn reset_candidate_cursor(&mut self) {
         // I don't know how to reset the candidate state in fcitx5, so I just reset the cursor.
         self.candidate_area_state.reset_cursor();
@@ -34,10 +43,6 @@ impl ImState {
 
     pub fn im_name(&self) -> Option<&String> {
         self.cur_im.as_ref().map(|im| im.unique_name())
-    }
-
-    pub(super) fn set_dbus_clients(&mut self, fcitx5_services: Fcitx5Services) {
-        self.fcitx5_services = Some(fcitx5_services);
     }
 
     pub fn update_candidate_area_state(&mut self, state: Arc<Fcitx5CandidateAreaState>) {
@@ -116,18 +121,14 @@ impl ImState {
 
 // call fcitx5
 impl ImState {
-    fn fcitx5_controller_service(&self) -> Option<&Fcitx5ControllerServiceProxy<'static>> {
-        self.fcitx5_services
-            .as_ref()
-            .map(Fcitx5Services::controller)
+    fn fcitx5_controller_service(&self) -> &Fcitx5ControllerServiceProxy<'static> {
+        self.fcitx5_services.controller()
     }
 
     fn fcitx5_virtual_keyboard_backend_service(
         &self,
-    ) -> Option<&Fcitx5VirtualKeyboardBackendServiceProxy<'static>> {
-        self.fcitx5_services
-            .as_ref()
-            .map(Fcitx5Services::virtual_keyboard_backend)
+    ) -> &Fcitx5VirtualKeyboardBackendServiceProxy<'static> {
+        self.fcitx5_services.virtual_keyboard_backend()
     }
 
     fn sync_input_methods_and_current_im(&self) -> Task<Message> {

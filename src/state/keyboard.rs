@@ -4,25 +4,19 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use iced::{
     alignment::{Horizontal, Vertical},
-    futures::channel::mpsc::UnboundedSender,
     widget::{Column, Container, Row, Text},
     Element, Font, Padding, Task,
 };
 use tracing::instrument;
 use xkeysym::Keysym;
-use zbus::Connection;
 
 use crate::{
     app::Message,
-    dbus::{
-        client::{
-            Fcitx5Services, Fcitx5VirtualKeyboardBackendServiceProxy,
-            Fcitx5VirtualKeyboardServiceProxy,
-        },
-        server::Fcitx5VirtualkeyboardImPanelService,
+    dbus::client::{
+        Fcitx5Services, Fcitx5VirtualKeyboardBackendServiceProxy, Fcitx5VirtualKeyboardServiceProxy,
     },
     font,
     key_set::{Key, KeyValue, ThinKeyValue},
@@ -30,8 +24,6 @@ use crate::{
     store::Store,
     widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
 };
-
-use super::StartEvent;
 
 const TEXT_PADDING_LENGTH: u16 = 5;
 
@@ -92,20 +84,20 @@ pub struct KeyboardState {
     holding_key_state: Option<HoldingKeyState>,
     popup_key_width_u: u16,
     popup_key_height_u: u16,
-    /// To avoid capturing the lifetime of this object, we seperate the connection process into
-    /// multiple steps. In theory, there would be multiple creations of connection in the same
-    /// time, we only keep the connection with the correct id only.
-    dbus_service_token: u8,
-    dbus_service_connection: Option<Connection>,
     /// if there is no indicator and fcitx5 hides virtual keyboard, we won't hide the keyboard,
     /// instead we set this flag, and tell fcitx5 to show virtual keyboard when there is any key
     /// pressing event.
     fcitx5_hidden: Fcitx5Hidden,
-    fcitx5_services: Option<Fcitx5Services>,
+    fcitx5_services: Fcitx5Services,
 }
 
 impl KeyboardState {
-    pub fn new(holding_timeout: Duration, key_area_layout: &KeyAreaLayout, store: &Store) -> Self {
+    pub fn new(
+        holding_timeout: Duration,
+        key_area_layout: &KeyAreaLayout,
+        store: &Store,
+        fcitx5_services: Fcitx5Services,
+    ) -> Self {
         let mut res = Self {
             id: 0,
             // always virtual
@@ -119,17 +111,11 @@ impl KeyboardState {
             holding_key_state: None,
             popup_key_width_u: 0,
             popup_key_height_u: 0,
-            dbus_service_token: 0,
-            dbus_service_connection: None,
             fcitx5_hidden: Fcitx5Hidden::Unset,
-            fcitx5_services: None,
+            fcitx5_services,
         };
         res.update_key_area_layout(key_area_layout, store);
         res
-    }
-
-    pub(super) fn set_dbus_clients(&mut self, fcitx5_services: Fcitx5Services) {
-        self.fcitx5_services = Some(fcitx5_services);
     }
 
     pub fn update_key_area_layout(&mut self, key_area_layout: &KeyAreaLayout, store: &Store) {
@@ -153,63 +139,8 @@ impl KeyboardState {
             .unwrap_or_default();
     }
 
-    pub fn start_dbus_service(&mut self, tx: UnboundedSender<Message>) -> Task<Message> {
-        self.dbus_service_token = self.dbus_service_token.wrapping_add(1);
-
-        let new_dbus_service_token = self.dbus_service_token;
-        Task::perform(
-            async move {
-                tracing::debug!("start dbus service: {}", new_dbus_service_token);
-                let conn = Connection::session().await?;
-                let s = Fcitx5VirtualkeyboardImPanelService::new(tx);
-                s.start(&conn)
-                    .await
-                    .context("failed to start dbus service")?;
-                Ok((new_dbus_service_token, conn))
-            },
-            |res: Result<_>| match res {
-                Ok((id, connection)) => KeyboardEvent::DbusServiceStarted(id, connection).into(),
-                Err(e) => super::fatal(e),
-            },
-        )
-    }
-
-    fn set_dbus_service_connection(
-        &mut self,
-        dbus_service_token: u8,
-        connection: Connection,
-    ) -> Task<Message> {
-        let (replaced, to_be_closed) = if dbus_service_token != self.dbus_service_token {
-            tracing::warn!(
-                "concurrency creation of dbus service, connection is dropped: {}/{:?}",
-                dbus_service_token,
-                connection
-            );
-            (false, Some(connection))
-        } else {
-            (true, self.dbus_service_connection.replace(connection))
-        };
-        let mut task = if let Some(to_be_closed) = to_be_closed {
-            Task::future(async move {
-                if let Err(err) = to_be_closed.close().await {
-                    tracing::warn!("error in closing dbus connection: {err:?}");
-                }
-                Message::Nothing
-            })
-        } else {
-            Message::nothing()
-        };
-        if replaced {
-            task = task.chain(Task::done(StartEvent::Start.into()));
-        }
-        task
-    }
-
     pub fn on_event(&mut self, event: KeyboardEvent) -> Task<Message> {
         match event {
-            KeyboardEvent::DbusServiceStarted(token, connection) => {
-                self.set_dbus_service_connection(token, connection)
-            }
             KeyboardEvent::UnsetFcitx5Hidden => {
                 if self.fcitx5_hidden == Fcitx5Hidden::Clearing {
                     self.fcitx5_hidden = Fcitx5Hidden::Unset;
@@ -443,18 +374,12 @@ impl KeyboardState {
 impl KeyboardState {
     fn fcitx5_virtual_keyboard_backend_service(
         &self,
-    ) -> Option<&Fcitx5VirtualKeyboardBackendServiceProxy<'static>> {
-        self.fcitx5_services
-            .as_ref()
-            .map(Fcitx5Services::virtual_keyboard_backend)
+    ) -> &Fcitx5VirtualKeyboardBackendServiceProxy<'static> {
+        self.fcitx5_services.virtual_keyboard_backend()
     }
 
-    fn fcitx5_virtual_keyboard_service(
-        &self,
-    ) -> Option<&Fcitx5VirtualKeyboardServiceProxy<'static>> {
-        self.fcitx5_services
-            .as_ref()
-            .map(Fcitx5Services::virtual_keyboard)
+    fn fcitx5_virtual_keyboard_service(&self) -> &Fcitx5VirtualKeyboardServiceProxy<'static> {
+        self.fcitx5_services.virtual_keyboard()
     }
 
     fn press_key(
@@ -687,7 +612,6 @@ impl From<KeyEvent> for Message {
 
 #[derive(Clone, Debug)]
 pub enum KeyboardEvent {
-    DbusServiceStarted(u8, Connection),
     UnsetFcitx5Hidden,
 }
 

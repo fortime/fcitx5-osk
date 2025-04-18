@@ -299,7 +299,7 @@ pub struct WindowManagerState<WM> {
     /// a value sync with config file
     indicator_display: IndicatorDisplay,
     to_be_opened: Option<ToBeOpened>,
-    fcitx5_services: Option<Fcitx5Services>,
+    fcitx5_services: Fcitx5Services,
     wm: WM,
 }
 
@@ -307,7 +307,11 @@ impl<WM> WindowManagerState<WM>
 where
     WM: Default,
 {
-    pub fn new(config: &Config, key_area_layout: Rc<KeyAreaLayout>) -> Result<Self> {
+    pub fn new(
+        config: &Config,
+        key_area_layout: Rc<KeyAreaLayout>,
+        fcitx5_services: Fcitx5Services,
+    ) -> Result<Self> {
         Ok(Self {
             scale_factor: 1.,
             landscape_layout: LayoutState::new(config.landscape_width(), key_area_layout.clone())?,
@@ -318,7 +322,7 @@ where
             indicator_width: config.indicator_width(),
             indicator_display: config.indicator_display(),
             to_be_opened: None,
-            fcitx5_services: None,
+            fcitx5_services,
             wm: Default::default(),
         })
     }
@@ -906,16 +910,8 @@ where
 
 // call fcitx5
 impl<WM> WindowManagerState<WM> {
-    pub(super) fn set_dbus_clients(&mut self, fcitx5_services: Fcitx5Services) {
-        self.fcitx5_services = Some(fcitx5_services);
-    }
-
-    fn fcitx5_virtual_keyboard_service(
-        &self,
-    ) -> Option<&Fcitx5VirtualKeyboardServiceProxy<'static>> {
-        self.fcitx5_services
-            .as_ref()
-            .map(Fcitx5Services::virtual_keyboard)
+    fn fcitx5_virtual_keyboard_service(&self) -> &Fcitx5VirtualKeyboardServiceProxy<'static> {
+        self.fcitx5_services.virtual_keyboard()
     }
 
     fn _fcitx5_toggle(&self) -> Task<Message> {

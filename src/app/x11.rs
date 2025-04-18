@@ -1,7 +1,4 @@
-use std::{
-    future::Future,
-    sync::{atomic::AtomicBool, Arc},
-};
+use std::sync::{atomic::AtomicBool, Arc};
 
 use anyhow::Result;
 use iced::Task;
@@ -9,35 +6,25 @@ use iced::Task;
 use crate::{
     app::{Keyboard, Message},
     config::ConfigManager,
+    dbus::client::Fcitx5Services,
     window::x11::X11WindowManager,
 };
 
-pub fn start<BG, SH>(
+pub fn start(
     config_manager: ConfigManager,
-    config_write_bg: BG,
-    signal_handle: SH,
+    init_task: Task<Message>,
     shutdown_flag: Arc<AtomicBool>,
-) -> Result<()>
-where
-    BG: Future<Output = ()> + 'static + Send + Sync,
-    SH: Future<Output = ()> + 'static + Send + Sync,
-{
-    let keyboard = Keyboard::<X11WindowManager>::new(config_manager, shutdown_flag)?;
-
+) -> Result<()> {
     iced::daemon(clap::crate_name!(), Keyboard::update, Keyboard::view)
         .theme(Keyboard::theme)
         .subscription(Keyboard::subscription)
-        .theme(Keyboard::theme)
         .run_with(move || {
-            (
-                keyboard,
-                // calculate size
-                Task::future(async move {
-                    tokio::spawn(signal_handle);
-                    tokio::spawn(config_write_bg);
-                    Message::Nothing
-                }),
-            )
+            let fcitx5_services = super::run_async(Fcitx5Services::new())
+                .expect("unable to create a fcitx5 service clients");
+            let (keyboard, task) =
+                Keyboard::<X11WindowManager>::new(config_manager, fcitx5_services, shutdown_flag)
+                    .expect("unable to create a X11Keyboard");
+            (keyboard, init_task.chain(task))
         })?;
     Ok(())
 }

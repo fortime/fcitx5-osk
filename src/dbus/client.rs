@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use getset::Getters;
 use serde::Deserialize;
 use tracing::instrument;
-use zbus::{proxy, zvariant::OwnedValue, Connection, Result};
+use zbus::{proxy, zvariant::OwnedValue, Connection, Result as ZbusResult};
 use zvariant::Type;
 
 /// "sssa{sv}a(sssssssbsa{sv})"
@@ -69,14 +69,14 @@ pub struct InputMethodInfo {
 )]
 pub trait Fcitx5ControllerService {
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn full_input_method_group_info(&self, name: &str) -> Result<InputMethodGroupInfo>;
+    fn full_input_method_group_info(&self, name: &str) -> ZbusResult<InputMethodGroupInfo>;
 
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn current_input_method(&self) -> Result<String>;
+    fn current_input_method(&self) -> ZbusResult<String>;
 
     #[zbus(name = "SetCurrentIM")]
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn set_current_im(&self, im: &str) -> Result<()>;
+    fn set_current_im(&self, im: &str) -> ZbusResult<()>;
 }
 
 #[proxy(
@@ -86,13 +86,13 @@ pub trait Fcitx5ControllerService {
 )]
 pub trait Fcitx5VirtualKeyboardService {
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn show_virtual_keyboard(&self) -> Result<()>;
+    fn show_virtual_keyboard(&self) -> ZbusResult<()>;
 
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn hide_virtual_keyboard(&self) -> Result<()>;
+    fn hide_virtual_keyboard(&self) -> ZbusResult<()>;
 
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn toggle_virtual_keyboard(&self) -> Result<()>;
+    fn toggle_virtual_keyboard(&self) -> ZbusResult<()>;
 }
 
 #[proxy(
@@ -110,19 +110,19 @@ pub trait Fcitx5VirtualKeyboardBackendService {
         state: u32,
         is_release: bool,
         time: u32,
-    ) -> Result<()>;
+    ) -> ZbusResult<()>;
 
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn process_visibility_event(&self, visible: bool) -> Result<()>;
+    fn process_visibility_event(&self, visible: bool) -> ZbusResult<()>;
 
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn select_candidate(&self, index: i32) -> Result<()>;
+    fn select_candidate(&self, index: i32) -> ZbusResult<()>;
 
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn prev_page(&self, index: i32) -> Result<()>;
+    fn prev_page(&self, index: i32) -> ZbusResult<()>;
 
     #[instrument(level = "debug", skip(self), err, ret)]
-    fn next_page(&self, index: i32) -> Result<()>;
+    fn next_page(&self, index: i32) -> ZbusResult<()>;
 }
 
 #[derive(Clone, Debug, Getters)]
@@ -136,7 +136,7 @@ pub struct Fcitx5Services {
 }
 
 impl Fcitx5Services {
-    pub async fn new() -> Result<Self> {
+    pub async fn new() -> anyhow::Result<Self> {
         let connection = Connection::session().await?;
         let controller = Fcitx5ControllerServiceProxy::new(&connection).await?;
         let virtual_keyboard = Fcitx5VirtualKeyboardServiceProxy::new(&connection).await?;

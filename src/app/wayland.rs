@@ -1,7 +1,4 @@
-use std::{
-    future::Future,
-    sync::{atomic::AtomicBool, Arc},
-};
+use std::sync::{atomic::AtomicBool, Arc};
 
 use anyhow::Result;
 use iced::{window::Id, Element, Subscription, Task, Theme};
@@ -11,9 +8,13 @@ use iced_layershell::{
     to_layer_message, Appearance,
 };
 
-use crate::{config::ConfigManager, font, window::wayland::WaylandWindowManager};
-
-use super::{Keyboard, Message};
+use crate::{
+    app::{Keyboard, MapTask, Message},
+    config::ConfigManager,
+    dbus::client::Fcitx5Services,
+    font,
+    window::wayland::WaylandWindowManager,
+};
 
 #[to_layer_message(multi)]
 #[derive(Clone, Debug)]
@@ -32,9 +33,13 @@ struct WaylandKeyboard {
 }
 
 impl WaylandKeyboard {
-    pub fn new(config_manager: ConfigManager, shutdown_flag: Arc<AtomicBool>) -> Result<Self> {
-        let inner = Keyboard::new(config_manager, shutdown_flag)?;
-        Ok(Self { inner })
+    pub fn new(
+        config_manager: ConfigManager,
+        fcitx5_services: Fcitx5Services,
+        shutdown_flag: Arc<AtomicBool>,
+    ) -> Result<(Self, Task<Message>)> {
+        let (inner, task) = Keyboard::new(config_manager, fcitx5_services, shutdown_flag)?;
+        Ok((Self { inner }, task))
     }
 }
 
@@ -66,23 +71,16 @@ impl WaylandKeyboard {
     pub fn remove_id(&mut self, _id: Id) {}
 }
 
-pub fn start<BG, SH>(
+pub fn start(
     config_manager: ConfigManager,
-    config_write_bg: BG,
-    signal_handle: SH,
+    init_task: Task<Message>,
     shutdown_flag: Arc<AtomicBool>,
-) -> Result<()>
-where
-    BG: Future<Output = ()> + 'static + Send + Sync,
-    SH: Future<Output = ()> + 'static + Send + Sync,
-{
+) -> Result<()> {
     let default_font = if let Some(font) = config_manager.as_ref().default_font() {
         font::load(font)
     } else {
         Default::default()
     };
-
-    let keyboard = WaylandKeyboard::new(config_manager, shutdown_flag)?;
 
     build_pattern::daemon(
         clap::crate_name!(),
@@ -102,14 +100,11 @@ where
         ..Default::default()
     })
     .run_with(move || {
-        (
-            keyboard,
-            Task::future(async move {
-                tokio::spawn(signal_handle);
-                tokio::spawn(config_write_bg);
-                Message::Nothing.into()
-            }),
-        )
+        let fcitx5_services = super::run_async(Fcitx5Services::new())
+            .expect("unable to create a fcitx5 service clients");
+        let (keyboard, task) = WaylandKeyboard::new(config_manager, fcitx5_services, shutdown_flag)
+            .expect("unable to create a WaylandKeyboard");
+        (keyboard, init_task.chain(task).map_task())
     })?;
     Ok(())
 }
