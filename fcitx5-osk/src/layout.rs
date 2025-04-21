@@ -746,7 +746,7 @@ pub fn indicator_btn<'a, Message>(width: u16) -> Button<'a, Message>
 where
     Message: 'a,
 {
-    let icon = include_bytes!("../assets/icons/fcitx5-osk.svg");
+    let icon = include_bytes!("../../assets/icons/fcitx5-osk.svg");
     let svg = Svg::new(SvgHandle::from_memory(icon)).width(width);
     Button::new(svg)
         .width(width)

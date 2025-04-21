@@ -1,9 +1,20 @@
-[package]
-name = "fcitx5-osk"
+[workspace]
+resolver = "2"
+members = ["fcitx5-osk"]
+
+[workspace.package]
+description = "An onscreen keyboard working with fcitx5"
+authors = [
+    "palfortime@gmail.com"
+]
 version = "0.1.0"
 edition = "2021"
+license-file = "LICENSE"
+keywords = ["wayland", "kwin", "virtual keyboard", "onscreen keyboard"]
+repository = "https://github.com/fortime/fcitx5-osk"
+readme = "README.md"
 
-[dependencies]
+[workspace.dependencies]
 anyhow = "1.0.94"
 clap = { version = "4.5.23", features = ["cargo", "derive"] }
 dark-light = "1.1.1"

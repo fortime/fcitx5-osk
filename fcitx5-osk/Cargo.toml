@@ -1,0 +1,32 @@
+[package]
+name = "fcitx5-osk"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+keywords.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+dark-light.workspace = true
+figment.workspace = true
+getset.workspace = true
+iced.workspace = true
+serde.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+xkeysym.workspace = true
+zbus.workspace = true
+zvariant.workspace = true
+iced_layershell.workspace = true
+iced_futures.workspace = true
+iced_graphics.workspace = true
+humantime-serde.workspace = true
+iced_font_awesome.workspace = true
+x11rb.workspace = true
+strum.workspace = true
+console-subscriber.workspace = true
