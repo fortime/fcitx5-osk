@@ -39,7 +39,6 @@ struct Args {
         short,
         long,
         value_name = "PATH",
-        default_value = "~/.config/fcitx5-osk/config.toml"
     )]
     config: PathBuf,
 
