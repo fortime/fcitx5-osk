@@ -31,7 +31,7 @@ use crate::{
         StateExtractor, StepDesc, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     store::IdAndConfigPath,
-    widget::{Movable, Toggle, ToggleCondition},
+    widget::{Movable, Toggle, ToggleCondition}, window::WindowManagerMode,
 };
 
 #[derive(Deserialize, CopyGetters, Getters)]
@@ -494,7 +494,13 @@ impl ToolbarLayout {
             IndicatorDisplay::AlwaysOn => {
                 Some(WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into())
             }
-            IndicatorDisplay::AlwaysOff => None,
+            IndicatorDisplay::AlwaysOff => {
+                if state.window_manager_mode() == WindowManagerMode::WaylandInputPanel {
+                    None
+                } else {
+                    Some(WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into())
+                }
+            },
         };
         if let Some(message) = indicator_message {
             row = row.push(

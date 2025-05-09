@@ -8,6 +8,8 @@ keywords.workspace = true
 repository.workspace = true
 
 [dependencies]
+fcitx5-osk-common.workspace = true
+
 anyhow.workspace = true
 clap.workspace = true
 dark-light.workspace = true
@@ -18,7 +20,6 @@ serde.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
 xkeysym.workspace = true
 zbus.workspace = true
 zvariant.workspace = true
@@ -29,4 +30,6 @@ humantime-serde.workspace = true
 iced_font_awesome.workspace = true
 x11rb.workspace = true
 strum.workspace = true
-console-subscriber.workspace = true
+async-trait.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true

@@ -2,6 +2,7 @@ use std::{future::Future, sync::Arc};
 
 use anyhow::{Error, Result};
 use dark_light::Mode;
+use fcitx5_osk_common::dbus::client::Fcitx5OskServices;
 use getset::{Getters, MutGetters};
 use iced::{window::Id, Element, Task, Theme, Vector};
 
@@ -46,7 +47,11 @@ impl<WM> State<WM>
 where
     WM: Default,
 {
-    pub fn new(config_manager: ConfigManager, fcitx5_services: Fcitx5Services) -> Result<Self> {
+    pub fn new(
+        config_manager: ConfigManager,
+        fcitx5_services: Fcitx5Services,
+        fcitx5_osk_services: Fcitx5OskServices,
+    ) -> Result<Self> {
         let config = config_manager.as_ref();
         let store = Store::new(config)?;
         // key_area_layout will be updated when cur_im is updated.
@@ -59,7 +64,12 @@ where
                 fcitx5_services.clone(),
             ),
             im: ImState::new(fcitx5_services.clone()),
-            window_manager: WindowManagerState::new(config, key_area_layout, fcitx5_services)?,
+            window_manager: WindowManagerState::new(
+                config,
+                key_area_layout,
+                fcitx5_services,
+                fcitx5_osk_services,
+            )?,
             theme: Default::default(),
             config: ConfigState::new(config_manager),
             store,
@@ -135,6 +145,13 @@ impl<WM> State<WM> {
             }
         };
         self.theme = theme.cloned().unwrap_or(default_theme);
+    }
+
+    pub fn update_fcitx5_services(&mut self, fcitx5_services: Fcitx5Services) {
+        self.im.update_fcitx5_services(fcitx5_services.clone());
+        self.keyboard
+            .update_fcitx5_services(fcitx5_services.clone());
+        self.window_manager.update_fcitx5_services(fcitx5_services);
     }
 }
 
@@ -287,7 +304,7 @@ impl From<ThemeEvent> for Message {
     }
 }
 
-fn call_fcitx5<S, M, FN, F>(service: &S, err_msg: M, f: FN) -> Task<Message>
+fn call_dbus<S, M, FN, F>(service: &S, err_msg: M, f: FN) -> Task<Message>
 where
     S: Clone,
     M: Into<String>,
@@ -302,34 +319,10 @@ where
     })
 }
 
-fn _error<E>(e: E) -> Message
-where
-    E: Into<Error>,
-{
-    KeyboardError::Error(Arc::new(e.into())).into()
-}
-
 fn error_with_context<E, M>(e: E, err_msg: M) -> Message
 where
     E: Into<Error>,
     M: Into<String>,
 {
     KeyboardError::Error(Arc::new(e.into().context(err_msg.into()))).into()
-}
-
-#[allow(unused)]
-fn fatal<E>(e: E) -> Message
-where
-    E: Into<Error>,
-{
-    KeyboardError::Fatal(Arc::new(e.into())).into()
-}
-
-#[allow(unused)]
-fn fatal_with_context<E, M>(e: E, err_msg: M) -> Message
-where
-    E: Into<Error>,
-    M: Into<String>,
-{
-    KeyboardError::Fatal(Arc::new(e.into().context(err_msg.into()))).into()
 }

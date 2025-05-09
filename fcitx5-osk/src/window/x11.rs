@@ -323,7 +323,11 @@ pub fn is_available() -> bool {
 }
 
 pub unsafe fn set_env(display: Option<&str>) {
-    env::set_var("Display", display.unwrap_or(""));
+    if let Some(display) = display {
+        env::set_var("Display", display);
+    } else {
+        env::remove_var("Display");
+    }
 }
 
 fn xcb_connection() -> Result<(RustConnection, usize)> {

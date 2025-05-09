@@ -176,8 +176,8 @@ impl ConfigState {
                     name: "Size(unit)",
                     id: "size",
                     typ: StepDesc::<u16> {
-                        cur_value: |state: &dyn StateExtractor| state.unit(),
-                        step: |state: &dyn StateExtractor| {
+                        cur_value: |state| state.unit(),
+                        step: |state| {
                             let scale_factor = state.scale_factor();
                             let mut step = 1;
                             loop {
@@ -188,13 +188,19 @@ impl ConfigState {
                             }
                             step
                         },
-                        on_increased: |_, cur_value, delta| {
-                            Some(Message::from(WindowManagerEvent::UpdateUnit(
-                                cur_value + delta,
-                            )))
+                        on_increased: |state, cur_value, delta| {
+                            if state.window_manager_mode() == WindowManagerMode::Normal {
+                                Some(Message::from(WindowManagerEvent::UpdateUnit(
+                                    cur_value + delta,
+                                )))
+                            } else {
+                                None
+                            }
                         },
-                        on_decreased: |_, cur_value, delta| {
-                            if cur_value > delta {
+                        on_decreased: |state, cur_value, delta| {
+                            if cur_value > delta
+                                && state.window_manager_mode() == WindowManagerMode::Normal
+                            {
                                 Some(Message::from(WindowManagerEvent::UpdateUnit(
                                     cur_value - delta,
                                 )))
@@ -209,9 +215,9 @@ impl ConfigState {
                     name: "Placement",
                     id: "placement",
                     typ: OwnedEnumDesc::<Placement> {
-                        cur_value: |state: &dyn StateExtractor| Some(state.placement()),
+                        cur_value: |state| Some(state.placement()),
                         variants: Placement::iter().collect(),
-                        is_enabled: |state: &dyn StateExtractor| {
+                        is_enabled: |state| {
                             state.window_manager_mode() == WindowManagerMode::Normal
                         },
                         on_selected: |_, p| Message::from(WindowManagerEvent::UpdatePlacement(p)),
@@ -222,9 +228,9 @@ impl ConfigState {
                     name: "Indicator Display",
                     id: "indicator_display",
                     typ: OwnedEnumDesc::<IndicatorDisplay> {
-                        cur_value: |state: &dyn StateExtractor| Some(state.indicator_display()),
+                        cur_value: |state| Some(state.indicator_display()),
                         variants: IndicatorDisplay::iter().collect(),
-                        is_enabled: |state: &dyn StateExtractor| {
+                        is_enabled: |state| {
                             state.window_manager_mode() == WindowManagerMode::Normal
                         },
                         on_selected: |_, d| {
@@ -237,7 +243,7 @@ impl ConfigState {
                     name: "Dark Theme",
                     id: "dark_theme",
                     typ: EnumDesc::<String> {
-                        cur_value: |state: &dyn StateExtractor| state.config().dark_theme(),
+                        cur_value: |state| state.config().dark_theme(),
                         variants: themes.clone(),
                         is_enabled: |_| true,
                         on_selected: |_, d| Message::from(UpdateConfigEvent::DarkTheme(d)),
@@ -248,7 +254,7 @@ impl ConfigState {
                     name: "Light Theme",
                     id: "light_theme",
                     typ: EnumDesc::<String> {
-                        cur_value: |state: &dyn StateExtractor| state.config().light_theme(),
+                        cur_value: |state| state.config().light_theme(),
                         variants: themes,
                         is_enabled: |_| true,
                         on_selected: |_, d| Message::from(UpdateConfigEvent::LightTheme(d)),

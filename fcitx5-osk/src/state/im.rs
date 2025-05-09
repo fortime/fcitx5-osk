@@ -6,7 +6,7 @@ use crate::{
     app::Message,
     dbus::{
         client::{
-            Fcitx5ControllerServiceProxy, Fcitx5Services, Fcitx5VirtualKeyboardBackendServiceProxy,
+            Fcitx5Services, IFcitx5ControllerService, IFcitx5VirtualKeyboardBackendService,
             InputMethodInfo,
         },
         server::CandidateAreaState as Fcitx5CandidateAreaState,
@@ -121,18 +121,22 @@ impl ImState {
 
 // call fcitx5
 impl ImState {
-    fn fcitx5_controller_service(&self) -> &Fcitx5ControllerServiceProxy<'static> {
+    pub(super) fn update_fcitx5_services(&mut self, fcitx5_services: Fcitx5Services) {
+        self.fcitx5_services = fcitx5_services;
+    }
+
+    fn fcitx5_controller_service(&self) -> &Arc<dyn IFcitx5ControllerService + Send + Sync> {
         self.fcitx5_services.controller()
     }
 
     fn fcitx5_virtual_keyboard_backend_service(
         &self,
-    ) -> &Fcitx5VirtualKeyboardBackendServiceProxy<'static> {
+    ) -> &Arc<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync> {
         self.fcitx5_services.virtual_keyboard_backend()
     }
 
     fn sync_input_methods_and_current_im(&self) -> Task<Message> {
-        super::call_fcitx5(
+        super::call_dbus(
             self.fcitx5_controller_service(),
             "get input method group info and current im failed".to_string(),
             |s| async move {
@@ -151,7 +155,7 @@ impl ImState {
     }
 
     fn sync_current_input_method(&self) -> Task<Message> {
-        super::call_fcitx5(
+        super::call_dbus(
             self.fcitx5_controller_service(),
             "get current input method failed".to_string(),
             |s| async move {
@@ -162,7 +166,7 @@ impl ImState {
     }
 
     fn select_im(&self, im: String) -> Task<Message> {
-        super::call_fcitx5(
+        super::call_dbus(
             self.fcitx5_controller_service(),
             "select im failed".to_string(),
             |s| async move {
@@ -173,7 +177,7 @@ impl ImState {
     }
 
     fn select_candidate(&self, cursor: usize) -> Task<Message> {
-        super::call_fcitx5(
+        super::call_dbus(
             self.fcitx5_virtual_keyboard_backend_service(),
             format!("select candidate {} failed", cursor),
             |s| async move {
@@ -184,7 +188,7 @@ impl ImState {
     }
 
     fn prev_page(&self, page_index: i32) -> Task<Message> {
-        super::call_fcitx5(
+        super::call_dbus(
             self.fcitx5_virtual_keyboard_backend_service(),
             "prev page failed".to_string(),
             |s| async move {
@@ -195,7 +199,7 @@ impl ImState {
     }
 
     fn next_page(&self, page_index: i32) -> Task<Message> {
-        super::call_fcitx5(
+        super::call_dbus(
             self.fcitx5_virtual_keyboard_backend_service(),
             "next page failed".to_string(),
             |s| async move {

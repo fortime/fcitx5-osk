@@ -21,6 +21,10 @@ pub struct Config {
 
     #[getset(get = "pub")]
     #[serde(default)]
+    log_directives: Vec<String>,
+
+    #[getset(get = "pub")]
+    #[serde(default)]
     key_area_layout_folders: Vec<PathBuf>,
 
     #[getset(get = "pub")]
