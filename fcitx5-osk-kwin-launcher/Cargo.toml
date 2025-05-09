@@ -1,0 +1,23 @@
+[package]
+name = "fcitx5-osk-kwin-launcher"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+keywords.workspace = true
+repository.workspace = true
+
+[dependencies]
+fcitx5-osk-common.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+getset.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zbus.workspace = true
+zvariant.workspace = true
+futures-util.workspace = true
+cvt = "0.1.2"
+libc = "0.2.172"
