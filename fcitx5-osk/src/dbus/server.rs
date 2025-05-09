@@ -1,15 +1,13 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::{os::fd::OwnedFd, sync::Arc};
 
+use fcitx5_osk_common::{
+    dbus::{self, entity},
+    signal::ShutdownFlag,
+};
 use getset::{CopyGetters, Getters};
 use iced::futures::channel::mpsc::UnboundedSender;
-use serde::Deserialize;
-use tokio::sync::oneshot;
 use tracing::instrument;
 use zbus::{fdo::Error, interface, Connection};
-use zvariant::Type;
 
 use crate::{
     app::Message,
@@ -176,32 +174,38 @@ pub struct CandidateAreaState {
     global_cursor_index: i32,
 }
 
+pub enum SocketEnv {
+    WaylandSocket(OwnedFd),
+    WaylandDisplay(String),
+    X11Display(String),
+}
+
 pub struct Fcitx5OskService {
+    mode: entity::WindowManagerMode,
     tx: UnboundedSender<Message>,
-    socket_env_tx: Option<oneshot::Sender<SocketEnv>>,
-    shutdown_flag: Arc<AtomicBool>,
+    socket_env_tx: Option<std::sync::mpsc::Sender<SocketEnv>>,
+    shutdown_flag: ShutdownFlag,
 }
 
 impl Fcitx5OskService {
-    const SERVICE_NAME: &'static str = "fyi.fortime.Fcitx5Osk";
-
     pub fn new(
         tx: UnboundedSender<Message>,
-        socket_env_tx: oneshot::Sender<SocketEnv>,
-        shutdown_flag: Arc<AtomicBool>,
+        socket_env_tx: Option<std::sync::mpsc::Sender<SocketEnv>>,
+        shutdown_flag: ShutdownFlag,
     ) -> Self {
         Self {
+            mode: entity::WindowManagerMode::Normal,
             tx,
-            socket_env_tx: Some(socket_env_tx),
+            socket_env_tx,
             shutdown_flag,
         }
     }
 
     pub async fn start(self, conn: &Connection) -> Result<(), Error> {
         conn.object_server()
-            .at(Self::CONTROLLER_OBJECT_PATH, self)
+            .at(dbus::CONTROLLER_OBJECT_PATH, self)
             .await?;
-        conn.request_name(Self::SERVICE_NAME).await?;
+        conn.request_name(dbus::SERVICE_NAME).await?;
         Ok(())
     }
 
@@ -215,10 +219,8 @@ impl Fcitx5OskService {
     }
 }
 
-#[interface(name = "fyi.fortime.Fcitx5Osk.Controller")]
+#[interface(name = "fyi.fortime.Fcitx5Osk.Controller1")]
 impl Fcitx5OskService {
-    const CONTROLLER_OBJECT_PATH: &'static str = "/fyi/fortime/Fcitx5Osk/Controller";
-
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn show(&self) -> Result<(), Error> {
         self.send(ImPanelEvent::Show)
@@ -229,57 +231,89 @@ impl Fcitx5OskService {
         self.send(ImPanelEvent::Hide)
     }
 
+    /// Unlike show/hide, setting visible to false will cause the program generating a transparent
+    /// view, it won't open/close the window.
     #[instrument(level = "debug", skip(self), err, ret)]
-    async fn change_mode(&self, mode: Mode) -> Result<(), Error> {
+    async fn change_visible(&self, visible: bool) -> Result<(), Error> {
+        self.send(ImPanelEvent::UpdateVisible(visible))
+    }
+
+    #[instrument(level = "debug", skip(self), err, ret)]
+    async fn change_mode(&self, mode: entity::WindowManagerMode) -> Result<(), Error> {
         let mode = match mode {
-            Mode::Normal => WindowManagerMode::Normal,
-            Mode::ExternalDock => WindowManagerMode::ExternalDock,
+            entity::WindowManagerMode::Normal => WindowManagerMode::Normal,
+            entity::WindowManagerMode::KwinLockScreen => WindowManagerMode::KwinLockScreen,
         };
         self.send(WindowManagerEvent::UpdateMode(mode))
     }
 
+    #[instrument(level = "debug", skip(self), ret)]
+    #[zbus(property(emits_changed_signal = "false"))]
+    async fn mode(&self) -> entity::WindowManagerMode {
+        self.mode.clone()
+    }
+
+    #[instrument(level = "debug", skip(self))]
+    #[zbus(property)]
+    async fn set_mode(&mut self, mode: entity::WindowManagerMode) {
+        self.mode = mode;
+    }
+
     /// Socket can be open once only.
     #[instrument(level = "debug", skip(self), err, ret)]
-    async fn open_socket(&mut self, socket_env: SocketEnv) -> Result<(), Error> {
+    async fn open_socket(&mut self, socket: entity::Socket) -> Result<(), Error> {
         if let Some(socket_env_tx) = self.socket_env_tx.take() {
+            match socket {
+                entity::Socket::Wayland(fd) => {
+                    if socket_env_tx
+                        .send(SocketEnv::WaylandSocket(fd.into()))
+                        .is_ok()
+                    {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        // if socket_env can't be sent, it will trigger a shutdown. fcitx5-osk-wayland-launcher
+        // will start a new one.
+        self.shutdown_flag.shutdown();
+        Ok(())
+    }
+
+    /// Socket can be open once only.
+    #[instrument(level = "debug", skip(self), err, ret)]
+    async fn open_display(&mut self, d: entity::Display) -> Result<(), Error> {
+        if let Some(socket_env_tx) = self.socket_env_tx.take() {
+            let socket_env = match d {
+                entity::Display::Wayland(s) => SocketEnv::WaylandDisplay(s),
+                entity::Display::X11(s) => SocketEnv::X11Display(s),
+            };
             if socket_env_tx.send(socket_env).is_ok() {
                 return Ok(());
             }
         }
         // if socket_env can't be sent, it will trigger a shutdown. fcitx5-osk-wayland-launcher
         // will start a new one.
-        self.shutdown_flag.store(true, Ordering::Relaxed);
+        self.shutdown_flag.shutdown();
         Ok(())
     }
 
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn shutdown(&mut self) -> Result<(), Error> {
-        self.shutdown_flag.store(true, Ordering::Relaxed);
+        self.shutdown_flag.shutdown();
         Ok(())
     }
-}
-
-#[derive(Deserialize, Type, PartialEq, Debug)]
-enum Mode {
-    Normal,
-    ExternalDock,
 }
 
 #[derive(Clone, Debug)]
 pub enum ImPanelEvent {
     Show,
     Hide,
+    UpdateVisible(bool),
 }
 
 impl From<ImPanelEvent> for Message {
     fn from(value: ImPanelEvent) -> Self {
         Self::ImPanelEvent(value)
     }
-}
-
-#[derive(Deserialize, Type, PartialEq, Debug)]
-pub enum SocketEnv {
-    WaylandSocket(String),
-    WaylandDisplay(String),
-    X11Display(String),
 }

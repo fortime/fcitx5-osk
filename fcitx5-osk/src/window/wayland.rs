@@ -27,8 +27,21 @@ pub fn is_available() -> bool {
 }
 
 pub unsafe fn set_env(socket: Option<&str>, display: Option<&str>) {
-    env::set_var("WAYLAND_SOCKET", socket.unwrap_or(""));
-    env::set_var("WAYLAND_DISPLAY", display.unwrap_or(""));
+    if let Some(socket) = socket {
+        env::set_var("WAYLAND_SOCKET", socket);
+    } else {
+        env::remove_var("WAYLAND_SOCKET");
+    }
+    if let Some(display) = display {
+        env::set_var("WAYLAND_DISPLAY", display);
+    } else {
+        env::remove_var("WAYLAND_DISPLAY");
+    }
+    tracing::debug!(
+        "socket: {:?}, display: {:?}",
+        env::var("WAYLAND_SOCKET"),
+        env::var("WAYLAND_DISPLAY")
+    );
 }
 
 impl WindowAppearance for Appearance {
@@ -101,19 +114,22 @@ impl WaylandWindowManager {
         let margin = self.margin(&settings);
         let id = Id::unique();
         self.settings.insert(id, settings);
-        if self.mode == WindowManagerMode::ExternalDock && placement == Placement::Dock {
+        if self.mode == WindowManagerMode::KwinLockScreen && placement == Placement::Dock {
+            tracing::debug!("open window[{id}] as input panel surface");
             // create input panel surface, so that it can be shown by kwin in lock screen
             (
                 id,
                 Task::done(WaylandMessage::NewInputPanel {
                     settings: NewInputPanelSettings {
                         size: size.expect("size should not be none in dock mode"),
+                        keyboard: true,
                         use_last_output: !internal,
                     },
                     id,
                 }),
             )
         } else {
+            tracing::debug!("open window[{id}] as layer shell surface");
             (
                 id,
                 Task::done(WaylandMessage::NewLayerShell {
@@ -121,7 +137,7 @@ impl WaylandWindowManager {
                         size,
                         exclusive_zone,
                         anchor,
-                        layer: Layer::Top,
+                        layer: Layer::Overlay,
                         margin,
                         keyboard_interactivity: KeyboardInteractivity::None,
                         use_last_output: !internal,
@@ -271,11 +287,22 @@ impl WindowManager for WaylandWindowManager {
     }
 
     fn fetch_screen_info(&mut self) -> Task<Self::Message> {
-        let mut settings = WindowSettings::new(None, Placement::Float);
-        settings.internal = true;
-        let (id, task) = self.open_window(settings);
-        self.internals.insert(id);
-        task
+        if self.mode == WindowManagerMode::KwinLockScreen {
+            // can't open a window to get size
+            Task::done(
+                Message::from(WindowManagerEvent::ScreenInfo(
+                    Size::new(u16::MAX as f32, u16::MAX as f32),
+                    1.0,
+                ))
+                .into(),
+            )
+        } else {
+            let mut settings = WindowSettings::new(None, Placement::Float);
+            settings.internal = true;
+            let (id, task) = self.open_window(settings);
+            self.internals.insert(id);
+            task
+        }
     }
 
     fn appearance(&self, theme: &Theme, _id: Id) -> Self::Appearance {
@@ -294,7 +321,10 @@ impl WindowManager for WaylandWindowManager {
                 s.size
                     // max can't apply to f32, the size of all window should be in integer.
                     .map(|size| size.height as u32)
-                    .filter(|_| s.placement == Placement::Dock)
+                    .filter(|_| {
+                        s.placement == Placement::Dock
+                            && self.mode != WindowManagerMode::KwinLockScreen
+                    })
             })
             .max()
             .unwrap_or(0);

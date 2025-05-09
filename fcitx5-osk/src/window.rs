@@ -55,7 +55,7 @@ pub trait WindowManager: Default {
 pub enum WindowManagerMode {
     #[default]
     Normal,
-    ExternalDock,
+    KwinLockScreen,
 }
 
 pub struct WindowSettings {

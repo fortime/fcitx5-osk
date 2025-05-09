@@ -1,23 +1,10 @@
-use std::{
-    env,
-    future::Future,
-    path::PathBuf,
-    pin::Pin,
-    process,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    task::{Context, Poll},
-};
+use std::{env, path::PathBuf, process, thread, time::Duration};
 
 use anyhow::Result;
 use app::Message;
 use clap::Parser;
 use config::{Config, ConfigManager};
 use iced::Task;
-use tokio::signal::unix::{signal, Signal, SignalKind};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use window::{wayland, x11};
 
 mod app;
@@ -35,11 +22,7 @@ mod window;
 #[command(version, about, long_about = None)]
 struct Args {
     /// The path of config file.
-    #[arg(
-        short,
-        long,
-        value_name = "PATH",
-    )]
+    #[arg(short, long, value_name = "PATH")]
     config: PathBuf,
 
     /// Force the program running on wayland.
@@ -53,61 +36,6 @@ struct Args {
     /// Waiting DISPLAY, WAYLAND_DISPLAY, WAYLAND_SOCKET from dbus.
     #[arg(long, default_missing_value = "true")]
     wait_for_socket: bool,
-}
-
-pub struct Signals(Vec<(SignalKind, Signal)>);
-
-impl Signals {
-    /// Should be called inside tokio runtime
-    pub async fn try_new(signal_kinds: Vec<SignalKind>) -> Result<Self> {
-        let mut signals = Vec::with_capacity(signal_kinds.len());
-        for kind in signal_kinds {
-            signals.push((kind, signal(kind)?));
-        }
-        Ok(Self(signals))
-    }
-}
-
-impl Future for Signals {
-    type Output = SignalKind;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        for (kind, signal) in self.0.iter_mut() {
-            match signal.poll_recv(cx) {
-                Poll::Pending => continue,
-                Poll::Ready(_) => return Poll::Ready(*kind),
-            }
-        }
-        Poll::Pending
-    }
-}
-
-pub async fn try_default_signals() -> Result<Signals> {
-    Signals::try_new(vec![
-        SignalKind::interrupt(),
-        SignalKind::terminate(),
-        SignalKind::hangup(),
-        SignalKind::pipe(),
-        SignalKind::quit(),
-    ])
-    .await
-}
-
-fn init_log(config: &Config) -> Result<()> {
-    let subscriber = tracing_subscriber::registry().with(EnvFilter::from_default_env());
-    #[cfg(debug_assertions)]
-    let subscriber = subscriber.with(
-        console_subscriber::ConsoleLayer::builder()
-            .with_default_env()
-            .spawn(),
-    );
-
-    if config.log_timestamp().unwrap_or(true) {
-        subscriber.with(fmt::layer()).try_init()?;
-    } else {
-        subscriber.with(fmt::layer().without_time()).try_init()?;
-    }
-    Ok(())
 }
 
 pub fn has_text_within_env(k: &str) -> bool {
@@ -130,27 +58,14 @@ fn load_external_fonts(config: &Config) -> Result<()> {
 fn run(args: Args) -> Result<()> {
     let (config_manager, config_write_bg) = ConfigManager::new(&args.config)?;
 
-    init_log(config_manager.as_ref())?;
+    let _log_guard = fcitx5_osk_common::log::init_log(
+        config_manager.as_ref().log_directives(),
+        config_manager.as_ref().log_timestamp().unwrap_or(false),
+    )?;
 
     load_external_fonts(config_manager.as_ref())?;
 
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
-    let signal_handle = {
-        let shutdown_flag = shutdown_flag.clone();
-        async move {
-            match try_default_signals().await {
-                Ok(signals) => {
-                    let res = signals.await;
-                    shutdown_flag.store(true, Ordering::Relaxed);
-                    tracing::info!("stopping by signal: {:?}", res);
-                }
-                Err(e) => {
-                    shutdown_flag.store(true, Ordering::Relaxed);
-                    tracing::error!("failed to create signal handle: {:?}", e);
-                }
-            }
-        }
-    };
+    let (mut shutdown_flag, signal_handle) = fcitx5_osk_common::signal::shutdown_flag();
 
     // this task will be run before x11/wayland connection is created.
     let init_task = Task::future(async move {
@@ -160,31 +75,55 @@ fn run(args: Args) -> Result<()> {
         Message::Nothing
     });
 
-    if args.force_wayland || (!args.force_x11 && wayland::is_available()) {
-        app::wayland::start(
-            config_manager,
-            init_task,
-            args.wait_for_socket,
-            shutdown_flag,
-        )?;
-    } else if args.force_x11 || x11::is_available() {
-        if args.force_x11 {
-            // unset wayland env, otherwise, winit will use wayland to open windows.
-            unsafe {
-                // Safety, currently there is no other thread running, except console_subscriber.
-                wayland::set_env(None, None);
-            }
+    let handle = thread::spawn({
+        let shutdown_flag = shutdown_flag.clone();
+        move || {
+            let res = if args.force_wayland || (!args.force_x11 && wayland::is_available()) {
+                app::wayland::start(
+                    config_manager,
+                    init_task,
+                    args.wait_for_socket,
+                    shutdown_flag.clone(),
+                )
+            } else if args.force_x11 || x11::is_available() {
+                if args.force_x11 {
+                    // unset wayland env, otherwise, winit will use wayland to open windows.
+                    unsafe {
+                        // Safety, currently there is no other thread running, except console_subscriber.
+                        wayland::set_env(None, None);
+                    }
+                }
+                app::x11::start(
+                    config_manager,
+                    init_task,
+                    args.wait_for_socket,
+                    shutdown_flag.clone(),
+                )
+            } else {
+                Err(anyhow::anyhow!("No Wayland or X11 Environment"))
+            };
+            // make sure shutdown
+            shutdown_flag.shutdown();
+            res
         }
-        app::x11::start(
-            config_manager,
-            init_task,
-            args.wait_for_socket,
-            shutdown_flag,
-        )?;
-    } else {
-        anyhow::bail!("No Wayland or X11 Environment");
+    });
+
+    if !handle.is_finished() {
+        shutdown_flag.wait_for_shutdown_blocking();
     }
-    Ok(())
+
+    let mut count = 0;
+    while !handle.is_finished() {
+        if count >= 10 {
+            anyhow::bail!("timeout of waiting the keyboard to quit");
+        }
+        thread::sleep(Duration::from_millis(300));
+        count += 1;
+    }
+    match handle.join() {
+        Ok(res) => res,
+        Err(e) => anyhow::bail!("join error: {e:?}"),
+    }
 }
 
 /// on:

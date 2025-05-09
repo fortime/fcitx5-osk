@@ -1,0 +1,20 @@
+[package]
+name = "fcitx5-osk-common"
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+keywords.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+getset.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+zbus.workspace = true
+zvariant.workspace = true
+console-subscriber.workspace = true
+tempfile.workspace = true

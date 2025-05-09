@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["fcitx5-osk"]
+members = [
+    "fcitx5-osk",
+    "fcitx5-osk-common"
+]
 
 [workspace.package]
 description = "An onscreen keyboard working with fcitx5"
@@ -15,6 +18,8 @@ repository = "https://github.com/fortime/fcitx5-osk"
 readme = "README.md"
 
 [workspace.dependencies]
+fcitx5-osk-common = { version = "0.1", path = "./fcitx5-osk-common" }
+
 anyhow = "1.0.94"
 clap = { version = "4.5.23", features = ["cargo", "derive"] }
 dark-light = "1.1.1"
@@ -37,7 +42,18 @@ iced_font_awesome = "0.2.1"
 x11rb = { version = "0.13.1", default-features = false, features = ["dl-libxcb"] }
 strum = { version = "0.27.1", features = ["derive"] }
 console-subscriber = "0.4.1"
+futures-util = "0.3.31"
+async-trait = "0.1.88"
+wayland-client = "0.31.8"
+wayland-protocols = "0.32.6"
+tempfile = "3.20.0"
 
 [patch.crates-io]
 #iced_layershell = { git = "https://github.com/fortime/exwlshelleventloop.git", branch = "feat/fcitx5-osk" }
 iced_layershell = { path = "../exwlshelleventloop/iced_layershell" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

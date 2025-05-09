@@ -1,13 +1,17 @@
-use std::{marker::PhantomData, rc::Rc, time::Duration};
+use std::{marker::PhantomData, rc::Rc, sync::Arc, time::Duration};
 
 use anyhow::Result;
+use fcitx5_osk_common::dbus::{client::Fcitx5OskServices, entity};
 use iced::{window::Id, Color, Element, Font, Point, Size, Task, Theme};
 use tokio::time;
 
 use crate::{
     app::{MapTask, Message},
     config::{Config, IndicatorDisplay, Placement},
-    dbus::client::{Fcitx5Services, Fcitx5VirtualKeyboardServiceProxy},
+    dbus::{
+        client::{Fcitx5Services, IFcitx5VirtualKeyboardService},
+        server::ImPanelEvent,
+    },
     layout::{self, KeyAreaLayout, ToElementCommonParams},
     state::{LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
@@ -95,6 +99,10 @@ impl<WM> WindowState<WM> {
 
     fn movable(&self) -> bool {
         self.movable
+    }
+
+    fn closing(&self) -> bool {
+        matches!(self.state, InnerWindowState::Closing(_))
     }
 }
 
@@ -301,6 +309,7 @@ pub struct WindowManagerState<WM> {
     indicator_display: IndicatorDisplay,
     to_be_opened: Option<ToBeOpened>,
     fcitx5_services: Fcitx5Services,
+    fcitx5_osk_services: Fcitx5OskServices,
     wm: WM,
 }
 
@@ -312,6 +321,7 @@ where
         config: &Config,
         key_area_layout: Rc<KeyAreaLayout>,
         fcitx5_services: Fcitx5Services,
+        fcitx5_osk_services: Fcitx5OskServices,
     ) -> Result<Self> {
         Ok(Self {
             scale_factor: 1.,
@@ -324,6 +334,7 @@ where
             indicator_display: config.indicator_display(),
             to_be_opened: None,
             fcitx5_services,
+            fcitx5_osk_services,
             wm: Default::default(),
         })
     }
@@ -498,14 +509,14 @@ where
     pub fn placement(&self) -> Placement {
         match self.mode() {
             WindowManagerMode::Normal => self.placement,
-            WindowManagerMode::ExternalDock => Placement::Dock,
+            WindowManagerMode::KwinLockScreen => Placement::Dock,
         }
     }
 
     pub fn indicator_display(&self) -> IndicatorDisplay {
         match self.mode() {
             WindowManagerMode::Normal => self.indicator_display,
-            WindowManagerMode::ExternalDock => IndicatorDisplay::AlwaysOff,
+            WindowManagerMode::KwinLockScreen => IndicatorDisplay::AlwaysOff,
         }
     }
 
@@ -556,14 +567,15 @@ where
     pub fn shutdown(&mut self) -> Task<WM::Message> {
         // in fcitx5, calling hideVirtualKeyboardForcibly doesn't set InputMethodMode::PhysicalKeyboard. it causes that if we doesn't press any physical keys fcitx5 will still kept in InputMethodMode::VirtualKeyboard and its icon in tray will be gone.
         // self.fcitx5_hide().chain(iced::exit()).map_task()
-        let mut task = self
-            .keyboard_window_state
-            .close(&mut self.wm, CloseOpSource::UserAction);
-        task = task.chain(
-            self.indicator_window_state
-                .close(&mut self.wm, CloseOpSource::UserAction),
-        );
-        task.chain(iced::exit())
+        //let mut task = self
+        //    .keyboard_window_state
+        //    .close(&mut self.wm, CloseOpSource::UserAction);
+        //task = task.chain(
+        //    self.indicator_window_state
+        //        .close(&mut self.wm, CloseOpSource::UserAction),
+        //);
+        //task.chain(iced::exit())
+        iced::exit()
     }
 
     pub fn open_indicator(&mut self) -> Task<WM::Message> {
@@ -593,6 +605,10 @@ where
         if self.keyboard_window_state.id().is_none() {
             self.to_be_opened = Some(ToBeOpened::Keyboard);
             task = task.chain(self.wm.fetch_screen_info());
+        } else if self.keyboard_window_state.closing() {
+            // don't chain fetch_screen_info, otherwise, to_be_opened will be consumed before the
+            // keyboard is closed.
+            self.to_be_opened = Some(ToBeOpened::Keyboard);
         } else {
             // manually increase close_req_token
             self.keyboard_window_state.inc_close_req_token();
@@ -602,11 +618,11 @@ where
 
     pub fn close_keyboard(&mut self, source: CloseOpSource) -> Task<WM::Message> {
         match source {
-            CloseOpSource::Fcitx5 | CloseOpSource::DbusController => self
+            CloseOpSource::Fcitx5 => self
                 .keyboard_window_state
                 .close_with_delay(Duration::from_millis(1000), source)
                 .map_task(),
-            CloseOpSource::UserAction => {
+            CloseOpSource::UserAction | CloseOpSource::DbusController => {
                 let mut task = self.keyboard_window_state.close(&mut self.wm, source);
                 if (self.indicator_display() == IndicatorDisplay::Auto
                     || self.indicator_display() == IndicatorDisplay::AlwaysOn)
@@ -620,18 +636,40 @@ where
     }
 
     fn update_mode(&mut self, mode: WindowManagerMode) -> Task<WM::Message> {
+        let mut task = super::call_dbus(
+            self.fcitx5_osk_services.controller(),
+            "setting fcitx5 osk mode failed".to_string(),
+            |s| async move {
+                let mode = match mode {
+                    WindowManagerMode::Normal => entity::WindowManagerMode::Normal,
+                    WindowManagerMode::KwinLockScreen => {
+                        entity::WindowManagerMode::KwinLockScreen
+                    }
+                };
+                s.set_mode(mode).await?;
+                Ok(Message::Nothing)
+            },
+        )
+        .map_task();
         if !self.wm.set_mode(mode) {
-            return Message::from_nothing();
+            return task;
         }
         match self.mode() {
             WindowManagerMode::Normal => {
-                let mut task = self.reset_indicator();
+                task = task.chain(self.reset_indicator());
                 if self.keyboard_window_state.id().is_some() {
                     task = task.chain(self.reopen_keyboard());
                 }
                 task
             }
-            WindowManagerMode::ExternalDock => self.open_keyboard().chain(self.close_indicator()),
+            WindowManagerMode::KwinLockScreen => task
+                .chain(self.close_indicator())
+                // set the keyboard invisible, so it won't appear when the user touches the
+                // password input box.
+                .chain(Task::done(
+                    Message::from(ImPanelEvent::UpdateVisible(false)).into(),
+                ))
+                .chain(self.open_keyboard()),
         }
     }
 
@@ -911,23 +949,18 @@ where
 
 // call fcitx5
 impl<WM> WindowManagerState<WM> {
-    fn fcitx5_virtual_keyboard_service(&self) -> &Fcitx5VirtualKeyboardServiceProxy<'static> {
+    pub(super) fn update_fcitx5_services(&mut self, fcitx5_services: Fcitx5Services) {
+        self.fcitx5_services = fcitx5_services;
+    }
+
+    fn fcitx5_virtual_keyboard_service(
+        &self,
+    ) -> &Arc<dyn IFcitx5VirtualKeyboardService + Send + Sync> {
         self.fcitx5_services.virtual_keyboard()
     }
 
-    fn _fcitx5_toggle(&self) -> Task<Message> {
-        super::call_fcitx5(
-            self.fcitx5_virtual_keyboard_service(),
-            "send toggle event failed".to_string(),
-            |s| async move {
-                s.toggle_virtual_keyboard().await?;
-                Ok(Message::Nothing)
-            },
-        )
-    }
-
     fn fcitx5_show(&self) -> Task<Message> {
-        super::call_fcitx5(
+        super::call_dbus(
             self.fcitx5_virtual_keyboard_service(),
             "send show event failed".to_string(),
             |s| async move {
@@ -938,7 +971,7 @@ impl<WM> WindowManagerState<WM> {
     }
 
     fn fcitx5_hide(&self) -> Task<Message> {
-        super::call_fcitx5(
+        super::call_dbus(
             self.fcitx5_virtual_keyboard_service(),
             "send hide event failed".to_string(),
             |s| async move {

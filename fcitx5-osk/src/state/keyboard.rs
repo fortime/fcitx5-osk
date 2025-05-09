@@ -16,7 +16,7 @@ use xkeysym::Keysym;
 use crate::{
     app::Message,
     dbus::client::{
-        Fcitx5Services, Fcitx5VirtualKeyboardBackendServiceProxy, Fcitx5VirtualKeyboardServiceProxy,
+        Fcitx5Services, IFcitx5VirtualKeyboardBackendService, IFcitx5VirtualKeyboardService,
     },
     font,
     key_set::{Key, KeyValue, ThinKeyValue},
@@ -372,13 +372,19 @@ impl KeyboardState {
 
 // call fcitx5
 impl KeyboardState {
+    pub(super) fn update_fcitx5_services(&mut self, fcitx5_services: Fcitx5Services) {
+        self.fcitx5_services = fcitx5_services;
+    }
+
     fn fcitx5_virtual_keyboard_backend_service(
         &self,
-    ) -> &Fcitx5VirtualKeyboardBackendServiceProxy<'static> {
+    ) -> &Arc<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync> {
         self.fcitx5_services.virtual_keyboard_backend()
     }
 
-    fn fcitx5_virtual_keyboard_service(&self) -> &Fcitx5VirtualKeyboardServiceProxy<'static> {
+    fn fcitx5_virtual_keyboard_service(
+        &self,
+    ) -> &Arc<dyn IFcitx5VirtualKeyboardService + Send + Sync> {
         self.fcitx5_services.virtual_keyboard()
     }
 
@@ -423,7 +429,7 @@ impl KeyboardState {
             // not send caps lock and shift state.
             let modifiers =
                 self.modifiers & !(ModifierState::CapsLock as u32) & !(ModifierState::Shift as u32);
-            let next = super::call_fcitx5(
+            let next = super::call_dbus(
                 self.fcitx5_virtual_keyboard_backend_service(),
                 format!("send key pressed event failed: {}", common.key_name),
                 |s| async move {
@@ -483,7 +489,7 @@ impl KeyboardState {
             let modifiers =
                 self.modifiers & !(ModifierState::CapsLock as u32) & !(ModifierState::Shift as u32);
 
-            super::call_fcitx5(
+            super::call_dbus(
                 self.fcitx5_virtual_keyboard_backend_service(),
                 format!(
                     "send key pressed/released event failed: {}",
@@ -552,7 +558,7 @@ impl KeyboardState {
         if self.fcitx5_hidden != Fcitx5Hidden::Unset {
             // make sure to unset the flag.
             self.fcitx5_hidden = Fcitx5Hidden::Clearing;
-            super::call_fcitx5(
+            super::call_dbus(
                 self.fcitx5_virtual_keyboard_service(),
                 "show virtual keyboard in pressing event",
                 |s| async move {
@@ -634,7 +640,7 @@ fn to_modifier_state(key_value: ThinKeyValue) -> ModifierState {
 }
 
 async fn on_key_release(
-    s: Fcitx5VirtualKeyboardBackendServiceProxy<'static>,
+    s: Arc<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync>,
     key_state: &KeyState,
     modifier_state: ModifierState,
     modifiers: u32,
