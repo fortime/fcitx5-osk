@@ -2,7 +2,8 @@
 resolver = "2"
 members = [
     "fcitx5-osk",
-    "fcitx5-osk-common"
+    "fcitx5-osk-common",
+    "fcitx5-osk-kwin-launcher"
 ]
 
 [workspace.package]
