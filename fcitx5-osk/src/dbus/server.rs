@@ -250,7 +250,7 @@ impl Fcitx5OskService {
     #[instrument(level = "debug", skip(self), ret)]
     #[zbus(property(emits_changed_signal = "false"))]
     async fn mode(&self) -> entity::WindowManagerMode {
-        self.mode.clone()
+        self.mode
     }
 
     #[instrument(level = "debug", skip(self))]

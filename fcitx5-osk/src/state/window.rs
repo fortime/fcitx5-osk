@@ -636,25 +636,29 @@ where
     }
 
     fn update_mode(&mut self, mode: WindowManagerMode) -> Task<WM::Message> {
+        let res = self.wm.set_mode(mode);
+
+        // use current mode.
+        let mode = self.wm.mode();
         let mut task = super::call_dbus(
             self.fcitx5_osk_services.controller(),
             "setting fcitx5 osk mode failed".to_string(),
             |s| async move {
                 let mode = match mode {
                     WindowManagerMode::Normal => entity::WindowManagerMode::Normal,
-                    WindowManagerMode::KwinLockScreen => {
-                        entity::WindowManagerMode::KwinLockScreen
-                    }
+                    WindowManagerMode::KwinLockScreen => entity::WindowManagerMode::KwinLockScreen,
                 };
                 s.set_mode(mode).await?;
                 Ok(Message::Nothing)
             },
         )
         .map_task();
-        if !self.wm.set_mode(mode) {
+
+        if !res {
             return task;
         }
-        match self.mode() {
+
+        match mode {
             WindowManagerMode::Normal => {
                 task = task.chain(self.reset_indicator());
                 if self.keyboard_window_state.id().is_some() {

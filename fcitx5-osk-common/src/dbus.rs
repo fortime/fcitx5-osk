@@ -2,7 +2,7 @@ pub mod entity {
     use serde::{Deserialize, Serialize};
     use zvariant::{OwnedFd, OwnedValue, Type, Value};
 
-    #[derive(Clone, Deserialize, Serialize, Type, PartialEq, Debug, Value, OwnedValue)]
+    #[derive(Clone, Copy, Deserialize, Serialize, Type, PartialEq, Debug, Value, OwnedValue)]
     pub enum WindowManagerMode {
         Normal = 0,
         KwinLockScreen = 1,

@@ -95,9 +95,7 @@ async fn watch_fcitx5_osk(
                         .await?;
                 if let Some(socket) = socket.take() {
                     // change mode to WaylandInputPanel, if it is using WAYLAND_SOCKET
-                    proxy
-                        .change_mode(WindowManagerMode::KwinLockScreen)
-                        .await?;
+                    proxy.change_mode(WindowManagerMode::KwinLockScreen).await?;
                     proxy
                         .open_socket(common_dbus::entity::Socket::Wayland(socket.into()))
                         .await?;
@@ -210,14 +208,25 @@ async fn watch_kwin_virtual_keyboard(
                             exit: Arc<AtomicBool>,
                             in_lockscreen: bool|
                     -> Result<()> {
+            let expected_mode = if in_lockscreen {
+                WindowManagerMode::KwinLockScreen
+            } else {
+                WindowManagerMode::Normal
+            };
             loop {
                 let mode = fcitx5_osk_services.controller().mode().await;
-                if (in_lockscreen && mode == Ok(WindowManagerMode::KwinLockScreen))
-                    || (!in_lockscreen && mode == Ok(WindowManagerMode::Normal))
+                if (in_lockscreen && mode == Ok(expected_mode))
+                    || (!in_lockscreen && mode == Ok(expected_mode))
                 {
                     break;
                 } else if exit.load(Ordering::Relaxed) {
                     return Ok(());
+                } else {
+                    // make sure mode is set
+                    fcitx5_osk_services
+                        .controller()
+                        .change_mode(expected_mode)
+                        .await?;
                 }
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }

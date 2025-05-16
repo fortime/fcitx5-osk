@@ -340,7 +340,8 @@ impl WindowManager for WaylandWindowManager {
     }
 
     fn set_mode(&mut self, mode: WindowManagerMode) -> bool {
-        if self.mode != mode {
+        // can't change to other mode, once it is KwinLockScreen
+        if self.mode != WindowManagerMode::KwinLockScreen && self.mode != mode {
             self.mode = mode;
             true
         } else {
