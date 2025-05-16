@@ -8,10 +8,7 @@ use tokio::time;
 use crate::{
     app::{MapTask, Message},
     config::{Config, IndicatorDisplay, Placement},
-    dbus::{
-        client::{Fcitx5Services, IFcitx5VirtualKeyboardService},
-        server::ImPanelEvent,
-    },
+    dbus::client::{Fcitx5Services, IFcitx5VirtualKeyboardService},
     layout::{self, KeyAreaLayout, ToElementCommonParams},
     state::{LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
@@ -668,12 +665,8 @@ where
             }
             WindowManagerMode::KwinLockScreen => task
                 .chain(self.close_indicator())
-                // set the keyboard invisible, so it won't appear when the user touches the
-                // password input box.
-                .chain(Task::done(
-                    Message::from(ImPanelEvent::UpdateVisible(false)).into(),
-                ))
-                .chain(self.open_keyboard()),
+                // open keyboard in input-method activation
+                .chain(self.close_keyboard(CloseOpSource::UserAction)),
         }
     }
 

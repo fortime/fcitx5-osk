@@ -139,10 +139,13 @@ mod v1 {
     use zbus::{Error as ZbusError, Result as ZbusResult};
 
     use crate::{
-        app::wayland::WaylandMessage,
-        dbus::client::{
-            IFcitx5ControllerService, IFcitx5VirtualKeyboardBackendService,
-            IFcitx5VirtualKeyboardService, InputMethodGroupInfo, InputMethodInfo,
+        app::{wayland::WaylandMessage, Message},
+        dbus::{
+            client::{
+                IFcitx5ControllerService, IFcitx5VirtualKeyboardBackendService,
+                IFcitx5VirtualKeyboardService, InputMethodGroupInfo, InputMethodInfo,
+            },
+            server::ImPanelEvent,
         },
     };
 
@@ -318,7 +321,7 @@ mod v1 {
             _conn: &Connection,
             _qhandle: &QueueHandle<Self>,
         ) {
-            let res: Result<()> = match event {
+            let res = match event {
                 ZwpInputMethodV1Event::Activate { id } => {
                     tracing::debug!("wayland input method v1 activate");
                     let mut guard = state.input_method_context();
@@ -326,10 +329,9 @@ mod v1 {
                     if let Some(old) = old {
                         old.destroy();
                     }
-                    //state
-                    //    .tx
-                    //    .unbounded_send(WaylandMessage::from(Message::from(ImPanelEvent::Show)))
-                    Ok(())
+                    state
+                        .tx
+                        .unbounded_send(WaylandMessage::from(Message::from(ImPanelEvent::Show)))
                 }
                 ZwpInputMethodV1Event::Deactivate { context } => {
                     tracing::debug!("wayland input method v1 deactivate");
