@@ -1,6 +1,8 @@
+#[cfg(debug_assertions)]
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use anyhow::Result;
+#[cfg(debug_assertions)]
 use tempfile::{NamedTempFile, TempPath};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
