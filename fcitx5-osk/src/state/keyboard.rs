@@ -192,7 +192,7 @@ impl KeyboardState {
             Text::new(key_value.symbol())
                 .align_x(Horizontal::Center)
                 .align_y(Vertical::Center)
-                .font(self.font)
+                .font(key_value.font().unwrap_or(self.font))
                 .size(self.primary_text_size_u * unit),
             holding_key_state.key_widget_event.finger,
         )
@@ -268,27 +268,40 @@ impl KeyboardState {
             let secondary_height = inner_height / 4;
             let primary_height = inner_height - 2 * secondary_height;
             let mut column: Column<Message> = Column::new();
-            let top = Text::new(key.secondary_text(is_shift_set, is_caps_lock_set));
-            let middle = Text::new(key.primary_text(is_shift_set, is_caps_lock_set));
-            let key_value = key.key_value(is_shift_set, is_caps_lock_set);
-            column = column
-                .push(
-                    top.width(inner_width)
-                        .height(secondary_height)
-                        .font(self.font)
-                        .size((self.secondary_text_size_u * unit) as f32)
-                        .align_y(Vertical::Center)
-                        .align_x(Horizontal::Right),
+            let primary_key_value = key.primary();
+            let secondary_key_values = key.secondaries();
+            let (primary, secondary) = if is_shift_set ^ is_caps_lock_set {
+                (
+                    secondary_key_values.first().unwrap_or(primary_key_value),
+                    secondary_key_values.first().map(|_| primary_key_value),
                 )
-                .push(
-                    middle
-                        .width(inner_width)
-                        .height(primary_height)
-                        .font(self.font)
-                        .size((self.primary_text_size_u * unit) as f32)
-                        .align_y(Vertical::Center)
-                        .align_x(Horizontal::Center),
-                );
+            } else {
+                (primary_key_value, secondary_key_values.first())
+            };
+            let middle = Text::new(primary.symbol()).font(primary.font().unwrap_or(self.font));
+            let mut top = Row::new().spacing(unit);
+            for secondary in secondary
+                .into_iter()
+                .chain(secondary_key_values.iter().skip(1))
+            {
+                let text = Text::new(secondary.symbol())
+                    .font(secondary.font().unwrap_or(self.font))
+                    .width(inner_width)
+                    .height(secondary_height)
+                    .size((self.secondary_text_size_u * unit) as f32)
+                    .align_y(Vertical::Center)
+                    .align_x(Horizontal::Right);
+                top = top.push(text);
+            }
+            let key_value = key.key_value(is_shift_set, is_caps_lock_set);
+            column = column.push(top.height(secondary_height)).push(
+                middle
+                    .width(inner_width)
+                    .height(primary_height)
+                    .size((self.primary_text_size_u * unit) as f32)
+                    .align_y(Vertical::Center)
+                    .align_x(Horizontal::Center),
+            );
             let id = self.id;
             let common = KeyEventCommon::new(id, key_name, key_value);
             (
@@ -323,7 +336,7 @@ impl KeyboardState {
     }
 
     pub fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Message>> {
-        const MARGIN_U: u16 = 2;
+        const MARGIN_U: u16 = 1;
         let (width, height) = size;
 
         let holding_key_state = self.holding_key_state.as_ref()?;

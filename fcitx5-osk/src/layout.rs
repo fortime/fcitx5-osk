@@ -84,11 +84,11 @@ impl KeyAreaLayout {
     }
 
     fn default_popup_key_width_u() -> u16 {
-        4
+        8
     }
 
     fn default_popup_key_height_u() -> u16 {
-        4
+        6
     }
 
     fn default_secondary_text_size_u() -> u16 {

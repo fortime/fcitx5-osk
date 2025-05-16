@@ -1,13 +1,14 @@
 use std::{collections::HashMap, path::PathBuf, rc::Rc, result::Result as StdResult};
 
 use getset::{CopyGetters, Getters};
+use iced::Font;
 use serde::{
     de::{Error, Unexpected},
     Deserialize, Deserializer,
 };
 use xkeysym::Keysym;
 
-use crate::store::IdAndConfigPath;
+use crate::{font, store::IdAndConfigPath};
 
 #[derive(Deserialize)]
 struct RawKeyValue {
@@ -19,6 +20,8 @@ struct RawKeyValue {
     character: Option<char>,
     #[serde(alias = "kc")]
     keycode: Option<i16>,
+    #[serde(alias = "f")]
+    font: Option<String>,
 }
 
 #[derive(CopyGetters, Getters)]
@@ -29,6 +32,8 @@ pub struct KeyValue {
     keysym: Keysym,
     #[getset(get_copy = "pub")]
     keycode: Option<i16>,
+    #[getset(get_copy = "pub")]
+    font: Option<Font>,
 }
 
 #[derive(CopyGetters, Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +83,7 @@ impl<'de> Deserialize<'de> for KeyValue {
             symbol,
             keysym,
             keycode: raw.keycode,
+            font: raw.font.as_deref().map(font::load),
         })
     }
 }
@@ -99,17 +105,9 @@ struct RawKey {
     secondaries: Vec<KeyValue>,
 }
 
-struct KeyTexts {
-    primary_text: String,
-    secondary_text: String,
-    shifted_primary_text: String,
-    shifted_secondary_text: String,
-}
-
 #[derive(Clone)]
 pub struct Key {
     raw: Rc<RawKey>,
-    texts: Rc<KeyTexts>,
 }
 
 impl Key {
@@ -130,22 +128,6 @@ impl Key {
         !self.raw.secondaries.is_empty()
     }
 
-    pub fn primary_text(&self, shift: bool, caps_lock: bool) -> &str {
-        if Self::is_shifted(shift, caps_lock) {
-            &self.texts.shifted_primary_text
-        } else {
-            &self.texts.primary_text
-        }
-    }
-
-    pub fn secondary_text(&self, shift: bool, caps_lock: bool) -> &str {
-        if Self::is_shifted(shift, caps_lock) {
-            &self.texts.shifted_secondary_text
-        } else {
-            &self.texts.secondary_text
-        }
-    }
-
     pub fn primary(&self) -> &KeyValue {
         &self.raw.primary
     }
@@ -161,41 +143,7 @@ impl<'de> Deserialize<'de> for Key {
         D: Deserializer<'de>,
     {
         let raw: RawKey = Deserialize::deserialize(deserializer)?;
-        let primary_text = raw.primary.symbol().to_string();
-        let secondary_text = raw
-            .secondaries
-            .iter()
-            .map(|k| k.symbol().as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let shifted_primary_text = raw
-            .secondaries
-            .first()
-            .map(|k| k.symbol().to_string())
-            .unwrap_or_else(|| primary_text.clone());
-        let shifted_secondary_text = if raw.secondaries.is_empty() {
-            Default::default()
-        } else {
-            [
-                primary_text.clone(),
-                raw.secondaries
-                    .iter()
-                    .skip(1)
-                    .map(|k| k.symbol().as_str())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            ]
-            .join(" ")
-        };
-        Ok(Self {
-            raw: Rc::new(raw),
-            texts: Rc::new(KeyTexts {
-                primary_text,
-                secondary_text,
-                shifted_primary_text,
-                shifted_secondary_text,
-            }),
-        })
+        Ok(Self { raw: Rc::new(raw) })
     }
 }
 

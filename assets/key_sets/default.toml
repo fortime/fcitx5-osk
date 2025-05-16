@@ -166,7 +166,7 @@ kc = -51
 p = {ks = 0xffe5, s = "CapsLock", kc = 66}
 
 [keys.k_escape]
-p = {ks = 0xff1b, kc = 9}
+p = {ks = 0xff1b, s = "Esc", kc = 9}
 
 [keys.k_a]
 p = {c = "a", kc = 38}
@@ -327,3 +327,15 @@ p = {ks = 0xff61, s = "Print", kc = 218}
 
 [keys.k_right_ctrl]
 p = {ks = 0xffe4, s = "Ctrl", kc = 105}
+
+[keys.k_left_arrow]
+p = {ks = 0x08fb, s = "←", kc = 113, f = "Adwaita Sans"}
+
+[keys.k_up_arrow]
+p = {ks = 0x08fc, s = "↑", kc = 111, f = "Adwaita Sans"}
+
+[keys.k_down_arrow]
+p = {ks = 0x08fe, s = "↓", kc = 116, f = "Adwaita Sans"}
+
+[keys.k_right_arrow]
+p = {ks = 0x08fd, s = "→", kc = 114, f = "Adwaita Sans"}

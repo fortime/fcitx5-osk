@@ -27,8 +27,8 @@ elements = ["k42:18", "k43", "k44", "k45", "k46", "k47", "k48", "k49", "k50", "k
 [[elements]]
 height = 6
 spacing = 1
-# 8 + 10 + 8 + 10 + 39 + 10 + 8 + 8 + 24 + 8 = 133
-elements = ["p:8", "k54:10", "k55", "k56:10", "k57:39", "k58:10", "k59", "k60", "p:24"]
+# 8 + 10 + 8 + 10 + 39 + 10 + 8 + 8 + 5 + 5 + 5 + 5 + 12 = 133
+elements = ["k61", "k54:10", "k55", "k56:10", "k57:39", "k58:10", "k59", "k60", "k62:5", "k63:5", "k64:5", "k65:5"]
 
 [key_mappings]
 k1 = "k_grave_accent"
@@ -59,7 +59,6 @@ k25 = "k_p"
 k26 = "k_open_bracket"
 k27 = "k_close_bracket"
 k28 = "k_backslash"
-#k29 = "k_escape"
 k29 = "k_caps_lock"
 k30 = "k_a"
 k31 = "k_s"
@@ -92,3 +91,8 @@ k57 = "k_space"
 k58 = "k_right_alt"
 k59 = "k_right_super"
 k60 = "k_right_ctrl"
+k61 = "k_escape"
+k62 = "k_left_arrow"
+k63 = "k_up_arrow"
+k64 = "k_down_arrow"
+k65 = "k_right_arrow"
