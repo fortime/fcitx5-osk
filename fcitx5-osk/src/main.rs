@@ -1,4 +1,9 @@
-use std::{env, path::PathBuf, process, thread, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    process, thread,
+    time::Duration,
+};
 
 use anyhow::Result;
 use app::Message;
@@ -23,7 +28,7 @@ mod window;
 struct Args {
     /// The path of config file.
     #[arg(short, long, value_name = "PATH")]
-    config: PathBuf,
+    config: Option<PathBuf>,
 
     /// Force the program running on wayland.
     #[arg(long, default_missing_value = "true")]
@@ -56,7 +61,19 @@ fn load_external_fonts(config: &Config) -> Result<()> {
 }
 
 fn run(args: Args) -> Result<()> {
-    let (config_manager, config_write_bg) = ConfigManager::new(&args.config)?;
+    let config_path = if let Ok(path) = env::var("FCITX5_OSK_CONFIG") {
+        Path::new(&path).to_path_buf()
+    } else if let Some(path) = &args.config {
+        path.clone()
+    } else if let Ok(home_path) = env::var("HOME") {
+        let mut buf = PathBuf::new();
+        buf.push(home_path);
+        buf.push(".config/fcitx5-osk/config.toml");
+        buf
+    } else {
+        anyhow::bail!("can't get the path of config file, specify it by -c or FCITX5_OSK_CONFIG");
+    };
+    let (config_manager, config_write_bg) = ConfigManager::new(&config_path)?;
 
     let _log_guard = fcitx5_osk_common::log::init_log(
         config_manager.as_ref().log_directives(),

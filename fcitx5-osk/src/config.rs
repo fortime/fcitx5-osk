@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 use tokio::fs;
 
-#[derive(Deserialize, Serialize, CopyGetters, Getters, Setters, Default, Clone)]
+#[derive(Deserialize, Serialize, CopyGetters, Getters, Setters, Clone)]
 pub struct Config {
     #[getset(get_copy = "pub")]
     log_timestamp: Option<bool>,
@@ -131,7 +131,7 @@ impl ConfigManager {
         let config = if path.exists() {
             Figment::new().merge(Toml::file(path)).extract()?
         } else {
-            Default::default()
+            Figment::new().extract()?
         };
         let (tx, mut rx) = mpsc::unbounded();
         let res = Self {
@@ -151,6 +151,14 @@ impl ConfigManager {
                         Err(_) => break false,
                     }
                 };
+
+                if let Some(parent) = path.parent() {
+                    if !parent.exists() {
+                        if let Err(e) = fs::create_dir_all(parent).await {
+                            tracing::error!("writing {parent:?} failed: {e}");
+                        }
+                    }
+                }
 
                 if let Err(e) = fs::write(&path, latest).await {
                     tracing::error!("writing {path:?} failed: {e}");
