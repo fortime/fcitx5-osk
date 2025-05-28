@@ -121,8 +121,6 @@ impl WaylandKeyboard {
     pub fn theme(&self, id: Id) -> Theme {
         self.inner.theme(id)
     }
-
-    pub fn remove_id(&mut self, _id: Id) {}
 }
 
 pub fn start(
@@ -143,7 +141,6 @@ pub fn start(
         clap::crate_name!(),
         WaylandKeyboard::update,
         WaylandKeyboard::view,
-        WaylandKeyboard::remove_id,
     )
     .style(WaylandKeyboard::appearance)
     .theme(WaylandKeyboard::theme)
