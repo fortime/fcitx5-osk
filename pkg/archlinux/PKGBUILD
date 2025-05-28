@@ -1,0 +1,52 @@
+# Maintainer: Morgan <morganamilo@archlinux.org>
+pkgbase=fcitx5-osk
+pkgname=(
+    fcitx5-osk-git
+    fcitx5-osk-kwin-launcher-git
+)
+pkgver=v0.1.0
+pkgrel=1
+pkgdesc='An onscreen keyboard working with fcitx5'
+url='https://github.com/fortime/fcitx5-osk'
+source=("git+https://github.com/fortime/fcitx5-osk")
+arch=('x86_64')
+license=('MIT')
+makedepends=('cargo' 'git')
+depends=('fcitx5')
+sha256sums=(SKIP)
+
+pkgver() {
+  cd "$srcdir/${_pkgbase}"
+  git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
+}
+
+prepare() {
+  cd "$pkgbase"
+  cargo fetch --offline --target "$(rustc -vV | sed -n 's|host: ||p')"
+}
+
+build () {
+  cd "$srcdir/$pkgbase"
+
+  cargo build --frozen --release
+}
+
+package_fcitx5-osk-git() {
+  cd "$srcdir/$pkgbase"
+
+  name=fcitx5-osk
+
+  install -Dm755 target/release/${name} "${pkgdir}/usr/bin/${name}"
+  install -Dm644 pkg/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service "${pkgdir}/usr/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${name}"
+}
+
+package_fcitx5-osk-kwin-launcher-git() {
+  cd "$srcdir/$pkgbase"
+
+  name=fcitx5-osk-kwin-launcher
+
+  install -Dm755 target/release/${name} "${pkgdir}/usr/bin/${name}"
+  install -Dm644 pkg/share/applications/fcitx5-osk-kwin-launcher.desktop "${pkgdir}/usr/share/applications/fcitx5-osk-kwin-launcher.desktop"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${name}"
+}
