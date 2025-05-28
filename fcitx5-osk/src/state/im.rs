@@ -82,7 +82,7 @@ impl ImState {
         &self.candidate_area_state
     }
 
-    fn deactive(&mut self, im: &str) {
+    fn deactivate(&mut self, im: &str) {
         if self.cur_im.take_if(|i| i.unique_name() == im).is_some() {
             self.candidate_area_state.reset();
         }
@@ -98,7 +98,7 @@ impl ImState {
             ImEvent::SelectIm(im) => return self.select_im(im),
             ImEvent::DeactivateIm(im) => {
                 // TODO? other logic
-                self.deactive(&im)
+                self.deactivate(&im)
             }
             ImEvent::SyncImList => return self.sync_input_methods_and_current_im(),
             ImEvent::SyncCurrentIm => return self.sync_current_input_method(),

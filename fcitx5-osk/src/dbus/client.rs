@@ -19,7 +19,7 @@ pub struct InputMethodGroupInfo {
     #[allow(unused)]
     #[getset(get = "pub")]
     default_layout: String,
-    _unknon_field1: HashMap<String, OwnedValue>,
+    _unknown_field1: HashMap<String, OwnedValue>,
     #[getset(get = "pub")]
     input_methods: Vec<InputMethodInfo>,
 }
@@ -41,7 +41,7 @@ impl InputMethodGroupInfo {
                     anyhow::anyhow!("can find input method at: {}", default_input_method)
                 })?,
             default_layout: default_layout.to_string(),
-            _unknon_field1: Default::default(),
+            _unknown_field1: Default::default(),
             input_methods,
         })
     }
@@ -81,7 +81,7 @@ pub struct InputMethodInfo {
     #[allow(unused)]
     #[getset(get = "pub")]
     layout: String,
-    _unknon_field1: HashMap<String, OwnedValue>,
+    _unknown_field1: HashMap<String, OwnedValue>,
 }
 
 impl InputMethodInfo {
@@ -96,7 +96,7 @@ impl InputMethodInfo {
             addon: Default::default(),
             is_configurable: Default::default(),
             layout: Default::default(),
-            _unknon_field1: Default::default(),
+            _unknown_field1: Default::default(),
         }
     }
 }

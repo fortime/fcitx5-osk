@@ -370,7 +370,7 @@ async fn run(args: &Args) -> Result<()> {
         }
     });
 
-    // only the lastest match rule will work in zbus::receive_signal. so I create two connections.
+    // only the latest match rule will work in zbus::receive_signal. so I create two connections.
     tokio::select! {
         res = watch_fcitx5(
             &connection,

@@ -527,7 +527,7 @@ async fn start_dbus_services(
         let _ = tokio::time::sleep(Duration::from_millis(500)).await;
     }
     // there is no way to have a graceful shutdown if the wayland socket is from kwin, kwin is
-    // running in a signle thread, when input method is shutting down, kwin can't handle other
+    // running in a signal thread, when input method is shutting down, kwin can't handle other
     // requests.
     tracing::info!("close the connection of dbus services");
     if let Err(e) = conn.close().await {

@@ -103,7 +103,7 @@ impl WaylandWindowManager {
             Placement::Dock => (Anchor::Bottom, size.map(|(_, h)| h as i32)),
             Placement::Float => {
                 // In kwin, if you anchor all edges, and doesn't set size, the final window size
-                // will be the size of the screen subtruct the size of margin. In the meantime, if
+                // will be the size of the screen subtract the size of margin. In the meantime, if
                 // there is a exclusive zone the size of the screen will be smaller. And if the
                 // size of margin is greater than the size of the screen, kwin will close the
                 // window which makes functions, such as `set_margin`, unavailable.
