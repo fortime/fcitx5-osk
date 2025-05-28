@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  release:
+    name: Create github release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Get the release version from the tag
+        if: env.VERSION == ''
+        run: echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
+      - name: Show the version
+        run: |
+          echo "version is: $VERSION"
+      - name: Check that tag version and Cargo.toml version are the same
+        shell: bash
+        run: |
+          if ! grep -q "version = \"$VERSION\"" Cargo.toml; then
+            echo "version does not match Cargo.toml" >&2
+            exit 1
+          fi
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create $VERSION --draft --verify-tag --title $VERSION
+    outputs:
+      version: ${{ env.VERSION }}
