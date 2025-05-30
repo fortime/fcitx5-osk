@@ -41,6 +41,7 @@ pub struct State<WM> {
     #[getset(get = "pub", get_mut = "pub")]
     window_manager: WindowManagerState<WM>,
     theme: Theme,
+    theme_detecting: bool,
 }
 
 impl<WM> State<WM>
@@ -71,10 +72,11 @@ where
                 fcitx5_osk_services,
             )?,
             theme: Default::default(),
+            theme_detecting: false,
             config: ConfigState::new(config_manager),
             store,
         };
-        state.sync_theme();
+        state.sync_theme(None);
         Ok(state)
     }
 }
@@ -114,26 +116,45 @@ impl<WM> State<WM> {
         self.config.config().theme().eq_ignore_ascii_case("auto")
     }
 
-    pub fn on_theme_event(&mut self, event: ThemeEvent) {
+    pub fn on_theme_event(&mut self, event: ThemeEvent) -> Task<Message> {
+        let mut task = Message::nothing();
         match event {
             ThemeEvent::Detect => {
-                if self.is_auto_theme() {
-                    self.sync_theme();
+                if self.is_auto_theme() && !self.theme_detecting {
+                    self.theme_detecting = true;
+                    // detect may block the eventloop, run it in a task.
+                    task =
+                        Task::future(async { ThemeEvent::Detected(dark_light::detect()).into() });
                 }
             }
+            ThemeEvent::Detected(mode) => {
+                if self.is_auto_theme() {
+                    self.sync_theme(Some(mode));
+                }
+                self.theme_detecting = false;
+            }
             ThemeEvent::Updated => {
-                self.sync_theme();
+                self.sync_theme(None);
             }
         }
+        task
     }
 
-    fn sync_theme(&mut self) {
+    fn sync_theme(&mut self, mode: Option<Mode>) {
+        let mode = mode.unwrap_or_else(|| {
+            if self.is_auto_theme() {
+                // it may block the eventloop.
+                dark_light::detect()
+            } else {
+                Mode::Default
+            }
+        });
         let config = self.config.config();
         let mut default_theme = Default::default();
         let theme = if !self.is_auto_theme() {
             self.store.theme(config.theme())
         } else {
-            match dark_light::detect() {
+            match mode {
                 Mode::Dark => {
                     default_theme = Theme::Dark;
                     config.dark_theme().and_then(|t| self.store.theme(t))
@@ -295,6 +316,7 @@ where
 #[derive(Clone, Debug)]
 pub enum ThemeEvent {
     Detect,
+    Detected(Mode),
     Updated,
 }
 

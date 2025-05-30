@@ -350,7 +350,7 @@ where
                 task = task.chain(self.state.window_manager_mut().on_event(event));
             }
             Message::ThemeEvent(event) => {
-                self.state.on_theme_event(event);
+                task = task.chain(self.state.on_theme_event(event).map_task());
             }
             Message::UpdateConfigEvent(event) => {
                 task = task.chain(self.state.on_update_config_event(event));
