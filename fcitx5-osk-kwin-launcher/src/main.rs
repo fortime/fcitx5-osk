@@ -348,10 +348,12 @@ async fn run(args: &Args) -> Result<()> {
         (socket, None)
     };
 
+    let fcitx5_osk_exited = Arc::new(AtomicBool::new(false));
     let fcitx5_osk_handler = tokio::spawn({
         let connection = connection.clone();
         let wayland_display = wayland_display.clone();
         let shutdown_flag = shutdown_flag.clone();
+        let fcitx5_osk_exited = fcitx5_osk_exited.clone();
         async move {
             if let Err(e) = watch_fcitx5_osk(
                 &connection,
@@ -365,6 +367,8 @@ async fn run(args: &Args) -> Result<()> {
             } else {
                 tracing::info!("watch_fcitx5_osk exits");
             }
+            // set fcitx5_osk_exited to true before shutting down.
+            fcitx5_osk_exited.store(true, Ordering::Relaxed);
             // tell the main loop to exit
             shutdown_flag.shutdown();
         }
@@ -396,10 +400,13 @@ async fn run(args: &Args) -> Result<()> {
         }
     }
 
-    // shutdown fcitx5-osk
-    let shutdown_res = services.controller().shutdown().await;
-    // wait fcitx5-osk to shutdown
-    let _ = fcitx5_osk_handler.await;
+    let mut shutdown_res = None;
+    if !fcitx5_osk_exited.load(Ordering::Relaxed) {
+        // shutdown fcitx5-osk
+        shutdown_res = Some(services.controller().shutdown().await);
+        // wait fcitx5-osk to shutdown
+        let _ = fcitx5_osk_handler.await;
+    }
 
     // disable and enable virtual keyboard to restart launcher
     let disable_res = kwin_services.virtual_keyboard().set_enabled(false).await;
