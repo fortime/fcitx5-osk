@@ -105,9 +105,12 @@ impl LayoutState {
         self.unit
     }
 
-    pub fn update_unit(&mut self, unit: u16) -> StdResult<u16, u16> {
+    pub fn update_unit(&mut self, unit: u16, max_width: u16) -> StdResult<u16, u16> {
         let old_unit = self.unit;
         let mut width = self.size.0 / self.unit * unit;
+        if width > max_width {
+            return Err(unit);
+        }
         mem::swap(&mut self.size.0, &mut width);
         if let Err(e) = self.calculate_size() {
             tracing::warn!("failed to update width: {e}, recovering.");

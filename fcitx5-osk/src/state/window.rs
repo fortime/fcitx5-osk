@@ -731,11 +731,12 @@ where
     }
 
     fn update_unit(&mut self, unit: u16) -> Task<WM::Message> {
+        let max_width = self.wm.full_screen_size().width as u16;
         let portrait = self.is_portrait();
         let res = if portrait {
-            self.portrait_layout.update_unit(unit)
+            self.portrait_layout.update_unit(unit, max_width)
         } else {
-            self.landscape_layout.update_unit(unit)
+            self.landscape_layout.update_unit(unit, max_width)
         };
 
         if res.is_ok() {
