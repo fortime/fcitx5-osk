@@ -287,22 +287,11 @@ impl WindowManager for WaylandWindowManager {
     }
 
     fn fetch_screen_info(&mut self) -> Task<Self::Message> {
-        if self.mode == WindowManagerMode::KwinLockScreen {
-            // can't open a window to get size
-            Task::done(
-                Message::from(WindowManagerEvent::ScreenInfo(
-                    Size::new(u16::MAX as f32, u16::MAX as f32),
-                    1.0,
-                ))
-                .into(),
-            )
-        } else {
-            let mut settings = WindowSettings::new(None, Placement::Float);
-            settings.internal = true;
-            let (id, task) = self.open_window(settings);
-            self.internals.insert(id);
-            task
-        }
+        let mut settings = WindowSettings::new(None, Placement::Float);
+        settings.internal = true;
+        let (id, task) = self.open_window(settings);
+        self.internals.insert(id);
+        task
     }
 
     fn appearance(&self, theme: &Theme, _id: Id) -> Self::Appearance {
