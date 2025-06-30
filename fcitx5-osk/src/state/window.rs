@@ -390,33 +390,6 @@ impl<WM> WindowManagerState<WM> {
         }
     }
 
-    pub fn update_key_area_layout(&mut self, key_area_layout: Rc<KeyAreaLayout>) -> bool {
-        let landscape_res = self
-            .landscape_layout
-            .update_key_area_layout(key_area_layout.clone());
-        let portrait_res = self.portrait_layout.update_key_area_layout(key_area_layout);
-        match (landscape_res, portrait_res) {
-            (Ok(_), Ok(_)) => true,
-            (Ok(old), Err(_)) => {
-                // reset landscape to old layout
-                if self.landscape_layout.update_key_area_layout(old).is_err() {
-                    // should't be failed
-                    unreachable!("reset landscape to old layout failed");
-                }
-                false
-            }
-            (Err(_), Ok(old)) => {
-                // reset portrait to old layout
-                if self.portrait_layout.update_key_area_layout(old).is_err() {
-                    // should't be failed
-                    unreachable!("reset portrait to old layout failed");
-                }
-                false
-            }
-            _ => false,
-        }
-    }
-
     pub fn update_candidate_font(&mut self, font: Font) {
         self.landscape_layout.update_candidate_font(font);
         self.portrait_layout.update_candidate_font(font);
@@ -753,6 +726,45 @@ where
                 .chain(Task::done(Message::from(event).into()))
         } else {
             Message::from_nothing()
+        }
+    }
+
+    pub fn update_key_area_layout(
+        &mut self,
+        key_area_layout: Rc<KeyAreaLayout>,
+    ) -> Option<Task<WM::Message>> {
+        let old_size = self.size();
+        let landscape_res = self
+            .landscape_layout
+            .update_key_area_layout(key_area_layout.clone());
+        let portrait_res = self.portrait_layout.update_key_area_layout(key_area_layout);
+        match (landscape_res, portrait_res) {
+            (Ok(_), Ok(_)) => {
+                // resize if the size is changed
+                let new_size = self.size();
+                if new_size != old_size {
+                    Some(self.keyboard_window_state.resize(&mut self.wm, new_size))
+                } else {
+                    Some(Message::from_nothing())
+                }
+            }
+            (Ok(old), Err(_)) => {
+                // reset landscape to old layout
+                if self.landscape_layout.update_key_area_layout(old).is_err() {
+                    // should't be failed
+                    unreachable!("reset landscape to old layout failed");
+                }
+                None
+            }
+            (Err(_), Ok(old)) => {
+                // reset portrait to old layout
+                if self.portrait_layout.update_key_area_layout(old).is_err() {
+                    // should't be failed
+                    unreachable!("reset portrait to old layout failed");
+                }
+                None
+            }
+            _ => None,
         }
     }
 

@@ -7,7 +7,7 @@ use getset::{Getters, MutGetters};
 use iced::{window::Id, Element, Task, Theme, Vector};
 
 use crate::{
-    app::{KeyboardError, Message},
+    app::{KeyboardError, MapTask, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
     dbus::client::Fcitx5Services,
     layout::ToElementCommonParams,
@@ -82,36 +82,6 @@ where
 }
 
 impl<WM> State<WM> {
-    fn update_cur_im(&mut self, im_name: &str) -> bool {
-        let key_area_layout = self.store.key_area_layout_by_im(im_name);
-        let res = self
-            .window_manager
-            .update_key_area_layout(key_area_layout.clone());
-        if res {
-            self.keyboard
-                .update_key_area_layout(&key_area_layout, &self.store);
-            self.im.update_cur_im(im_name);
-            self.window_manager
-                .update_candidate_font(self.store.font_by_im(im_name));
-        }
-        res
-    }
-
-    pub fn on_im_event(&mut self, event: ImEvent) -> Task<Message> {
-        match event {
-            ImEvent::UpdateCurrentIm(im) => {
-                self.update_cur_im(&im);
-                Message::nothing()
-            }
-            // make sure virtual keyboard mode of fcitx5 is activated
-            ImEvent::SelectIm(_) => self
-                .keyboard_mut()
-                .clear_fcitx5_hidden()
-                .chain(self.im.on_event(event)),
-            _ => self.im.on_event(event),
-        }
-    }
-
     fn is_auto_theme(&self) -> bool {
         self.config.config().theme().eq_ignore_ascii_case("auto")
     }
@@ -215,6 +185,38 @@ where
             }
         } else {
             Message::from_nothing()
+        }
+    }
+
+    fn update_cur_im(&mut self, im_name: &str) -> Task<WM::Message> {
+        let key_area_layout = self
+            .store
+            .key_area_layout_by_im(im_name, self.window_manager.is_portrait());
+        let res = self
+            .window_manager
+            .update_key_area_layout(key_area_layout.clone());
+        if let Some(task) = res {
+            self.keyboard
+                .update_key_area_layout(&key_area_layout, &self.store);
+            self.im.update_cur_im(im_name);
+            self.window_manager
+                .update_candidate_font(self.store.font_by_im(im_name));
+            task
+        } else {
+            Message::from_nothing()
+        }
+    }
+
+    pub fn on_im_event(&mut self, event: ImEvent) -> Task<WM::Message> {
+        match event {
+            ImEvent::UpdateCurrentIm(im) => self.update_cur_im(&im),
+            // make sure virtual keyboard mode of fcitx5 is activated
+            ImEvent::SelectIm(_) => self
+                .keyboard_mut()
+                .clear_fcitx5_hidden()
+                .chain(self.im.on_event(event))
+                .map_task(),
+            _ => self.im.on_event(event).map_task(),
         }
     }
 }

@@ -396,7 +396,7 @@ where
                 }
             }
             Message::ImEvent(event) => {
-                task = task.chain(self.state.on_im_event(event).map_task());
+                task = task.chain(self.state.on_im_event(event));
             }
             Message::UpdateFcitx5Services(fcitx5_services) => {
                 tracing::debug!("update fcitx5_services");
