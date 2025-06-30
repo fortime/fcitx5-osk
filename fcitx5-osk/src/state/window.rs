@@ -860,11 +860,21 @@ where
                         } else {
                             Message::from_nothing()
                         };
-                        let size = if self.is_portrait() {
-                            self.portrait_layout.size()
-                        } else {
-                            self.landscape_layout.size()
-                        };
+                        let mut size = self.size();
+                        let screen_size = self.wm.full_screen_size();
+                        // update unit if width is too large
+                        if size.width > screen_size.width {
+                            // update unit
+                            let layout = if portrait {
+                                &mut self.portrait_layout
+                            } else {
+                                &mut self.landscape_layout
+                            };
+                            let unit = layout.unit_within(screen_size.width as u16);
+                            if layout.update_unit(unit, screen_size.width as u16).is_ok() {
+                                size = layout.size();
+                            }
+                        }
                         let mut window_settings = WindowSettings::new(Some(size), self.placement());
                         // set default float position.
                         if self.placement() == Placement::Float {

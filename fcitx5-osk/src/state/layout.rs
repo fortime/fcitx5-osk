@@ -44,23 +44,27 @@ impl LayoutState {
         Ok(res)
     }
 
-    fn unit_within(&self, width: u16) -> u16 {
+    pub fn unit_within(&self, width: u16) -> u16 {
         // plus two units of padding
         let width_u = self.key_area_layout.width_u() + 2;
 
-        let mut unit = width / width_u;
-        if unit < 1 {
-            tracing::warn!("width: {width} are too small");
-            unit = 1;
+        let mut step = 1;
+        loop {
+            if (self.scale_factor * step as f32).fract() == 0.0 {
+                break;
+            }
+            step += 1;
         }
 
-        while (unit as f32 * self.scale_factor).fract() != 0.0 {
-            tracing::warn!(
-                "physical size of unit has fraction, increase it: {} / {}",
-                unit,
-                self.scale_factor
-            );
-            unit += 1;
+        let mut unit = step;
+        while unit * width_u <= width {
+            unit += step;
+        }
+
+        // make sure unit has changed
+        if unit > step {
+            // the last valid unit
+            unit -= step;
         }
 
         unit
