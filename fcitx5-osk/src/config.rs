@@ -113,7 +113,7 @@ fn default_indicator_width() -> u16 {
 }
 
 fn default_holding_timeout() -> Duration {
-    Duration::from_millis(500)
+    Duration::from_millis(200)
 }
 
 fn default_theme() -> String {
