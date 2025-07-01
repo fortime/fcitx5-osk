@@ -218,14 +218,19 @@ impl WindowManager for WaylandWindowManager {
     }
 
     fn resize(&mut self, id: Id, size: Size) -> Task<Self::Message> {
-        tracing::debug!("resize window[{}] to size: {:?}", id, size);
         let old_size = if let Some(settings) = self.settings.get_mut(&id) {
             let old_size = settings.size.replace(size);
-            Self::fix_settings(settings, self.screen_size);
+            if settings.placement == Placement::Dock {
+                // it should use full_screen_size to fix the settings in Dock mode
+                Self::fix_settings(settings, self.full_screen_size);
+            } else {
+                Self::fix_settings(settings, self.screen_size);
+            }
             old_size
         } else {
             None
         };
+        tracing::debug!("resize window[{}] from[{:?}] to [{:?}]", id, old_size, size);
         if let Some(settings) = self.settings.get(&id) {
             // use the size after fixing
             let Some(size) = settings.size else {
