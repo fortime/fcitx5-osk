@@ -31,11 +31,11 @@ pub(crate) trait IdAndConfigPath {
 pub struct Store {
     theme_names: Vec<String>,
     themes: HashMap<String, Theme>,
-    default_key_area_layout: Rc<KeyAreaLayout>,
+    default_key_area_layouts: (Rc<KeyAreaLayout>, Rc<KeyAreaLayout>),
     key_area_layouts: HashMap<String, Rc<KeyAreaLayout>>,
     default_key_set: Rc<KeySet>,
     key_sets: HashMap<String, Rc<KeySet>>,
-    im_layout_mapping: HashMap<String, String>,
+    im_layout_mapping: HashMap<String, HashMap<String, String>>,
     im_font_mapping: HashMap<String, Font>,
 }
 
@@ -50,8 +50,12 @@ impl Store {
         Theme::ALL
             .iter()
             .for_each(|t| theme_names.push(t.to_string()));
-        let default_key_area_layout =
-            Rc::new(init_default(default_value::DEFAULT_KEY_AREA_LAYOUT_TOML)?);
+        let default_landscape_key_area_layout = Rc::new(init_default(
+            default_value::DEFAULT_LANDSCAPE_KEY_AREA_LAYOUT_TOML,
+        )?);
+        let default_portrait_key_area_layout = Rc::new(init_default(
+            default_value::DEFAULT_PORTRAIT_KEY_AREA_LAYOUT_TOML,
+        )?);
         let key_area_layouts = init_confs(config.key_area_layout_folders())?;
         let default_key_set = Rc::new(init_default(default_value::DEFAULT_KEY_SET_TOML)?);
         let key_sets = init_confs(config.key_set_folders())?;
@@ -64,7 +68,10 @@ impl Store {
         Ok(Self {
             theme_names,
             themes,
-            default_key_area_layout,
+            default_key_area_layouts: (
+                default_landscape_key_area_layout,
+                default_portrait_key_area_layout,
+            ),
             key_area_layouts,
             default_key_set,
             key_sets,
@@ -81,13 +88,16 @@ impl Store {
         self.themes.get(&name.to_ascii_lowercase())
     }
 
-    pub fn key_area_layout(&self, name: &str) -> Rc<KeyAreaLayout> {
-        if let Some(l) = self.key_area_layouts.get(name) {
-            l.clone()
+    fn default_key_area_layout(&self, portrait: bool) -> Rc<KeyAreaLayout> {
+        if portrait {
+            self.default_key_area_layouts.1.clone()
         } else {
-            tracing::debug!("KeyAreaLayout[{}] not found, default is used", name);
-            self.default_key_area_layout.clone()
+            self.default_key_area_layouts.0.clone()
         }
+    }
+
+    fn key_area_layout(&self, name: &str) -> Option<Rc<KeyAreaLayout>> {
+        self.key_area_layouts.get(name).cloned()
     }
 
     pub fn key(&self, key_id: &KeyId) -> Option<&Key> {
@@ -112,12 +122,16 @@ impl Store {
             .unwrap_or_default()
     }
 
-    pub fn key_area_layout_by_im(&self, im_name: &str) -> Rc<KeyAreaLayout> {
-        if let Some(layout_name) = self.im_layout_mapping.get(im_name) {
-            self.key_area_layout(layout_name)
+    pub fn key_area_layout_by_im(&self, im_name: &str, portrait: bool) -> Rc<KeyAreaLayout> {
+        let mapping = if portrait {
+            self.im_layout_mapping.get("portrait")
         } else {
-            self.default_key_area_layout.clone()
-        }
+            self.im_layout_mapping.get("landscape")
+        };
+        mapping
+            .and_then(|m| m.get(im_name))
+            .and_then(|layout_name| self.key_area_layout(layout_name))
+            .unwrap_or_else(|| self.default_key_area_layout(portrait))
     }
 }
 

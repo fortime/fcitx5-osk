@@ -56,7 +56,7 @@ where
         let config = config_manager.as_ref();
         let store = Store::new(config)?;
         // key_area_layout will be updated when cur_im is updated.
-        let key_area_layout = store.key_area_layout("");
+        let key_area_layout = store.key_area_layout_by_im("", false);
         let mut state = Self {
             keyboard: KeyboardState::new(
                 config.holding_timeout(),

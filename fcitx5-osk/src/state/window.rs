@@ -715,10 +715,12 @@ where
         if res.is_ok() {
             let (event, size) = if portrait {
                 let size = self.portrait_layout.size();
-                (UpdateConfigEvent::PortraitWidth(size.width as u16), size)
+                let width = self.portrait_layout.max_width();
+                (UpdateConfigEvent::PortraitWidth(width), size)
             } else {
                 let size = self.landscape_layout.size();
-                (UpdateConfigEvent::LandscapeWidth(size.width as u16), size)
+                let width = self.landscape_layout.max_width();
+                (UpdateConfigEvent::LandscapeWidth(width), size)
             };
             // resize and update config
             self.keyboard_window_state

@@ -1,0 +1,81 @@
+name = "default-portrait"
+min_toolbar_height = 10
+popup_key_height = 10
+
+[[elements]]
+height = 10
+spacing = 1
+# 10 * 8 + 9 = 89
+elements = ["k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "k10"]
+
+[[elements]]
+height = 10
+spacing = 1
+# 10 * 8 + 9 = 89
+elements = ["k11", "k12", "k13", "k14", "k15", "k16", "k17", "k18", "k19", "k20"]
+
+[[elements]]
+height = 10
+spacing = 1
+# 9 * 8 + 2 * 3 + 10 = 88
+elements = ["p:3", "k21", "k22", "k23", "k24", "k25", "k26", "k27", "k28", "k29", "p:3"]
+
+
+[[elements]]
+height = 10
+spacing = 1
+# 7 * 8 + 2 * 12 + 8 = 88
+elements = ["k30:12", "k31", "k32", "k33", "k34", "k35", "k36", "k37", "k38:12"]
+
+[[elements]]
+height = 10
+spacing = 1
+# 4 * 8 + 2 * 12 + 26 + 6 = 88
+elements = ["k39:12", "k40", "k41", "k42:26", "k43", "k44", "k45:12"]
+
+[key_mappings]
+k1 = "k_p_one"
+k2 = "k_p_two"
+k3 = "k_p_three"
+k4 = "k_p_four"
+k5 = "k_p_five"
+k6 = "k_p_six"
+k7 = "k_p_seven"
+k8 = "k_p_eight"
+k9 = "k_p_nine"
+k10 = "k_p_zero"
+k11 = "k_p_q"
+k12 = "k_w"
+k13 = "k_e"
+k14 = "k_r"
+k15 = "k_t"
+k16 = "k_y"
+k17 = "k_u"
+k18 = "k_i"
+k19 = "k_o"
+k20 = "k_p"
+k21 = "k_a"
+k22 = "k_s"
+k23 = "k_d"
+k24 = "k_f"
+k25 = "k_g"
+k26 = "k_p_h"
+k27 = "k_p_j"
+k28 = "k_p_k"
+k29 = "k_p_l"
+k30 = "k_right_shift"
+k31 = "k_z"
+k32 = "k_x"
+k33 = "k_c"
+k34 = "k_v"
+k35 = "k_b"
+k36 = "k_n"
+k37 = "k_m"
+k38 = "k_backspace"
+k39 = "k_right_ctrl"
+k40 = "k_right_alt"
+k41 = "k_caps_lock"
+k42 = "k_space"
+k43 = "k_comma"
+k44 = "k_dot"
+k45 = "k_enter"

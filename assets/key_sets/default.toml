@@ -79,10 +79,10 @@ c = "+"
 kc = -21
 
 [keys.k_backspace]
-p = {ks = 0xff08, s = "Backspace", kc = 22}
+p = {ks = 0xff08, s = "⌫", kc = 22, f = "Adwaita Mono"}
 
 [keys.k_tab]
-p = {ks = 0xff09, kc = 23}
+p = {ks = 0xff09, s = "⇥", kc = 23, f = "Adwaita Mono"}
 
 [keys.k_q]
 p = {c = "q", kc = 24}
@@ -163,7 +163,7 @@ c = "|"
 kc = -51
 
 [keys.k_caps_lock]
-p = {ks = 0xffe5, s = "CapsLock", kc = 66}
+p = {ks = 0xffe5, s = "⟲", kc = 66, f = "Adwaita Mono"}
 
 [keys.k_escape]
 p = {ks = 0xff1b, s = "Esc", kc = 9}
@@ -235,8 +235,7 @@ c = "\""
 kc = -48
 
 [keys.k_enter]
-p = {ks = 0xff0d, s = "Enter", kc = 36}
-#p = {ks = 0xff0a}
+p = {ks = 0xff0d, s = "↵", kc = 36, f = "Adwaita Mono"}
 
 [keys.k_left_shift]
 p = {ks = 0xffe1, s = "Shift", kc = 50}
@@ -308,7 +307,7 @@ p = {ks = 0xffe2, s = "Shift", kc = 62}
 p = {ks = 0xffe3, s = "Ctrl", kc = 37}
 
 [keys.k_left_super]
-p = {ks = 0xffeb, s = "Super", kc = 133}
+p = {ks = 0xffeb, s = "⌘", kc = 133, f = "Adwaita Mono"}
 
 [keys.k_left_alt]
 p = {ks = 0xffe9, s = "Alt", kc = 64}
@@ -320,7 +319,7 @@ p = {c = " ", s = "Space", kc = 65}
 p = {ks = 0xffea, s = "Alt", kc = 108}
 
 [keys.k_right_super]
-p = {ks = 0xffec, s = "Super", kc = 134}
+p = {ks = 0xffec, s = "⌘", kc = 134, f = "Adwaita Mono"}
 
 [keys.k_print]
 p = {ks = 0xff61, s = "Print", kc = 218}
@@ -329,13 +328,186 @@ p = {ks = 0xff61, s = "Print", kc = 218}
 p = {ks = 0xffe4, s = "Ctrl", kc = 105}
 
 [keys.k_left_arrow]
-p = {ks = 0x08fb, s = "←", kc = 113, f = "Adwaita Sans"}
+p = {ks = 0x08fb, s = "←", kc = 113, f = "Adwaita Mono"}
 
 [keys.k_up_arrow]
-p = {ks = 0x08fc, s = "↑", kc = 111, f = "Adwaita Sans"}
+p = {ks = 0x08fc, s = "↑", kc = 111, f = "Adwaita Mono"}
 
 [keys.k_down_arrow]
-p = {ks = 0x08fe, s = "↓", kc = 116, f = "Adwaita Sans"}
+p = {ks = 0x08fe, s = "↓", kc = 116, f = "Adwaita Mono"}
 
 [keys.k_right_arrow]
-p = {ks = 0x08fd, s = "→", kc = 114, f = "Adwaita Sans"}
+p = {ks = 0x08fd, s = "→", kc = 114, f = "Adwaita Mono"}
+
+[keys.k_p_one]
+p = {c = "1", kc = 10}
+[[keys.k_p_one.s]]
+c = "!"
+kc = -10
+[[keys.k_p_one.s]]
+s = "Esc"
+ks = 0xff1b
+kc = 9
+
+[keys.k_p_two]
+p = {c = "2", kc = 11}
+[[keys.k_p_two.s]]
+c = "@"
+kc = -11
+[[keys.k_p_two.s]]
+c = "`"
+kc = 49
+[[keys.k_p_two.s]]
+c = "~"
+kc = -49
+
+[keys.k_p_three]
+p = {c = "3", kc = 12}
+[[keys.k_p_three.s]]
+c = "#"
+kc = -12
+[[keys.k_p_three.s]]
+c = "\\"
+kc = 51
+[[keys.k_p_three.s]]
+c = "|"
+kc = -51
+
+[keys.k_p_four]
+p = {c = "4", kc = 13}
+[[keys.k_p_four.s]]
+c = "$"
+kc = -13
+[[keys.k_p_four.s]]
+c = "/"
+kc = 61
+[[keys.k_p_four.s]]
+c = "?"
+kc = -61
+
+[keys.k_p_five]
+p = {c = "5", kc = 14}
+[[keys.k_p_five.s]]
+c = "%"
+kc = -14
+[[keys.k_p_five.s]]
+c = "-"
+kc = 20
+[[keys.k_p_five.s]]
+c = "_"
+kc = -20
+
+[keys.k_p_six]
+p = {c = "6", kc = 15}
+[[keys.k_p_six.s]]
+c = "^"
+kc = -15
+[[keys.k_p_six.s]]
+c = "="
+kc = 21
+[[keys.k_p_six.s]]
+c = "+"
+kc = -21
+
+[keys.k_p_seven]
+p = {c = "7", kc = 16}
+[[keys.k_p_seven.s]]
+c = "&"
+kc = -16
+[[keys.k_p_seven.s]]
+c = ";"
+kc = 47
+[[keys.k_p_seven.s]]
+c = ":"
+kc = -47
+
+[keys.k_p_eight]
+p = {c = "8", kc = 17}
+[[keys.k_p_eight.s]]
+c = "*"
+kc = -17
+[[keys.k_p_eight.s]]
+c = "'"
+kc = 48
+[[keys.k_p_eight.s]]
+c = "\""
+kc = -48
+
+[keys.k_p_nine]
+p = {c = "9", kc = 18}
+[[keys.k_p_nine.s]]
+c = "("
+kc = -18
+[[keys.k_p_nine.s]]
+c = "["
+kc = 34
+[[keys.k_p_nine.s]]
+c = "{"
+kc = -34
+
+[keys.k_p_zero]
+p = {c = "0", kc = 19}
+[[keys.k_p_zero.s]]
+c = ")"
+kc = -19
+[[keys.k_p_zero.s]]
+c = "]"
+kc = 35
+[[keys.k_p_zero.s]]
+c = "}"
+kc = -35
+
+[keys.k_p_q]
+p = {c = "q", kc = 24}
+[[keys.k_p_q.s]]
+c = "Q"
+kc = -24
+[[keys.k_p_q.s]]
+ks = 0xff09
+s = "⇥"
+kc = 23
+f = "Adwaita Mono"
+
+[keys.k_p_h]
+p = {c = "h", kc = 43}
+[[keys.k_p_h.s]]
+c = "H"
+kc = -43
+[[keys.k_p_h.s]]
+s = "←"
+ks = 0x08fb
+kc = 113
+f = "Adwaita Mono"
+
+[keys.k_p_j]
+p = {c = "j", kc = 44}
+[[keys.k_p_j.s]]
+c = "J"
+kc = -44
+[[keys.k_p_j.s]]
+s = "↓"
+ks = 0x08fe
+kc = 116
+f = "Adwaita Mono"
+
+[keys.k_p_k]
+p = {c = "k", kc = 45}
+[[keys.k_p_k.s]]
+c = "K"
+kc = -45
+[[keys.k_p_k.s]]
+s = "↑"
+ks = 0x08fc
+kc = 111
+f = "Adwaita Mono"
+
+[keys.k_p_l]
+p = {c = "l", kc = 46}
+[[keys.k_p_l.s]]
+c = "L"
+kc = -46
+[[keys.k_p_l.s]]
+s = "→"
+ks = 0x08fd
+kc = 114
+f = "Adwaita Mono"

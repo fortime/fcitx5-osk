@@ -25,7 +25,7 @@ use crate::{
     widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
 };
 
-const TEXT_PADDING_LENGTH: u16 = 5;
+const TEXT_PADDING_LENGTH: u16 = 3;
 
 /// #define KEY_LEFTSHIFT       42, val + 8
 const KEYCODE_LEFT_SHIFT: u32 = 50;
@@ -265,8 +265,12 @@ impl KeyboardState {
         let (content, press_cb, release_cb) = if let Some(key) = self.keys.get(&*key_name) {
             let is_shift_set = ModifierState::Shift.is_set(self.modifiers);
             let is_caps_lock_set = ModifierState::CapsLock.is_set(self.modifiers);
-            let secondary_height = inner_height / 4;
-            let primary_height = inner_height - 2 * secondary_height;
+            let secondary_height = inner_height / 3;
+            let primary_height = inner_height - secondary_height;
+            // It's related to the conversion between float and int, if we don't minus 1, it may
+            // be too large in float, and the text can't be shown
+            let secondary_text_size = (secondary_height - 1).min(self.secondary_text_size_u * unit);
+            let primary_text_size = (primary_height - 1).min(self.primary_text_size_u * unit);
             let mut column: Column<Message> = Column::new();
             let primary_key_value = key.primary();
             let secondary_key_values = key.secondaries();
@@ -284,21 +288,22 @@ impl KeyboardState {
                 .into_iter()
                 .chain(secondary_key_values.iter().skip(1))
             {
+                let padding = Text::new(" ").size(TEXT_PADDING_LENGTH as f32);
                 let text = Text::new(secondary.symbol())
                     .font(secondary.font().unwrap_or(self.font))
                     .width(inner_width)
                     .height(secondary_height)
-                    .size((self.secondary_text_size_u * unit) as f32)
+                    .size(secondary_text_size as f32)
                     .align_y(Vertical::Center)
                     .align_x(Horizontal::Right);
-                top = top.push(text);
+                top = top.push(padding).push(text);
             }
             let key_value = key.key_value(is_shift_set, is_caps_lock_set);
             column = column.push(top.height(secondary_height)).push(
                 middle
                     .width(inner_width)
                     .height(primary_height)
-                    .size((self.primary_text_size_u * unit) as f32)
+                    .size(primary_text_size as f32)
                     .align_y(Vertical::Center)
                     .align_x(Horizontal::Center),
             );

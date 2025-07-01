@@ -67,7 +67,7 @@ pub struct Config {
 
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
-    im_layout_mapping: HashMap<String, String>,
+    im_layout_mapping: HashMap<String, HashMap<String, String>>,
 
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]

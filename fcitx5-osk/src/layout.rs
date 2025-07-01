@@ -70,6 +70,12 @@ pub struct KeyAreaLayout {
     )]
     #[getset(get_copy = "pub")]
     popup_key_height_u: u16,
+    #[serde(
+        alias = "min_toolbar_height",
+        default = "KeyAreaLayout::default_min_toolbar_height_u"
+    )]
+    #[getset(get_copy = "pub")]
+    min_toolbar_height_u: u16,
     #[getset(get = "pub")]
     font: Option<String>,
 }
@@ -80,7 +86,7 @@ impl KeyAreaLayout {
     }
 
     fn default_primary_text_size_u() -> u16 {
-        2
+        3
     }
 
     fn default_popup_key_width_u() -> u16 {
@@ -92,7 +98,11 @@ impl KeyAreaLayout {
     }
 
     fn default_secondary_text_size_u() -> u16 {
-        1
+        2
+    }
+
+    fn default_min_toolbar_height_u() -> u16 {
+        6
     }
 
     pub fn width_u(&self) -> u16 {
@@ -336,8 +346,14 @@ pub struct ToolbarLayout {
 }
 
 impl ToolbarLayout {
-    pub fn new() -> Self {
-        Self { height_u: 6 }
+    pub fn new(min_toolbar_height_u: u16) -> Self {
+        let mut res = Self { height_u: 6 };
+        res.update_height_u(min_toolbar_height_u);
+        res
+    }
+
+    pub fn update_height_u(&mut self, min_toolbar_height_u: u16) {
+        self.height_u = 6.max(min_toolbar_height_u)
     }
 
     pub fn height_u(&self) -> u16 {
