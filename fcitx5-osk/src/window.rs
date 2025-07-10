@@ -13,7 +13,7 @@ pub trait WindowAppearance {
     fn background_color(&self) -> Color;
 }
 
-pub trait WindowManager: Default {
+pub trait WindowManager {
     type Message;
 
     type Appearance;
@@ -21,7 +21,7 @@ pub trait WindowManager: Default {
     /// generate a do nothing task
     fn nothing() -> Task<Self::Message>;
 
-    fn open(&mut self, settings: WindowSettings) -> (Id, Task<Self::Message>);
+    fn open(&mut self, settings: WindowSettings) -> (Option<Id>, Task<Self::Message>);
 
     fn opened(&mut self, id: Id, size: Size) -> Task<Self::Message>;
 
@@ -49,6 +49,11 @@ pub trait WindowManager: Default {
     fn set_mode(&mut self, mode: WindowManagerMode) -> bool;
 
     fn mode(&self) -> WindowManagerMode;
+
+    fn set_preferred_output_name(&mut self, preferred_output_name: &str);
+
+    /// Return a list of output's name and its description
+    fn outputs(&self) -> Vec<(String, String)>;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

@@ -10,12 +10,16 @@ use iced::{
 use iced_layershell::{
     reexport::{
         Anchor, KeyboardInteractivity, Layer, NewInputPanelSettings, NewLayerShellSettings,
+        OutputOption,
     },
     Appearance, DefaultStyle,
 };
 
 use crate::{
-    app::{wayland::WaylandMessage, Message},
+    app::{
+        wayland::{OutputContext, WaylandMessage},
+        Message,
+    },
     config::Placement,
     has_text_within_env,
     state::WindowManagerEvent,
@@ -58,18 +62,33 @@ impl WindowAppearance for Appearance {
     }
 }
 
-#[derive(Default)]
 pub struct WaylandWindowManager {
     settings: HashMap<Id, WindowSettings>,
     internals: HashSet<Id>,
     screen_size: Size,
     full_screen_size: Size,
     mode: WindowManagerMode,
+    output_context: OutputContext,
+    preferred_output_name: Option<String>,
+    selected_output_name: Option<String>,
 }
 
 type Margin = (i32, i32, i32, i32);
 
 impl WaylandWindowManager {
+    pub fn new(output_context: OutputContext, preferred_output_name: Option<String>) -> Self {
+        Self {
+            settings: Default::default(),
+            internals: Default::default(),
+            screen_size: Default::default(),
+            full_screen_size: Default::default(),
+            mode: Default::default(),
+            output_context,
+            preferred_output_name,
+            selected_output_name: Default::default(),
+        }
+    }
+
     /// make sure size and position are valid.
     fn fix_settings(settings: &mut WindowSettings, screen_size: Size) {
         if let Some(size) = settings.size.as_mut() {
@@ -95,7 +114,7 @@ impl WaylandWindowManager {
         }
     }
 
-    fn open_window(&mut self, mut settings: WindowSettings) -> (Id, Task<WaylandMessage>) {
+    fn open_window(&mut self, mut settings: WindowSettings) -> (Option<Id>, Task<WaylandMessage>) {
         Self::fix_settings(&mut settings, self.screen_size);
         let size = settings.size.map(|s| (s.width as u32, s.height as u32));
         let placement = settings.placement;
@@ -113,40 +132,81 @@ impl WaylandWindowManager {
         let internal = settings.internal;
         let margin = self.margin(&settings);
         let id = Id::unique();
+
+        let (output_option, closing_window_task) = self.select_output(internal);
+
         self.settings.insert(id, settings);
-        if self.mode == WindowManagerMode::KwinLockScreen && placement == Placement::Dock {
+
+        let task = if self.mode == WindowManagerMode::KwinLockScreen && placement == Placement::Dock
+        {
             tracing::debug!("open window[{id}] as input panel surface");
             // create input panel surface, so that it can be shown by kwin in lock screen
-            (
+            Task::done(WaylandMessage::NewInputPanel {
+                settings: NewInputPanelSettings {
+                    size: size.expect("size should not be none in dock mode"),
+                    keyboard: true,
+                    output_option,
+                },
                 id,
-                Task::done(WaylandMessage::NewInputPanel {
-                    settings: NewInputPanelSettings {
-                        size: size.expect("size should not be none in dock mode"),
-                        keyboard: true,
-                        use_last_output: !internal,
-                    },
-                    id,
-                }),
-            )
+            })
         } else {
             tracing::debug!("open window[{id}] as layer shell surface");
-            (
+            Task::done(WaylandMessage::NewLayerShell {
+                settings: NewLayerShellSettings {
+                    size,
+                    exclusive_zone,
+                    anchor,
+                    layer: Layer::Overlay,
+                    margin,
+                    keyboard_interactivity: KeyboardInteractivity::None,
+                    output_option,
+                    events_transparent: internal,
+                },
                 id,
-                Task::done(WaylandMessage::NewLayerShell {
-                    settings: NewLayerShellSettings {
-                        size,
-                        exclusive_zone,
-                        anchor,
-                        layer: Layer::Overlay,
-                        margin,
-                        keyboard_interactivity: KeyboardInteractivity::None,
-                        use_last_output: !internal,
-                        events_transparent: internal,
-                    },
-                    id,
-                }),
-            )
+            })
+        };
+
+        if let Some(closing_window_task) = closing_window_task {
+            (Some(id), closing_window_task.chain(task))
+        } else {
+            (Some(id), task)
         }
+    }
+
+    fn select_output(&mut self, internal: bool) -> (OutputOption, Option<Task<WaylandMessage>>) {
+        // Use preferred_output_name to select output
+        let preferred_output_name = if internal {
+            self.preferred_output_name.as_deref()
+        } else {
+            // use last selected output
+            None
+        };
+        let wl_output_res = self.output_context.select_output(preferred_output_name);
+        let mut task: Option<Task<WaylandMessage>> = None;
+        let output_option = if let Some((name, wl_output)) = wl_output_res {
+            let close_window = if let Some(selected_output_name) = &self.selected_output_name {
+                *selected_output_name != name
+            } else {
+                true
+            };
+            // Update selected_output_name
+            self.selected_output_name = Some(name);
+            if close_window {
+                let ids: Vec<_> = self.settings.keys().copied().collect();
+                for id in ids {
+                    tracing::debug!("Close window[{}] because selected output is changed", id);
+                    if let Some(t) = task {
+                        task = Some(t.chain(self.close(id)));
+                    } else {
+                        task = Some(self.close(id));
+                    }
+                }
+            }
+            OutputOption::Output(wl_output)
+        } else {
+            OutputOption::LastOutput
+        };
+        (output_option, task)
     }
 
     fn margin(&self, settings: &WindowSettings) -> Option<Margin> {
@@ -185,17 +245,17 @@ impl WindowManager for WaylandWindowManager {
         Message::from_nothing()
     }
 
-    fn open(&mut self, settings: WindowSettings) -> (Id, Task<Self::Message>) {
+    fn open(&mut self, settings: WindowSettings) -> (Option<Id>, Task<Self::Message>) {
         self.open_window(settings)
     }
 
     fn opened(&mut self, id: Id, size: Size) -> Task<Self::Message> {
         if self.internals.contains(&id) {
-            // We keep internal window opened until any other types of window is
-            // opened. So they can be opened in the same screen.
-            iced_window::get_scale_factor(id).map(move |scale_factor| {
-                Message::from(WindowManagerEvent::ScreenInfo(size, scale_factor)).into()
-            })
+            iced_window::get_scale_factor(id)
+                .map(move |scale_factor| {
+                    Message::from(WindowManagerEvent::ScreenInfo(size, scale_factor)).into()
+                })
+                .chain(iced_window::close(id))
         } else {
             // close all internals
             let mut task = Message::from_nothing();
@@ -295,7 +355,9 @@ impl WindowManager for WaylandWindowManager {
         let mut settings = WindowSettings::new(None, Placement::Float);
         settings.internal = true;
         let (id, task) = self.open_window(settings);
-        self.internals.insert(id);
+        if let Some(id) = id {
+            self.internals.insert(id);
+        }
         task
     }
 
@@ -345,5 +407,13 @@ impl WindowManager for WaylandWindowManager {
 
     fn mode(&self) -> WindowManagerMode {
         self.mode
+    }
+
+    fn set_preferred_output_name(&mut self, preferred_output_name: &str) {
+        self.preferred_output_name = Some(preferred_output_name.to_string());
+    }
+
+    fn outputs(&self) -> Vec<(String, String)> {
+        self.output_context.outputs()
     }
 }

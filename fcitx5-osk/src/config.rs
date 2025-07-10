@@ -47,8 +47,10 @@ pub struct Config {
     #[serde(default = "default_theme")]
     theme: String,
 
+    #[serde(default)]
     dark_theme: Option<String>,
 
+    #[serde(default)]
     light_theme: Option<String>,
 
     #[getset(get_copy = "pub", set = "pub")]
@@ -80,6 +82,10 @@ pub struct Config {
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default)]
     indicator_display: IndicatorDisplay,
+
+    /// preferred output to be used.
+    #[serde(default)]
+    preferred_output_name: Option<String>,
 }
 
 impl Config {
@@ -97,6 +103,14 @@ impl Config {
 
     pub fn set_light_theme(&mut self, theme: String) {
         self.light_theme = Some(theme);
+    }
+
+    pub fn preferred_output_name(&self) -> Option<&String> {
+        self.preferred_output_name.as_ref()
+    }
+
+    pub fn set_preferred_output_name(&mut self, name: String) {
+        self.preferred_output_name = Some(name);
     }
 }
 

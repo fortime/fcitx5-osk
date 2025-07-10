@@ -1,13 +1,13 @@
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 
-use anyhow::{Error, Result};
+use anyhow::Result;
 use dark_light::Mode;
 use fcitx5_osk_common::dbus::client::Fcitx5OskServices;
 use getset::{Getters, MutGetters};
 use iced::{window::Id, Element, Task, Theme, Vector};
 
 use crate::{
-    app::{KeyboardError, MapTask, Message},
+    app::{self, MapTask, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
     dbus::client::Fcitx5Services,
     layout::ToElementCommonParams,
@@ -22,7 +22,8 @@ mod layout;
 mod window;
 
 pub use config::{
-    ConfigState, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc, UpdateConfigEvent,
+    ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc, TextDesc,
+    UpdateConfigEvent,
 };
 pub use im::{ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
@@ -44,12 +45,10 @@ pub struct State<WM> {
     theme_detecting: bool,
 }
 
-impl<WM> State<WM>
-where
-    WM: Default,
-{
+impl<WM> State<WM> {
     pub fn new(
         config_manager: ConfigManager,
+        wm: WM,
         fcitx5_services: Fcitx5Services,
         fcitx5_osk_services: Fcitx5OskServices,
     ) -> Result<Self> {
@@ -67,6 +66,7 @@ where
             im: ImState::new(fcitx5_services.clone()),
             window_manager: WindowManagerState::new(
                 config,
+                wm,
                 key_area_layout,
                 fcitx5_services,
                 fcitx5_osk_services,
@@ -79,9 +79,7 @@ where
         state.sync_theme(None);
         Ok(state)
     }
-}
 
-impl<WM> State<WM> {
     fn is_auto_theme(&self) -> bool {
         self.config.config().theme().eq_ignore_ascii_case("auto")
     }
@@ -171,21 +169,7 @@ where
     WM::Message: From<Message> + 'static + Send + Sync,
 {
     pub fn on_update_config_event(&mut self, event: UpdateConfigEvent) -> Task<WM::Message> {
-        if self.config.on_update_event(event.clone()) {
-            match event {
-                UpdateConfigEvent::Theme(_) => {
-                    Task::done(Message::from(ThemeEvent::Updated).into())
-                }
-                UpdateConfigEvent::LandscapeWidth(_) | UpdateConfigEvent::PortraitWidth(_) => {
-                    // After width is changed, the pages of candidate area should be changed too. Here we
-                    // just reset it.
-                    Task::done(Message::from(ImEvent::ResetCandidateCursor).into())
-                }
-                _ => Message::from_nothing(),
-            }
-        } else {
-            Message::from_nothing()
-        }
+        self.config.on_update_event(event).map_task()
     }
 
     fn update_cur_im(&mut self, im_name: &str) -> Task<WM::Message> {
@@ -250,6 +234,11 @@ pub trait StateExtractor {
     fn placement(&self) -> Placement;
 
     fn indicator_display(&self) -> IndicatorDisplay;
+
+    fn outputs(&self) -> Vec<(String, String)>;
+
+    /// Return the init value and cur value stored by ChangeTempText event
+    fn config_temp_text(&self, key: &str) -> Option<(&str, &str)>;
 }
 
 impl<WM> StateExtractor for State<WM>
@@ -313,6 +302,15 @@ where
     fn indicator_display(&self) -> IndicatorDisplay {
         self.window_manager.indicator_display()
     }
+
+    fn outputs(&self) -> Vec<(String, String)> {
+        self.window_manager.outputs()
+    }
+
+    /// Return the init value and cur value stored by ChangeTempText event
+    fn config_temp_text(&self, key: &str) -> Option<(&str, &str)> {
+        self.config.temp_text(key)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -338,15 +336,7 @@ where
     let err_msg = err_msg.into();
     let service = service.clone();
     Task::perform(f(service), move |r| match r {
-        Err(e) => error_with_context(e, err_msg.clone()),
+        Err(e) => app::error_with_context(e, err_msg.clone()),
         Ok(t) => t,
     })
-}
-
-fn error_with_context<E, M>(e: E, err_msg: M) -> Message
-where
-    E: Into<Error>,
-    M: Into<String>,
-{
-    KeyboardError::Error(Arc::new(e.into().context(err_msg.into()))).into()
 }

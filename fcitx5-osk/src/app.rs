@@ -155,12 +155,10 @@ pub struct Keyboard<WM> {
     shutdown_sent: bool,
 }
 
-impl<WM> Keyboard<WM>
-where
-    WM: Default,
-{
+impl<WM> Keyboard<WM> {
     pub fn new(
         config_manager: ConfigManager,
+        wm: WM,
         fcitx5_services: Fcitx5Services,
         fcitx5_osk_services: Fcitx5OskServices,
         wait_for_socket: bool,
@@ -173,7 +171,7 @@ where
         } else {
             (None, None)
         };
-        let state = State::new(config_manager, fcitx5_services, fcitx5_osk_services)?;
+        let state = State::new(config_manager, wm, fcitx5_services, fcitx5_osk_services)?;
         let mut init_task = Task::future(init(tx, socket_env_tx, shutdown_flag.clone()));
         if !wait_for_socket {
             // open indicator if it is not waiting for a socket.
@@ -193,9 +191,7 @@ where
             init_task,
         ))
     }
-}
 
-impl<WM> Keyboard<WM> {
     pub fn handle_error_message(&mut self, e: KeyboardError) {
         match &e {
             KeyboardError::Error(e) => tracing::error!("Error: {e:#}"),
@@ -362,13 +358,16 @@ where
                         task = task.chain(self.state.window_manager_mut().open_keyboard());
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard => {
-                        // always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated.
+                        // Always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated
                         self.state.keyboard_mut().set_fcitx5_hidden();
-                        task = task.chain(
-                            self.state
-                                .window_manager_mut()
-                                .close_keyboard(CloseOpSource::Fcitx5),
-                        );
+                        // Close keyboard only when setting isn't shown
+                        if !self.state.window_manager().is_setting_shown() {
+                            task = task.chain(
+                                self.state
+                                    .window_manager_mut()
+                                    .close_keyboard(CloseOpSource::Fcitx5),
+                            );
+                        }
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(state) => {
                         self.state.im_mut().update_candidate_area_state(state);
@@ -393,6 +392,13 @@ where
                         );
                     }
                     ImPanelEvent::UpdateVisible(visible) => self.visible = visible,
+                    ImPanelEvent::ReopenIfOpened => {
+                        if let Some(next_task) =
+                            self.state.window_manager_mut().reopen_keyboard_if_opened()
+                        {
+                            task = task.chain(next_task)
+                        }
+                    }
                 }
             }
             Message::ImEvent(event) => {
@@ -549,7 +555,15 @@ where
     rx.recv()?
 }
 
-fn fatal_with_context<E, M>(e: E, err_msg: M) -> Message
+pub fn error_with_context<E, M>(e: E, err_msg: M) -> Message
+where
+    E: Into<Error>,
+    M: Into<String>,
+{
+    KeyboardError::Error(Arc::new(e.into().context(err_msg.into()))).into()
+}
+
+pub fn fatal_with_context<E, M>(e: E, err_msg: M) -> Message
 where
     E: Into<Error>,
     M: Into<String>,

@@ -92,54 +92,55 @@ fn run(args: Args) -> Result<()> {
         Message::Nothing
     });
 
-    let handle = thread::spawn({
-        let shutdown_flag = shutdown_flag.clone();
-        move || {
-            let res = if args.force_wayland || (!args.force_x11 && wayland::is_available()) {
-                app::wayland::start(
+    if args.force_wayland || (!args.force_x11 && wayland::is_available()) {
+        let handle = thread::spawn({
+            let shutdown_flag = shutdown_flag.clone();
+            move || {
+                let res = app::wayland::start(
                     config_manager,
                     init_task,
                     args.wait_for_socket,
                     shutdown_flag.clone(),
-                )
-            } else if args.force_x11 || x11::is_available() {
-                if args.force_x11 {
-                    // unset wayland env, otherwise, winit will use wayland to open windows.
-                    unsafe {
-                        // Safety, currently there is no other thread running, except console_subscriber.
-                        wayland::set_env(None, None);
-                    }
-                }
-                app::x11::start(
-                    config_manager,
-                    init_task,
-                    args.wait_for_socket,
-                    shutdown_flag.clone(),
-                )
-            } else {
-                Err(anyhow::anyhow!("No Wayland or X11 Environment"))
-            };
-            // make sure shutdown
-            shutdown_flag.shutdown();
-            res
-        }
-    });
+                );
+                // make sure shutdown
+                shutdown_flag.shutdown();
+                res
+            }
+        });
 
-    if !handle.is_finished() {
-        shutdown_flag.wait_for_shutdown_blocking();
-    }
-
-    let mut count = 0;
-    while !handle.is_finished() {
-        if count >= 10 {
-            anyhow::bail!("timeout of waiting the keyboard to quit");
+        if !handle.is_finished() {
+            shutdown_flag.wait_for_shutdown_blocking();
         }
-        thread::sleep(Duration::from_millis(300));
-        count += 1;
-    }
-    match handle.join() {
-        Ok(res) => res,
-        Err(e) => anyhow::bail!("join error: {e:?}"),
+
+        let mut count = 0;
+        while !handle.is_finished() {
+            if count >= 10 {
+                anyhow::bail!("timeout of waiting the keyboard to quit");
+            }
+            thread::sleep(Duration::from_millis(300));
+            count += 1;
+        }
+        match handle.join() {
+            Ok(res) => res,
+            Err(e) => anyhow::bail!("join error: {e:?}"),
+        }
+    } else if args.force_x11 || x11::is_available() {
+        if args.force_x11 {
+            // unset wayland env, otherwise, winit will use wayland to open windows.
+            unsafe {
+                // Safety, currently there is no other thread running, except console_subscriber.
+                wayland::set_env(None, None);
+            }
+        }
+        // iced_winit can't be run outside main thread
+        app::x11::start(
+            config_manager,
+            init_task,
+            args.wait_for_socket,
+            shutdown_flag.clone(),
+        )
+    } else {
+        Err(anyhow::anyhow!("No Wayland or X11 Environment"))
     }
 }
 

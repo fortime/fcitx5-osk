@@ -39,7 +39,6 @@ enum InnerWindowState {
     Closed,
 }
 
-#[derive(Default)]
 struct WindowState<WM> {
     id: Option<Id>,
     state: InnerWindowState,
@@ -47,6 +46,19 @@ struct WindowState<WM> {
     positions: (Option<Point>, Option<Point>),
     movable: bool,
     phantom: PhantomData<WM>,
+}
+
+impl<WM> Default for WindowState<WM> {
+    fn default() -> Self {
+        Self {
+            id: Default::default(),
+            state: Default::default(),
+            close_req_token: Default::default(),
+            positions: Default::default(),
+            movable: Default::default(),
+            phantom: PhantomData,
+        }
+    }
 }
 
 impl<WM> WindowState<WM> {
@@ -161,10 +173,12 @@ where
                 }
             }
             let (id, task) = wm.open(settings);
-            tracing::debug!("opening window: {}", id);
-            self.id = Some(id);
-            self.state = InnerWindowState::Init;
-            self.close_req_token = 0;
+            if id.is_some() {
+                tracing::debug!("opening window: {:?}", id);
+                self.id = id;
+                self.state = InnerWindowState::Init;
+                self.close_req_token = 0;
+            }
             task
         }
     }
@@ -310,12 +324,10 @@ pub struct WindowManagerState<WM> {
     wm: WM,
 }
 
-impl<WM> WindowManagerState<WM>
-where
-    WM: Default,
-{
+impl<WM> WindowManagerState<WM> {
     pub fn new(
         config: &Config,
+        wm: WM,
         key_area_layout: Rc<KeyAreaLayout>,
         fcitx5_services: Fcitx5Services,
         fcitx5_osk_services: Fcitx5OskServices,
@@ -332,12 +344,10 @@ where
             to_be_opened: None,
             fcitx5_services,
             fcitx5_osk_services,
-            wm: Default::default(),
+            wm,
         })
     }
-}
 
-impl<WM> WindowManagerState<WM> {
     pub fn on_layout_event(&mut self, event: LayoutEvent) {
         self.landscape_layout.on_event(event.clone());
         self.portrait_layout.on_event(event);
@@ -494,6 +504,10 @@ where
         self.wm.mode()
     }
 
+    pub fn outputs(&self) -> Vec<(String, String)> {
+        self.wm.outputs()
+    }
+
     pub fn to_element<'b>(&self, params: ToElementCommonParams<'b>) -> Element<'b, Message> {
         let id = params.window_id;
         if self.is_keyboard(id) {
@@ -631,8 +645,8 @@ where
         match mode {
             WindowManagerMode::Normal => {
                 task = task.chain(self.reset_indicator());
-                if self.keyboard_window_state.id().is_some() {
-                    task = task.chain(self.reopen_keyboard());
+                if let Some(next_task) = self.reopen_keyboard_if_opened() {
+                    task = task.chain(next_task)
                 }
                 task
             }
@@ -648,8 +662,8 @@ where
             let mut task =
                 Task::done(Message::from(UpdateConfigEvent::Placement(placement)).into());
             self.placement = placement;
-            if self.keyboard_window_state.id().is_some() {
-                task = task.chain(self.reopen_keyboard())
+            if let Some(next_task) = self.reopen_keyboard_if_opened() {
+                task = task.chain(next_task)
             }
             task
         } else {
@@ -694,6 +708,14 @@ where
             }
         }
         task
+    }
+
+    pub fn reopen_keyboard_if_opened(&mut self) -> Option<Task<WM::Message>> {
+        if self.keyboard_window_state.id().is_some() {
+            Some(self.reopen_keyboard())
+        } else {
+            None
+        }
     }
 
     fn reopen_keyboard(&mut self) -> Task<WM::Message> {
@@ -779,8 +801,17 @@ where
                     self.keyboard_window_state
                         .set_opened(&mut self.wm, portrait);
                     task = task.chain(self.fcitx5_show().map_task());
-                    if self.indicator_display() == IndicatorDisplay::Auto {
-                        task = task.chain(self.close_indicator());
+                    match self.indicator_display() {
+                        IndicatorDisplay::Auto | IndicatorDisplay::AlwaysOff => {
+                            if self.indicator_window_state.id().is_some() {
+                                task = task.chain(self.close_indicator())
+                            }
+                        }
+                        IndicatorDisplay::AlwaysOn => {
+                            if self.indicator_window_state.id().is_none() {
+                                task = task.chain(self.open_indicator())
+                            }
+                        }
                     }
                     if self.placement() == Placement::Dock {
                         task = task.chain(self.wm.fetch_screen_info());
@@ -946,6 +977,11 @@ where
                 self.update_indicator_display(indicator_display)
             }
             WindowManagerEvent::UpdateUnit(unit) => self.update_unit(unit),
+            WindowManagerEvent::UpdatePreferredOutputName(name) => {
+                tracing::debug!("Set preferred name: {name}");
+                self.wm.set_preferred_output_name(&name);
+                Message::from_nothing()
+            }
         }
     }
 }
@@ -1014,6 +1050,7 @@ pub enum WindowManagerEvent {
     UpdatePlacement(Placement),
     UpdateIndicatorDisplay(IndicatorDisplay),
     UpdateUnit(u16),
+    UpdatePreferredOutputName(String),
 }
 
 impl From<WindowManagerEvent> for Message {
