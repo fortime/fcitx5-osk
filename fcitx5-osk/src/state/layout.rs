@@ -140,11 +140,13 @@ impl LayoutState {
 
     pub fn update_key_area_layout(
         &mut self,
+        mut max_width: u16,
         mut key_area_layout: Rc<KeyAreaLayout>,
     ) -> StdResult<Rc<KeyAreaLayout>, Rc<KeyAreaLayout>> {
         let old_min_toolbar_height_u = self.key_area_layout.min_toolbar_height_u();
         let new_min_toolbar_height_u = key_area_layout.min_toolbar_height_u();
         mem::swap(&mut self.key_area_layout, &mut key_area_layout);
+        mem::swap(&mut self.max_width, &mut max_width);
         self.toolbar_layout
             .update_height_u(new_min_toolbar_height_u);
         if let Err(e) = self.calculate_size() {
@@ -154,6 +156,7 @@ impl LayoutState {
             );
             // recover
             mem::swap(&mut self.key_area_layout, &mut key_area_layout);
+            mem::swap(&mut self.max_width, &mut max_width);
             self.toolbar_layout
                 .update_height_u(old_min_toolbar_height_u);
             Err(key_area_layout)
@@ -211,12 +214,14 @@ impl LayoutState {
     pub fn on_event(&mut self, event: LayoutEvent) {
         match event {
             LayoutEvent::ToggleSetting => self.setting_shown = !self.setting_shown,
+            LayoutEvent::SyncLayout => {}
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum LayoutEvent {
+    SyncLayout,
     ToggleSetting,
 }
 

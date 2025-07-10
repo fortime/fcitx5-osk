@@ -1,13 +1,13 @@
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 
-use anyhow::{Error, Result};
+use anyhow::Result;
 use dark_light::Mode;
 use fcitx5_osk_common::dbus::client::Fcitx5OskServices;
 use getset::{Getters, MutGetters};
 use iced::{window::Id, Element, Task, Theme, Vector};
 
 use crate::{
-    app::{KeyboardError, MapTask, Message},
+    app::{self, MapTask, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
     dbus::client::Fcitx5Services,
     layout::ToElementCommonParams,
@@ -22,7 +22,8 @@ mod layout;
 mod window;
 
 pub use config::{
-    ConfigState, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc, UpdateConfigEvent,
+    ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc, TextDesc,
+    UpdateConfigEvent,
 };
 pub use im::{ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
@@ -44,19 +45,18 @@ pub struct State<WM> {
     theme_detecting: bool,
 }
 
-impl<WM> State<WM>
-where
-    WM: Default,
-{
+impl<WM> State<WM> {
     pub fn new(
         config_manager: ConfigManager,
+        wm: WM,
         fcitx5_services: Fcitx5Services,
         fcitx5_osk_services: Fcitx5OskServices,
     ) -> Result<Self> {
         let config = config_manager.as_ref();
         let store = Store::new(config)?;
+        let portrait = false;
         // key_area_layout will be updated when cur_im is updated.
-        let key_area_layout = store.key_area_layout_by_im("", false);
+        let key_area_layout = store.key_area_layout_by_im("", portrait);
         let mut state = Self {
             keyboard: KeyboardState::new(
                 config.holding_timeout(),
@@ -67,6 +67,8 @@ where
             im: ImState::new(fcitx5_services.clone()),
             window_manager: WindowManagerState::new(
                 config,
+                wm,
+                portrait,
                 key_area_layout,
                 fcitx5_services,
                 fcitx5_osk_services,
@@ -79,9 +81,7 @@ where
         state.sync_theme(None);
         Ok(state)
     }
-}
 
-impl<WM> State<WM> {
     fn is_auto_theme(&self) -> bool {
         self.config.config().theme().eq_ignore_ascii_case("auto")
     }
@@ -150,13 +150,6 @@ impl<WM> State<WM>
 where
     WM: WindowManager,
 {
-    pub fn on_layout_event(&mut self, event: LayoutEvent) {
-        self.window_manager.on_layout_event(event);
-        if self.window_manager.is_setting_shown() {
-            self.config.refresh();
-        }
-    }
-
     pub fn to_element(&self, id: Id) -> Element<Message> {
         self.window_manager.to_element(ToElementCommonParams {
             state: self,
@@ -171,33 +164,34 @@ where
     WM::Message: From<Message> + 'static + Send + Sync,
 {
     pub fn on_update_config_event(&mut self, event: UpdateConfigEvent) -> Task<WM::Message> {
-        if self.config.on_update_event(event.clone()) {
-            match event {
-                UpdateConfigEvent::Theme(_) => {
-                    Task::done(Message::from(ThemeEvent::Updated).into())
-                }
-                UpdateConfigEvent::LandscapeWidth(_) | UpdateConfigEvent::PortraitWidth(_) => {
-                    // After width is changed, the pages of candidate area should be changed too. Here we
-                    // just reset it.
-                    Task::done(Message::from(ImEvent::ResetCandidateCursor).into())
-                }
-                _ => Message::from_nothing(),
-            }
-        } else {
-            Message::from_nothing()
-        }
+        self.config.on_update_event(event).map_task()
     }
 
-    fn update_cur_im(&mut self, im_name: &str) -> Task<WM::Message> {
+    fn update_layout_by_im(&mut self, im_name: Option<&str>) -> Option<Task<WM::Message>> {
+        let im_name = im_name
+            .or_else(|| self.im.im_name().map(String::as_str))
+            .unwrap_or_default();
+        let portrait = self.window_manager.is_portrait();
         let key_area_layout = self
             .store
             .key_area_layout_by_im(im_name, self.window_manager.is_portrait());
-        let res = self
+        let max_width = if portrait {
+            self.config().portrait_width()
+        } else {
+            self.config().landscape_width()
+        };
+        let task = self
             .window_manager
-            .update_key_area_layout(key_area_layout.clone());
-        if let Some(task) = res {
+            .update_key_area_layout(max_width, key_area_layout.clone());
+        if task.is_some() {
             self.keyboard
                 .update_key_area_layout(&key_area_layout, &self.store);
+        }
+        task
+    }
+
+    fn update_cur_im(&mut self, im_name: &str) -> Task<WM::Message> {
+        if let Some(task) = self.update_layout_by_im(Some(im_name)) {
             self.im.update_cur_im(im_name);
             self.window_manager
                 .update_candidate_font(self.store.font_by_im(im_name));
@@ -217,6 +211,23 @@ where
                 .chain(self.im.on_event(event))
                 .map_task(),
             _ => self.im.on_event(event).map_task(),
+        }
+    }
+
+    pub fn on_layout_event(&mut self, event: LayoutEvent) -> Task<WM::Message> {
+        let task = if let LayoutEvent::SyncLayout = event {
+            self.update_layout_by_im(None)
+        } else {
+            self.window_manager.on_layout_event(event);
+            if self.window_manager.is_setting_shown() {
+                self.config.refresh();
+            }
+            None
+        };
+        if let Some(task) = task {
+            task
+        } else {
+            Message::from_nothing()
         }
     }
 }
@@ -250,6 +261,11 @@ pub trait StateExtractor {
     fn placement(&self) -> Placement;
 
     fn indicator_display(&self) -> IndicatorDisplay;
+
+    fn outputs(&self) -> Vec<(String, String)>;
+
+    /// Return the init value and cur value stored by ChangeTempText event
+    fn config_temp_text(&self, key: &str) -> Option<(&str, &str)>;
 }
 
 impl<WM> StateExtractor for State<WM>
@@ -313,6 +329,15 @@ where
     fn indicator_display(&self) -> IndicatorDisplay {
         self.window_manager.indicator_display()
     }
+
+    fn outputs(&self) -> Vec<(String, String)> {
+        self.window_manager.outputs()
+    }
+
+    /// Return the init value and cur value stored by ChangeTempText event
+    fn config_temp_text(&self, key: &str) -> Option<(&str, &str)> {
+        self.config.temp_text(key)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -338,15 +363,7 @@ where
     let err_msg = err_msg.into();
     let service = service.clone();
     Task::perform(f(service), move |r| match r {
-        Err(e) => error_with_context(e, err_msg.clone()),
+        Err(e) => app::error_with_context(e, err_msg.clone()),
         Ok(t) => t,
     })
-}
-
-fn error_with_context<E, M>(e: E, err_msg: M) -> Message
-where
-    E: Into<Error>,
-    M: Into<String>,
-{
-    KeyboardError::Error(Arc::new(e.into().context(err_msg.into()))).into()
 }

@@ -1,12 +1,14 @@
 use anyhow::Result;
+use connection::WaylandConnection;
 use fcitx5_osk_common::{dbus::client::Fcitx5OskServices, signal::ShutdownFlag};
-use iced::{window::Id, Element, Subscription, Task, Theme};
+use iced::{futures::stream, window::Id, Element, Subscription, Task, Theme};
 use iced_layershell::{
     build_pattern::{self, MainSettings},
     settings::{LayerShellSettings, StartMode},
     to_layer_message, Appearance,
 };
 
+pub use crate::app::wayland::output::{OutputContext, OutputGeometry};
 use crate::{
     app::{self, wayland::input_method::InputMethodContext, Keyboard, MapTask, Message},
     config::ConfigManager,
@@ -16,7 +18,9 @@ use crate::{
     window::{wayland::WaylandWindowManager, WindowManagerMode},
 };
 
+mod connection;
 mod input_method;
+mod output;
 
 #[to_layer_message(multi)]
 #[derive(Clone, Debug)]
@@ -32,6 +36,7 @@ impl From<Message> for WaylandMessage {
 
 struct WaylandKeyboard {
     input_method_context: InputMethodContext,
+    output_context: OutputContext,
     shutdown_flag: ShutdownFlag,
     inner: Keyboard<WaylandWindowManager>,
 }
@@ -40,13 +45,19 @@ impl WaylandKeyboard {
     pub fn new(
         config_manager: ConfigManager,
         input_method_context: InputMethodContext,
+        output_context: OutputContext,
         fcitx5_services: Fcitx5Services,
         fcitx5_osk_services: Fcitx5OskServices,
         wait_for_socket: bool,
         shutdown_flag: ShutdownFlag,
     ) -> Result<(Self, Task<Message>)> {
+        let wayland_window_manager = WaylandWindowManager::new(
+            output_context.clone(),
+            config_manager.as_ref().preferred_output_name().cloned(),
+        );
         let (inner, task) = Keyboard::new(
             config_manager,
+            wayland_window_manager,
             fcitx5_services,
             fcitx5_osk_services,
             wait_for_socket,
@@ -56,6 +67,7 @@ impl WaylandKeyboard {
             Self {
                 inner,
                 input_method_context,
+                output_context,
                 shutdown_flag,
             },
             task,
@@ -69,15 +81,33 @@ impl WaylandKeyboard {
     }
 
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
-        Subscription::batch(vec![
+        let mut subscriptions = vec![
             self.inner.subscription(),
             self.input_method_context.subscription(),
-        ])
+            self.output_context.subscription(),
+        ];
+
+        // These messages only work in the first call
+        let mut once_messages = vec![];
+        // Wayland connection environment variables will be set in the call of `self.inner.subscription()`.
+        if let Err(e) = self.output_context.listen() {
+            once_messages.push(
+                app::error_with_context(e, "Unable to listen to the changes of wayland output")
+                    .into(),
+            );
+        }
+        subscriptions.push(Subscription::run_with_id(
+            "external::wayland_once",
+            stream::iter(once_messages),
+        ));
+
+        Subscription::batch(subscriptions)
     }
 
     pub fn update(&mut self, message: WaylandMessage) -> Task<WaylandMessage> {
         if self.shutdown_flag.get() {
             self.input_method_context.close();
+            self.output_context.close();
         }
 
         if let WaylandMessage::Inner(message) = message {
@@ -135,7 +165,9 @@ pub fn start(
         Default::default()
     };
 
-    let input_method_context = InputMethodContext::new();
+    let connection = WaylandConnection::new();
+    let input_method_context = InputMethodContext::new(connection.clone());
+    let output_context = OutputContext::new(connection.clone());
 
     build_pattern::daemon(
         clap::crate_name!(),
@@ -151,17 +183,15 @@ pub fn start(
             ..Default::default()
         },
         default_font,
-        with_connection: {
-            let input_method_context = input_method_context.clone();
-            Some(
-                (move || {
-                    input_method_context
-                        .connection()
-                        .inspect_err(|e| tracing::error!("failed to get a connection: {:?}", e))
-                })
-                .into(),
-            )
-        },
+        with_connection: Some(
+            (move || {
+                connection
+                    .state()
+                    .inspect_err(|e| tracing::error!("failed to get a connection: {:?}", e))
+                    .map(|s| s.connection().clone())
+            })
+            .into(),
+        ),
         ..Default::default()
     })
     .run_with(move || {
@@ -172,6 +202,7 @@ pub fn start(
         let (keyboard, task) = WaylandKeyboard::new(
             config_manager,
             input_method_context,
+            output_context,
             fcitx5_services,
             fcitx5_osk_services,
             wait_for_socket,

@@ -1363,6 +1363,7 @@ dependencies = [
  "tracing",
  "wayland-client",
  "wayland-protocols",
+ "wayland-protocols-wlr",
  "x11rb",
  "xkeysym",
  "zbus 5.2.0",
@@ -2121,7 +2122,7 @@ dependencies = [
 [[package]]
 name = "iced_layershell"
 version = "0.13.5"
-source = "git+https://github.com/fortime/exwlshelleventloop.git?rev=194f2910db#194f2910db786ff50feaf22ac10cee25b6af41bd"
+source = "git+https://github.com/fortime/exwlshelleventloop.git?rev=4b0b981826#4b0b981826cc6536b81ba54f8575f1a1f516a850"
 dependencies = [
  "futures",
  "iced",
@@ -2141,7 +2142,7 @@ dependencies = [
 [[package]]
 name = "iced_layershell_macros"
 version = "0.13.5"
-source = "git+https://github.com/fortime/exwlshelleventloop.git?rev=194f2910db#194f2910db786ff50feaf22ac10cee25b6af41bd"
+source = "git+https://github.com/fortime/exwlshelleventloop.git?rev=4b0b981826#4b0b981826cc6536b81ba54f8575f1a1f516a850"
 dependencies = [
  "darling",
  "manyhow",
@@ -2428,7 +2429,7 @@ dependencies = [
 [[package]]
 name = "layershellev"
 version = "0.13.5"
-source = "git+https://github.com/fortime/exwlshelleventloop.git?rev=194f2910db#194f2910db786ff50feaf22ac10cee25b6af41bd"
+source = "git+https://github.com/fortime/exwlshelleventloop.git?rev=4b0b981826#4b0b981826cc6536b81ba54f8575f1a1f516a850"
 dependencies = [
  "bitflags 2.9.0",
  "calloop 0.14.2",
@@ -4719,7 +4720,7 @@ dependencies = [
 [[package]]
 name = "waycrate_xkbkeycode"
 version = "0.13.5"
-source = "git+https://github.com/fortime/exwlshelleventloop.git?rev=194f2910db#194f2910db786ff50feaf22ac10cee25b6af41bd"
+source = "git+https://github.com/fortime/exwlshelleventloop.git?rev=4b0b981826#4b0b981826cc6536b81ba54f8575f1a1f516a850"
 dependencies = [
  "bitflags 2.9.0",
  "calloop 0.14.2",

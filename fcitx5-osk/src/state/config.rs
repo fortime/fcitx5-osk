@@ -1,24 +1,33 @@
-use iced::Theme;
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter, Result as FmtResult},
+};
+
+use iced::{Task, Theme};
 use strum::IntoEnumIterator;
 
 use crate::{
     app::Message,
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
-    state::{StateExtractor, WindowManagerEvent},
+    state::{ImEvent, StateExtractor, ThemeEvent, WindowManagerEvent},
     window::WindowManagerMode,
 };
 
 macro_rules! on_update_event {
-    ($event:ident, $config:expr, $(($variant:tt => $eq:expr, $set:tt)),*  $(,)?) => {
+    ($event:ident, $config:expr, $(@$variant:ident => {$eq:expr, $set:ident $(, $message_cb:expr)?}),*$(,)? $($pat: pat => $raw_expr: expr),* $(,)?) => {
         match $event {
             $(UpdateConfigEvent::$variant(v) => {
                 if $eq($config, &v) {
-                    false
+                    (false, None)
                 } else {
-                    $config.$set(v);
-                    true
+                    $config.$set(v.clone());
+                    #[allow(unused_mut, unused_assignments)]
+                    let mut message = None;
+                    $( message = Some($message_cb(v)); )?
+                    (true, message)
                 }
             },)*
+            $($pat => $raw_expr,)*
         }
     }
 }
@@ -33,6 +42,38 @@ macro_rules! option_config_eq {
     ($field:tt) => {
         |c: &Config, v| c.$field().filter(|f| (*f).eq(v)).is_some()
     };
+}
+
+pub struct ValueAndDescription<T> {
+    value: T,
+    desc: String,
+}
+
+impl<T> Display for ValueAndDescription<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str(&self.desc)
+    }
+}
+
+impl<T> Clone for ValueAndDescription<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            value: self.value.clone(),
+            desc: self.desc.clone(),
+        }
+    }
+}
+
+impl<T> PartialEq for ValueAndDescription<T>
+where
+    T: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.value.eq(&other.value)
+    }
 }
 
 pub struct StepDesc<T> {
@@ -106,11 +147,118 @@ impl<T> EnumDesc<T> {
     }
 }
 
+pub struct DynamicEnumDesc<T> {
+    #[allow(clippy::type_complexity)]
+    variants_and_selected:
+        fn(&dyn StateExtractor) -> (Vec<ValueAndDescription<T>>, Option<ValueAndDescription<T>>),
+    is_enabled: fn(&dyn StateExtractor) -> bool,
+    on_selected: fn(&dyn StateExtractor, ValueAndDescription<T>) -> Message,
+}
+
+impl<T> DynamicEnumDesc<T> {
+    pub fn variants_and_selected(
+        &self,
+        state: &dyn StateExtractor,
+    ) -> (Vec<ValueAndDescription<T>>, Option<ValueAndDescription<T>>) {
+        (self.variants_and_selected)(state)
+    }
+
+    pub fn is_enabled(&self, state: &dyn StateExtractor) -> bool {
+        (self.is_enabled)(state)
+    }
+
+    pub fn on_selected(
+        &self,
+        state: &dyn StateExtractor,
+        selected: ValueAndDescription<T>,
+    ) -> Message {
+        (self.on_selected)(state, selected)
+    }
+}
+
+/// TODO Actually, this doesn't work because the keyboard ui doesn't accept input, you can't type text. How funny I am!
+pub struct TextDesc {
+    placeholder: fn(&Field, &dyn StateExtractor) -> Option<String>,
+    init_value: fn(&dyn StateExtractor) -> Option<String>,
+    is_enabled: fn(&dyn StateExtractor) -> bool,
+    submit_message: fn(String) -> UpdateConfigEvent,
+}
+
+impl TextDesc {
+    pub fn placeholder(&self, field: &Field, state: &dyn StateExtractor) -> Option<String> {
+        (self.placeholder)(field, state)
+    }
+
+    pub fn cur_value(&self, field: &Field, state: &dyn StateExtractor) -> Option<String> {
+        let init_value = (self.init_value)(state);
+        if let Some((last_init_value, value)) = state.config_temp_text(field.id()) {
+            if last_init_value.is_empty() && init_value.is_none() {
+                return Some(value.to_string());
+            }
+            if init_value
+                .as_ref()
+                .filter(|v| *v == last_init_value)
+                .is_some()
+            {
+                return Some(value.to_string());
+            }
+        }
+        init_value
+    }
+
+    pub fn on_input_maybe(
+        &self,
+        field: &Field,
+        state: &dyn StateExtractor,
+    ) -> Option<Box<dyn Fn(String) -> Message>> {
+        if !(self.is_enabled)(state) {
+            return None;
+        }
+
+        let init_value = (self.init_value)(state).unwrap_or_default();
+        let key = field.id().to_string();
+
+        let handle = move |value| {
+            Message::from(UpdateConfigEvent::ChangeTempText {
+                key: key.clone(),
+                init_value: init_value.clone(),
+                value,
+            })
+        };
+        Some(Box::new(handle))
+    }
+
+    pub fn on_paste_maybe(
+        &self,
+        field: &Field,
+        state: &dyn StateExtractor,
+    ) -> Option<Box<dyn Fn(String) -> Message>> {
+        self.on_input_maybe(field, state)
+    }
+
+    pub fn on_submit_maybe(&self, field: &Field, state: &dyn StateExtractor) -> Option<Message> {
+        if !(self.is_enabled)(state) {
+            return None;
+        }
+
+        let init_value = (self.init_value)(state).unwrap_or_default();
+        let key = field.id().to_string();
+
+        Some(Message::from(UpdateConfigEvent::SubmitTempText {
+            key,
+            init_value,
+            producer: self.submit_message,
+        }))
+    }
+}
+
 pub enum FieldType {
     StepU16(StepDesc<u16>),
     OwnedEnumPlacement(OwnedEnumDesc<Placement>),
     OwnedEnumIndicatorDisplay(OwnedEnumDesc<IndicatorDisplay>),
     EnumString(EnumDesc<String>),
+    DynamicEnumString(DynamicEnumDesc<String>),
+    Text(TextDesc),
 }
 
 impl From<StepDesc<u16>> for FieldType {
@@ -137,6 +285,18 @@ impl From<EnumDesc<String>> for FieldType {
     }
 }
 
+impl From<DynamicEnumDesc<String>> for FieldType {
+    fn from(value: DynamicEnumDesc<String>) -> Self {
+        Self::DynamicEnumString(value)
+    }
+}
+
+impl From<TextDesc> for FieldType {
+    fn from(value: TextDesc) -> Self {
+        Self::Text(value)
+    }
+}
+
 pub struct Field {
     name: &'static str,
     id: &'static str,
@@ -148,7 +308,6 @@ impl Field {
         self.name
     }
 
-    #[allow(unused)]
     pub fn id(&self) -> &str {
         self.id
     }
@@ -161,6 +320,7 @@ impl Field {
 pub struct ConfigState {
     config_manager: ConfigManager,
     updatable_fields: Vec<Field>,
+    temp_texts: HashMap<String, (String, String)>,
 }
 
 impl ConfigState {
@@ -261,7 +421,10 @@ impl ConfigState {
                     }
                     .into(),
                 },
+                preferred_output_name_field(),
+                preferred_output_name_custom_field(),
             ],
+            temp_texts: Default::default(),
         }
     }
 
@@ -277,23 +440,123 @@ impl ConfigState {
         // clear temp values if needed
     }
 
-    pub fn on_update_event(&mut self, event: UpdateConfigEvent) -> bool {
+    pub fn temp_text(&self, key: &str) -> Option<(&str, &str)> {
+        self.temp_texts
+            .get(key)
+            .map(|(init_value, value)| (init_value.as_str(), value.as_str()))
+    }
+
+    pub fn on_update_event(&mut self, event: UpdateConfigEvent) -> Task<Message> {
         let config = self.config_manager.as_mut();
-        let updated = on_update_event!(
+        let (updated, message) = on_update_event!(
             event,
             config,
-            (LandscapeWidth => config_eq!(landscape_width), set_landscape_width),
-            (PortraitWidth => config_eq!(portrait_width), set_portrait_width),
-            (Placement => config_eq!(placement), set_placement),
-            (IndicatorDisplay => config_eq!(indicator_display), set_indicator_display),
-            (Theme => config_eq!(theme), set_theme),
-            (DarkTheme => option_config_eq!(dark_theme), set_dark_theme),
-            (LightTheme => option_config_eq!(light_theme), set_light_theme),
+            @LandscapeWidth => {
+                config_eq!(landscape_width),
+                set_landscape_width,
+                |_| Message::from(ImEvent::ResetCandidateCursor)
+            },
+            @PortraitWidth => {
+                config_eq!(portrait_width),
+                set_portrait_width,
+                |_| Message::from(ImEvent::ResetCandidateCursor)
+            },
+            @Placement => {config_eq!(placement), set_placement},
+            @IndicatorDisplay => {config_eq!(indicator_display), set_indicator_display},
+            @Theme => {
+                config_eq!(theme),
+                set_theme,
+                |_| Message::from(ThemeEvent::Updated)
+            },
+            @DarkTheme => {option_config_eq!(dark_theme), set_dark_theme},
+            @LightTheme => {option_config_eq!(light_theme), set_light_theme},
+            @PreferredOutputName => {
+                option_config_eq!(preferred_output_name),
+                set_preferred_output_name,
+                |v| Message::from(WindowManagerEvent::UpdatePreferredOutputName(v))
+            },
+            UpdateConfigEvent::ChangeTempText {key, init_value, value} => {
+                tracing::error!("Update temp_text[{key}] to {value}, init value[{init_value}]");
+                self.temp_texts.insert(key, (init_value, value));
+                (false, None)
+            },
+            UpdateConfigEvent::SubmitTempText {key, init_value, producer} => {
+                let mut message = None;
+                if let Some((last_init_value, value)) = self.temp_texts.remove(&key) {
+                    // update only if init_value is the same
+                    if last_init_value == init_value && value != init_value {
+                        message = Some(Message::from(producer(value)))
+                    }
+                };
+                (false, message)
+            },
         );
         if updated {
             self.config_manager.try_write();
         }
-        updated
+        message.map(Task::done).unwrap_or_else(Message::nothing)
+    }
+}
+
+fn preferred_output_name_field() -> Field {
+    Field {
+        name: "Preferred Output",
+        id: "preferred_output_name",
+        typ: DynamicEnumDesc::<String> {
+            variants_and_selected: |state| {
+                let outputs = state.outputs();
+                let mut variants = Vec::with_capacity(outputs.len());
+                let mut selected = None;
+                let preferred_output_name = state.config().preferred_output_name();
+
+                for (name, description) in outputs {
+                    if preferred_output_name.filter(|n| **n == name).is_some() {
+                        selected = Some(output_name(name.clone(), description.clone()));
+                    }
+                    variants.push(output_name(name, description));
+                }
+                if selected.is_none() {
+                    if let Some(name) = preferred_output_name {
+                        selected = Some(ValueAndDescription {
+                            value: name.clone(),
+                            desc: format!("{name} (Not Connected)"),
+                        })
+                    }
+                }
+                (variants, selected)
+            },
+            is_enabled: |_| true,
+            on_selected: |_, d| Message::from(UpdateConfigEvent::PreferredOutputName(d.value)),
+        }
+        .into(),
+    }
+}
+
+fn preferred_output_name_custom_field() -> Field {
+    Field {
+        name: "Preferred Output(Custom)",
+        id: "preferred_output_name",
+        typ: TextDesc {
+            placeholder: |_, _| Some("The name of the preferred output, like: DP-1".to_string()),
+            is_enabled: |_| true,
+            init_value: |state| state.config().preferred_output_name().cloned(),
+            submit_message: |s| UpdateConfigEvent::PreferredOutputName(s),
+        }
+        .into(),
+    }
+}
+
+fn output_name(name: String, description: String) -> ValueAndDescription<String> {
+    if description.is_empty() {
+        ValueAndDescription {
+            value: name.clone(),
+            desc: name,
+        }
+    } else {
+        ValueAndDescription {
+            value: name.clone(),
+            desc: format!("{name} ({description})"),
+        }
     }
 }
 
@@ -306,6 +569,17 @@ pub enum UpdateConfigEvent {
     Theme(String),
     DarkTheme(String),
     LightTheme(String),
+    PreferredOutputName(String),
+    ChangeTempText {
+        key: String,
+        init_value: String,
+        value: String,
+    },
+    SubmitTempText {
+        key: String,
+        init_value: String,
+        producer: fn(String) -> UpdateConfigEvent,
+    },
 }
 
 impl From<UpdateConfigEvent> for Message {

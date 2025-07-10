@@ -13,7 +13,16 @@ pub trait WindowAppearance {
     fn background_color(&self) -> Color;
 }
 
-pub trait WindowManager: Default {
+#[allow(clippy::enum_variant_names)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SyncOutputResponse {
+    OutputChanged,
+    SizeChanged,
+    ScaleFactorChanged(f64),
+    RotationChanged,
+}
+
+pub trait WindowManager {
     type Message;
 
     type Appearance;
@@ -21,7 +30,7 @@ pub trait WindowManager: Default {
     /// generate a do nothing task
     fn nothing() -> Task<Self::Message>;
 
-    fn open(&mut self, settings: WindowSettings) -> (Id, Task<Self::Message>);
+    fn open(&mut self, settings: WindowSettings) -> (Option<Id>, Task<Self::Message>);
 
     fn opened(&mut self, id: Id, size: Size) -> Task<Self::Message>;
 
@@ -37,18 +46,21 @@ pub trait WindowManager: Default {
 
     fn placement(&self, id: Id) -> Option<Placement>;
 
-    fn fetch_screen_info(&mut self) -> Task<Self::Message>;
-
     fn appearance(&self, theme: &Theme, id: Id) -> Self::Appearance;
 
-    fn set_screen_size(&mut self, size: Size) -> bool;
-
     /// screen size with exclusive zone
-    fn full_screen_size(&self) -> Size;
+    fn screen_size(&self) -> Size;
 
     fn set_mode(&mut self, mode: WindowManagerMode) -> bool;
 
     fn mode(&self) -> WindowManagerMode;
+
+    fn set_preferred_output_name(&mut self, preferred_output_name: &str);
+
+    /// Return a list of output's name and its description
+    fn outputs(&self) -> Vec<(String, String)>;
+
+    fn sync_output(&mut self) -> Vec<SyncOutputResponse>;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -58,23 +70,22 @@ pub enum WindowManagerMode {
     KwinLockScreen,
 }
 
+#[derive(Debug)]
 pub struct WindowSettings {
     application_id: String,
-    size: Option<Size>,
+    size: Size,
     placement: Placement,
     position: Point,
-    internal: bool,
 }
 
 impl WindowSettings {
-    pub fn new(size: Option<Size>, placement: Placement) -> Self {
+    pub fn new(size: Size, placement: Placement) -> Self {
         Self {
             // TODO don't hardcode
             application_id: "fcitx5-osk".to_string(),
             size,
             placement,
             position: Point::ORIGIN,
-            internal: false,
         }
     }
 

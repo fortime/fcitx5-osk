@@ -12,7 +12,9 @@ use crate::{
     layout::{self, KeyAreaLayout, ToElementCommonParams},
     state::{LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
-    window::{WindowAppearance, WindowManager, WindowManagerMode, WindowSettings},
+    window::{
+        SyncOutputResponse, WindowAppearance, WindowManager, WindowManagerMode, WindowSettings,
+    },
 };
 
 use super::ImEvent;
@@ -39,8 +41,8 @@ enum InnerWindowState {
     Closed,
 }
 
-#[derive(Default)]
 struct WindowState<WM> {
+    name: String,
     id: Option<Id>,
     state: InnerWindowState,
     close_req_token: u16,
@@ -50,6 +52,18 @@ struct WindowState<WM> {
 }
 
 impl<WM> WindowState<WM> {
+    fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            id: Default::default(),
+            state: Default::default(),
+            close_req_token: Default::default(),
+            positions: Default::default(),
+            movable: Default::default(),
+            phantom: PhantomData,
+        }
+    }
+
     fn id(&self) -> Option<Id> {
         self.id
     }
@@ -67,12 +81,12 @@ impl<WM> WindowState<WM> {
 
     fn close_with_delay(&mut self, delay: Duration, source: CloseOpSource) -> Task<Message> {
         if let Some(snapshot) = self.snapshot() {
-            tracing::debug!("waiting to close window: {:?}", snapshot);
+            tracing::debug!("Waiting to close window[{}]: {:?}", self.name, snapshot);
             Task::future(time::sleep(delay)).map(move |_| {
                 WindowEvent::ClosingWindow(snapshot.id, Some(snapshot), source).into()
             })
         } else {
-            tracing::debug!("window is already closed");
+            tracing::debug!("Window[{}] is already closed", self.name);
             Message::nothing()
         }
     }
@@ -85,7 +99,7 @@ impl<WM> WindowState<WM> {
                 _ => Some(CloseOpSource::UserAction),
             };
             if source.is_some() {
-                tracing::debug!("window[{}] closed", id);
+                tracing::debug!("Window[{}/{}] closed", self.name, id);
                 self.state = InnerWindowState::Closed;
             }
             source
@@ -109,7 +123,7 @@ where
 {
     fn set_opened(&mut self, wm: &mut WM, portrait: bool) {
         let Some(id) = self.id else {
-            tracing::error!("window is closed, can't set_opened");
+            tracing::error!("Window[{}] is closed, can't set_opened", self.name);
             return;
         };
         if let InnerWindowState::Init = self.state {
@@ -121,7 +135,8 @@ where
                     self.positions.0 = wm.position(id);
                 }
                 tracing::debug!(
-                    "update window[{}] positions: {:?}, portrait: {}",
+                    "Update window[{}/{}] positions: {:?}, portrait: {}",
+                    self.name,
                     id,
                     self.positions,
                     portrait
@@ -130,7 +145,8 @@ where
             return;
         }
         tracing::error!(
-            "window[{}] is in a wrong state: {:?}, can't update to {:?}",
+            "Window[{}/{}] is in a wrong state: {:?}, can't update to {:?}",
+            self.name,
             id,
             self.state,
             InnerWindowState::Opened
@@ -144,7 +160,7 @@ where
         portrait: bool,
     ) -> Task<WM::Message> {
         if let Some(id) = self.id {
-            tracing::warn!("window[{}] is already shown", id);
+            tracing::warn!("Window[{}/{}] is already shown", self.name, id);
             // disable all pending close requests.
             self.inc_close_req_token();
             WM::nothing()
@@ -155,16 +171,22 @@ where
                 } else {
                     self.positions.0
                 };
-                tracing::debug!("opening window in position: {:?}", position);
                 if let Some(position) = position {
                     settings = settings.set_position(position);
                 }
             }
+            tracing::debug!(
+                "Opening window[{}] with settings: {:?}",
+                self.name,
+                settings
+            );
             let (id, task) = wm.open(settings);
-            tracing::debug!("opening window: {}", id);
-            self.id = Some(id);
-            self.state = InnerWindowState::Init;
-            self.close_req_token = 0;
+            if id.is_some() {
+                tracing::debug!("Opening window[{}]: {:?}", self.name, id);
+                self.id = id;
+                self.state = InnerWindowState::Init;
+                self.close_req_token = 0;
+            }
             task
         }
     }
@@ -180,7 +202,8 @@ where
             self.close(wm, source)
         } else {
             tracing::debug!(
-                "window state snapshot doesn't match, last: {:?}, current: {:?}",
+                "Window[{}] state snapshot doesn't match, last: {:?}, current: {:?}",
+                self.name,
                 snapshot,
                 last
             );
@@ -192,44 +215,51 @@ where
         match (self.id, self.state) {
             (Some(id), InnerWindowState::Init) | (Some(id), InnerWindowState::Opened) => {
                 self.state = InnerWindowState::Closing(source);
-                tracing::debug!("closing window: {}", id);
+                tracing::debug!("Closing window: {}/{}", self.name, id);
                 return wm.close(id);
             }
             (Some(id), InnerWindowState::Closing(_)) => {
                 if source == CloseOpSource::Fcitx5 {
-                    tracing::debug!("update close op source: {:?}, window: {:?}", source, id);
+                    tracing::debug!(
+                        "Update close op source: {:?}, window: {}/{:?}",
+                        source,
+                        self.name,
+                        id
+                    );
                     self.state = InnerWindowState::Closing(source);
                 }
             }
             (None, _) | (_, InnerWindowState::Closed) => {
-                tracing::debug!("window is already closed");
+                tracing::debug!("Window[{}] is already closed", self.name);
             }
         }
         WM::nothing()
     }
 
     fn resize(&mut self, wm: &mut WM, size: Size) -> Task<WM::Message> {
-        if let Some(id) = self.id {
-            tracing::debug!("resizing window: {}, size: {:?}", id, size);
+        // id exists and not closing
+        if let Some(id) = self.opened_id() {
+            tracing::debug!("Resizing window: {}/{}, size: {:?}", self.name, id, size);
             wm.resize(id, size)
         } else {
-            tracing::debug!("window is closed, don't resize");
+            tracing::debug!("Window[{}] is closed, don't resize", self.name);
             WM::nothing()
         }
     }
 
     fn mv(&mut self, wm: &mut WM, position: Point, portrait: bool) -> Task<WM::Message> {
-        let Some(id) = self.id else {
-            tracing::debug!("window is closed, don't move");
+        let Some(id) = self.opened_id() else {
+            tracing::debug!("Window[{}] is closed, don't move", self.name);
             return WM::nothing();
         };
         let Some(cur_position) = self.position(portrait) else {
             // ignore
-            tracing::debug!("no position info of window[{}]", id);
+            tracing::debug!("No position info of window[{}/{}]", self.name, id);
             return WM::nothing();
         };
         tracing::debug!(
-            "moving {} from position[{:?}] to position[{:?}]",
+            "Moving window[{}/{}] from position[{:?}] to position[{:?}]",
+            self.name,
             id,
             cur_position,
             position
@@ -245,7 +275,8 @@ where
     }
 
     fn position(&self, portrait: bool) -> Option<Point> {
-        self.id.and({
+        // Not closing or closed
+        self.id.filter(|_| !self.closing()).and({
             if portrait {
                 self.positions.1
             } else {
@@ -255,8 +286,8 @@ where
     }
 
     fn set_movable(&mut self, wm: &WM, movable: bool) {
-        let Some(id) = self.id else {
-            tracing::debug!("window is closed, don't set movable");
+        let Some(id) = self.opened_id() else {
+            tracing::debug!("Window[{}] is closed, don't set movable", self.name);
             return;
         };
 
@@ -264,11 +295,17 @@ where
     }
 
     fn fix_position(&mut self, wm: &mut WM, portrait: bool) -> Option<Task<WM::Message>> {
-        if self.id.and_then(|id| wm.placement(id)) == Some(Placement::Dock) {
+        if self.opened_id().and_then(|id| wm.placement(id)) == Some(Placement::Dock) {
             return None;
         }
+        tracing::debug!("Fix position of window[{}]", self.name);
         self.position(portrait)
             .map(|position| self.mv(wm, position, portrait))
+    }
+
+    /// Return id only if the window is opened
+    fn opened_id(&self) -> Option<Id> {
+        self.id.filter(|_| self.state == InnerWindowState::Opened)
     }
 }
 
@@ -288,15 +325,16 @@ impl From<WindowEvent> for Message {
 }
 
 #[derive(Clone, Copy)]
-enum ToBeOpened {
-    Keyboard,
-    Indicator,
+#[repr(u16)]
+enum WindowMask {
+    Keyboard = 0x0001,
+    Indicator = 0x0002,
 }
 
 pub struct WindowManagerState<WM> {
     scale_factor: f32,
-    landscape_layout: LayoutState,
-    portrait_layout: LayoutState,
+    portrait: bool,
+    layout: LayoutState,
     keyboard_window_state: WindowState<WM>,
     indicator_window_state: WindowState<WM>,
     /// a value sync with config file
@@ -304,43 +342,44 @@ pub struct WindowManagerState<WM> {
     indicator_width: u16,
     /// a value sync with config file
     indicator_display: IndicatorDisplay,
-    to_be_opened: Option<ToBeOpened>,
+    to_be_opened_flag: u16,
     fcitx5_services: Fcitx5Services,
     fcitx5_osk_services: Fcitx5OskServices,
     wm: WM,
 }
 
-impl<WM> WindowManagerState<WM>
-where
-    WM: Default,
-{
+impl<WM> WindowManagerState<WM> {
     pub fn new(
         config: &Config,
+        wm: WM,
+        portrait: bool,
         key_area_layout: Rc<KeyAreaLayout>,
         fcitx5_services: Fcitx5Services,
         fcitx5_osk_services: Fcitx5OskServices,
     ) -> Result<Self> {
+        let max_width = if portrait {
+            config.portrait_width()
+        } else {
+            config.landscape_width()
+        };
         Ok(Self {
             scale_factor: 1.,
-            landscape_layout: LayoutState::new(config.landscape_width(), key_area_layout.clone())?,
-            portrait_layout: LayoutState::new(config.portrait_width(), key_area_layout.clone())?,
-            keyboard_window_state: Default::default(),
-            indicator_window_state: Default::default(),
+            portrait,
+            layout: LayoutState::new(max_width, key_area_layout)?,
+            keyboard_window_state: WindowState::new("keyboard"),
+            indicator_window_state: WindowState::new("indicator"),
             placement: config.placement(),
             indicator_width: config.indicator_width(),
             indicator_display: config.indicator_display(),
-            to_be_opened: None,
+            to_be_opened_flag: 0,
             fcitx5_services,
             fcitx5_osk_services,
-            wm: Default::default(),
+            wm,
         })
     }
-}
 
-impl<WM> WindowManagerState<WM> {
     pub fn on_layout_event(&mut self, event: LayoutEvent) {
-        self.landscape_layout.on_event(event.clone());
-        self.portrait_layout.on_event(event);
+        self.layout.on_event(event);
     }
 
     pub fn scale_factor(&self) -> f32 {
@@ -351,48 +390,18 @@ impl<WM> WindowManagerState<WM> {
         if scale_factor == self.scale_factor {
             return false;
         }
-        let landscape_res = self.landscape_layout.update_scale_factor(scale_factor);
-        if landscape_res.is_err() {
-            tracing::warn!(
-                "unable to update scale factor of landscape layout: {}",
-                scale_factor
-            );
-        }
-        let portrait_res = self.portrait_layout.update_scale_factor(scale_factor);
-        if portrait_res.is_err() {
-            tracing::warn!(
-                "unable to update scale factor of portrait layout: {}",
-                scale_factor
-            );
-        }
-        match (landscape_res, portrait_res) {
-            (Ok(_), Ok(_)) => {
-                self.scale_factor = scale_factor;
-                true
-            }
-            (Ok(old), Err(_)) => {
-                // reset landscape to old layout
-                if self.landscape_layout.update_scale_factor(old).is_err() {
-                    // should't be failed
-                    unreachable!("reset landscape to old scale factor failed");
-                }
-                false
-            }
-            (Err(_), Ok(old)) => {
-                // reset portrait to old layout
-                if self.portrait_layout.update_scale_factor(old).is_err() {
-                    // should't be failed
-                    unreachable!("reset portrait to old scale factor failed");
-                }
-                false
-            }
-            _ => false,
+        let res = self.layout.update_scale_factor(scale_factor);
+        if res.is_err() {
+            tracing::warn!("unable to update scale factor of layout: {}", scale_factor);
+            false
+        } else {
+            self.scale_factor = scale_factor;
+            true
         }
     }
 
     pub fn update_candidate_font(&mut self, font: Font) {
-        self.landscape_layout.update_candidate_font(font);
-        self.portrait_layout.update_candidate_font(font);
+        self.layout.update_candidate_font(font);
     }
 }
 
@@ -401,40 +410,23 @@ where
     WM: WindowManager,
 {
     pub fn is_portrait(&self) -> bool {
-        let screen_size = self.wm.full_screen_size();
-        screen_size.height > screen_size.width
+        self.portrait
     }
 
     pub fn available_candidate_width(&self) -> u16 {
-        if self.is_portrait() {
-            self.portrait_layout.available_candidate_width()
-        } else {
-            self.landscape_layout.available_candidate_width()
-        }
+        self.layout.available_candidate_width()
     }
 
     pub fn is_setting_shown(&self) -> bool {
-        if self.is_portrait() {
-            self.portrait_layout.is_setting_shown()
-        } else {
-            self.landscape_layout.is_setting_shown()
-        }
+        self.layout.is_setting_shown()
     }
 
     pub fn size(&self) -> Size {
-        if self.is_portrait() {
-            self.portrait_layout.size()
-        } else {
-            self.landscape_layout.size()
-        }
+        self.layout.size()
     }
 
     pub fn unit(&self) -> u16 {
-        if self.is_portrait() {
-            self.portrait_layout.unit()
-        } else {
-            self.landscape_layout.unit()
-        }
+        self.layout.unit()
     }
 
     fn window_state(&self, id: Id) -> Option<&WindowState<WM>> {
@@ -453,18 +445,6 @@ where
 
     pub fn is_indicator(&self, id: Id) -> bool {
         Some(id) == self.indicator_window_state.id()
-    }
-
-    fn update_screen_size(&mut self, screen_size: Size) -> bool {
-        let old_full_screen_size = self.wm.full_screen_size();
-        let res = self.wm.set_screen_size(screen_size);
-        let new_full_screen_size = self.wm.full_screen_size();
-        tracing::debug!(
-            "update screen size, old full size: {:?}, new full size: {:?}",
-            old_full_screen_size,
-            new_full_screen_size,
-        );
-        res
     }
 
     pub fn position(&self, id: Id) -> Option<Point> {
@@ -494,14 +474,14 @@ where
         self.wm.mode()
     }
 
+    pub fn outputs(&self) -> Vec<(String, String)> {
+        self.wm.outputs()
+    }
+
     pub fn to_element<'b>(&self, params: ToElementCommonParams<'b>) -> Element<'b, Message> {
         let id = params.window_id;
         if self.is_keyboard(id) {
-            if self.is_portrait() {
-                self.portrait_layout.to_element(&params)
-            } else {
-                self.landscape_layout.to_element(&params)
-            }
+            self.layout.to_element(&params)
         } else {
             let state = params.state;
             let message = if self.keyboard_window_state.id().is_some() {
@@ -549,11 +529,22 @@ where
     }
 
     pub fn open_indicator(&mut self) -> Task<WM::Message> {
+        // Reset the flag
+        self.unset_to_be_opened(WindowMask::Indicator);
         match self.indicator_display() {
             IndicatorDisplay::Auto | IndicatorDisplay::AlwaysOn => {
                 if self.indicator_window_state.id().is_none() {
-                    self.to_be_opened = Some(ToBeOpened::Indicator);
-                    self.wm.fetch_screen_info()
+                    let portrait = self.is_portrait();
+                    let window_settings = WindowSettings::new(
+                        Size::new(self.indicator_width as f32, self.indicator_width as f32),
+                        Placement::Float,
+                    );
+                    let task =
+                        self.indicator_window_state
+                            .open(&mut self.wm, window_settings, portrait);
+                    // window is not opened, mark it to_be_opened
+                    self.set_to_be_opened(WindowMask::Indicator, false);
+                    task
                 } else {
                     // manually increase close_req_token
                     self.indicator_window_state.inc_close_req_token();
@@ -570,15 +561,52 @@ where
     }
 
     pub fn open_keyboard(&mut self) -> Task<WM::Message> {
+        // Reset the flag
+        self.unset_to_be_opened(WindowMask::Keyboard);
         let mut task = Task::done(Message::from(ImEvent::SyncImList).into())
             .chain(Task::done(Message::from(ImEvent::SyncCurrentIm).into()));
         if self.keyboard_window_state.id().is_none() {
-            self.to_be_opened = Some(ToBeOpened::Keyboard);
-            task = task.chain(self.wm.fetch_screen_info());
+            let portrait = self.is_portrait();
+            task = task.chain(Task::done(WM::Message::from(
+                ImEvent::ResetCandidateCursor.into(),
+            )));
+            let mut size = self.size();
+            let screen_size = self.wm.screen_size();
+            // update unit if width is too large
+            if size.width > screen_size.width {
+                // update unit
+                let unit = self.layout.unit_within(screen_size.width as u16);
+                if self
+                    .layout
+                    .update_unit(unit, screen_size.width as u16)
+                    .is_ok()
+                {
+                    size = self.size();
+                }
+            }
+            let mut window_settings = WindowSettings::new(size, self.placement());
+            // set default float position.
+            if self.placement() == Placement::Float {
+                window_settings = window_settings.set_position(
+                    (
+                        (screen_size.width - size.width) / 2.,
+                        screen_size.height - size.height,
+                    )
+                        .into(),
+                );
+            }
+            task = task.chain(self.keyboard_window_state.open(
+                &mut self.wm,
+                window_settings,
+                portrait,
+            ));
+            // window is not opened, mark it to_be_opened
+            self.set_to_be_opened(WindowMask::Keyboard, false);
         } else if self.keyboard_window_state.closing() {
             // don't chain fetch_screen_info, otherwise, to_be_opened will be consumed before the
             // keyboard is closed.
-            self.to_be_opened = Some(ToBeOpened::Keyboard);
+            //self.to_be_opened_flag |= WindowMask::Keyboard as u16;
+            // TODO I have forgotten why this case is needed
         } else {
             // manually increase close_req_token
             self.keyboard_window_state.inc_close_req_token();
@@ -593,12 +621,14 @@ where
                 .close_with_delay(Duration::from_millis(1000), source)
                 .map_task(),
             CloseOpSource::UserAction | CloseOpSource::DbusController => {
-                let mut task = self.keyboard_window_state.close(&mut self.wm, source);
-                if (self.indicator_display() == IndicatorDisplay::Auto
+                let task = self.keyboard_window_state.close(&mut self.wm, source);
+                // If Keyboard is reopening, don't open indicator
+                if ((self.indicator_display() == IndicatorDisplay::Auto
+                    && !self.need_opened(WindowMask::Keyboard))
                     || self.indicator_display() == IndicatorDisplay::AlwaysOn)
                     && self.indicator_window_state.id().is_none()
                 {
-                    task = self.open_indicator().chain(task);
+                    self.set_to_be_opened(WindowMask::Indicator, false);
                 }
                 task
             }
@@ -631,8 +661,8 @@ where
         match mode {
             WindowManagerMode::Normal => {
                 task = task.chain(self.reset_indicator());
-                if self.keyboard_window_state.id().is_some() {
-                    task = task.chain(self.reopen_keyboard());
+                if let Some(next_task) = self.reopen_keyboard_if_opened() {
+                    task = task.chain(next_task)
                 }
                 task
             }
@@ -648,8 +678,8 @@ where
             let mut task =
                 Task::done(Message::from(UpdateConfigEvent::Placement(placement)).into());
             self.placement = placement;
-            if self.keyboard_window_state.id().is_some() {
-                task = task.chain(self.reopen_keyboard())
+            if let Some(next_task) = self.reopen_keyboard_if_opened() {
+                task = task.chain(next_task)
             }
             task
         } else {
@@ -696,31 +726,33 @@ where
         task
     }
 
-    fn reopen_keyboard(&mut self) -> Task<WM::Message> {
-        // If the keyboard is closed, it will trigger fetching screen info. After screen size is
-        // fetched, it will open a new keyboard window.
-        self.to_be_opened = Some(ToBeOpened::Keyboard);
-        self.close_keyboard(CloseOpSource::UserAction)
+    pub fn reopen_keyboard_if_opened(&mut self) -> Option<Task<WM::Message>> {
+        if self.keyboard_window_state.id().is_some() {
+            self.set_to_be_opened(WindowMask::Keyboard, true);
+            Some(self.close_keyboard(CloseOpSource::UserAction))
+        } else {
+            None
+        }
+    }
+
+    pub fn reopen_indicator_if_opened(&mut self) -> Option<Task<WM::Message>> {
+        if self.indicator_window_state.id().is_some() {
+            self.set_to_be_opened(WindowMask::Indicator, true);
+            Some(self.close_indicator())
+        } else {
+            None
+        }
     }
 
     fn update_unit(&mut self, unit: u16) -> Task<WM::Message> {
-        let max_width = self.wm.full_screen_size().width as u16;
+        let max_width = self.wm.screen_size().width as u16;
         let portrait = self.is_portrait();
-        let res = if portrait {
-            self.portrait_layout.update_unit(unit, max_width)
-        } else {
-            self.landscape_layout.update_unit(unit, max_width)
-        };
-
-        if res.is_ok() {
-            let (event, size) = if portrait {
-                let size = self.portrait_layout.size();
-                let width = self.portrait_layout.max_width();
-                (UpdateConfigEvent::PortraitWidth(width), size)
+        if self.layout.update_unit(unit, max_width).is_ok() {
+            let (max_width, size) = (self.layout.max_width(), self.layout.size());
+            let event = if portrait {
+                UpdateConfigEvent::PortraitWidth(max_width)
             } else {
-                let size = self.landscape_layout.size();
-                let width = self.landscape_layout.max_width();
-                (UpdateConfigEvent::LandscapeWidth(width), size)
+                UpdateConfigEvent::LandscapeWidth(max_width)
             };
             // resize and update config
             self.keyboard_window_state
@@ -733,41 +765,128 @@ where
 
     pub fn update_key_area_layout(
         &mut self,
+        max_width: u16,
         key_area_layout: Rc<KeyAreaLayout>,
     ) -> Option<Task<WM::Message>> {
         let old_size = self.size();
-        let landscape_res = self
-            .landscape_layout
-            .update_key_area_layout(key_area_layout.clone());
-        let portrait_res = self.portrait_layout.update_key_area_layout(key_area_layout);
-        match (landscape_res, portrait_res) {
-            (Ok(_), Ok(_)) => {
-                // resize if the size is changed
-                let new_size = self.size();
-                if new_size != old_size {
-                    Some(self.keyboard_window_state.resize(&mut self.wm, new_size))
-                } else {
-                    Some(Message::from_nothing())
-                }
+        let max_width = max_width.min(self.wm.screen_size().width as u16);
+        let res = self
+            .layout
+            .update_key_area_layout(max_width, key_area_layout);
+        if res.is_ok() {
+            // resize if the size is changed
+            let new_size = self.size();
+            if new_size != old_size {
+                Some(self.keyboard_window_state.resize(&mut self.wm, new_size))
+            } else {
+                Some(Message::from_nothing())
             }
-            (Ok(old), Err(_)) => {
-                // reset landscape to old layout
-                if self.landscape_layout.update_key_area_layout(old).is_err() {
-                    // should't be failed
-                    unreachable!("reset landscape to old layout failed");
-                }
-                None
-            }
-            (Err(_), Ok(old)) => {
-                // reset portrait to old layout
-                if self.portrait_layout.update_key_area_layout(old).is_err() {
-                    // should't be failed
-                    unreachable!("reset portrait to old layout failed");
-                }
-                None
-            }
-            _ => None,
+        } else {
+            None
         }
+    }
+
+    fn sync_output(&mut self) -> Task<WM::Message> {
+        let res = self.wm.sync_output();
+
+        let mut tasks = vec![];
+
+        let screen_size = self.wm.screen_size();
+        let mut reopen = false;
+        let old_unit = self.unit();
+
+        let portrait = screen_size.height > screen_size.width;
+        if portrait != self.portrait {
+            self.portrait = portrait;
+            tasks.push(Task::done(Message::from(LayoutEvent::SyncLayout).into()));
+        }
+
+        let scale_factor = res
+            .iter()
+            .filter_map(|r| {
+                if let SyncOutputResponse::ScaleFactorChanged(f) = r {
+                    Some(*f as f32)
+                } else {
+                    None
+                }
+            })
+            .next_back();
+        if let Some(scale_factor) = scale_factor {
+            self.update_scale_factor(scale_factor);
+            reopen = reopen || old_unit != self.unit();
+        }
+
+        if res.contains(&SyncOutputResponse::SizeChanged) {
+            let screen_size = self.wm.screen_size();
+            reopen = self.size().width > screen_size.width;
+        }
+
+        reopen = reopen || res.contains(&SyncOutputResponse::RotationChanged);
+        reopen = reopen || res.contains(&SyncOutputResponse::OutputChanged);
+
+        if reopen {
+            if let Some(task) = self.reopen_indicator_if_opened() {
+                tasks.push(task);
+            } else if let Some(task) = self.open_to_be_opened(WindowMask::Indicator) {
+                // Check if window is need to be opened
+                tasks.push(task);
+            }
+            if let Some(task) = self.reopen_keyboard_if_opened() {
+                tasks.push(task);
+            } else if let Some(task) = self.open_to_be_opened(WindowMask::Keyboard) {
+                // Check if window is need to be opened
+                tasks.push(task);
+            }
+        } else {
+            if let Some(task) = self.open_to_be_opened(WindowMask::Indicator) {
+                tasks.push(task);
+            }
+            if let Some(task) = self.open_to_be_opened(WindowMask::Keyboard) {
+                tasks.push(task);
+            }
+        }
+        if tasks.is_empty() {
+            Message::from_nothing()
+        } else {
+            Task::batch(tasks)
+        }
+    }
+
+    fn need_opened(&self, window_mask: WindowMask) -> bool {
+        (self.to_be_opened_flag & window_mask as u16) != 0
+    }
+
+    fn open_to_be_opened(&mut self, window_mask: WindowMask) -> Option<Task<WM::Message>> {
+        let to_be_opened = self.need_opened(window_mask);
+        if !to_be_opened {
+            None
+        } else {
+            Some(match window_mask {
+                WindowMask::Keyboard => {
+                    tracing::debug!("Open to be opened keyboard");
+                    self.open_keyboard()
+                }
+                WindowMask::Indicator => {
+                    tracing::debug!("Open to be opened indicator");
+                    self.open_indicator()
+                }
+            })
+        }
+    }
+
+    fn set_to_be_opened(&mut self, window_mask: WindowMask, force: bool) {
+        let closed = match window_mask {
+            WindowMask::Keyboard => self.keyboard_window_state.id().is_none(),
+            WindowMask::Indicator => self.indicator_window_state.id().is_none(),
+        };
+        // set only if the window is closed
+        if closed || force {
+            self.to_be_opened_flag |= window_mask as u16;
+        }
+    }
+
+    fn unset_to_be_opened(&mut self, window_mask: WindowMask) {
+        self.to_be_opened_flag &= 0xffff ^ window_mask as u16;
     }
 
     pub fn on_window_event(&mut self, event: WindowEvent) -> Task<WM::Message> {
@@ -779,11 +898,24 @@ where
                     self.keyboard_window_state
                         .set_opened(&mut self.wm, portrait);
                     task = task.chain(self.fcitx5_show().map_task());
-                    if self.indicator_display() == IndicatorDisplay::Auto {
-                        task = task.chain(self.close_indicator());
+                    match self.indicator_display() {
+                        IndicatorDisplay::Auto | IndicatorDisplay::AlwaysOff => {
+                            if self.indicator_window_state.id().is_some() {
+                                task = task.chain(self.close_indicator())
+                            }
+                        }
+                        IndicatorDisplay::AlwaysOn => {
+                            if self.indicator_window_state.id().is_none() {
+                                task = task.chain(self.open_indicator())
+                            }
+                        }
                     }
-                    if self.placement() == Placement::Dock {
-                        task = task.chain(self.wm.fetch_screen_info());
+                    // The indicator might need to move up after a docked keyboard is opened
+                    if let Some(t) = self
+                        .indicator_window_state
+                        .fix_position(&mut self.wm, portrait)
+                    {
+                        task = task.chain(t);
                     }
                 } else if self.is_indicator(id) {
                     self.indicator_window_state
@@ -795,13 +927,15 @@ where
                 task
             }
             WindowEvent::ClosingWindow(id, snapshot, source) => {
-                let mut task = Message::from_nothing();
+                tracing::debug!("Window is to be closed: {id}");
                 let window_state = if self.is_keyboard(id) {
-                    if (self.indicator_display() == IndicatorDisplay::Auto
+                    // If Keyboard is reopening, don't open indicator
+                    if ((self.indicator_display() == IndicatorDisplay::Auto
+                        && !self.need_opened(WindowMask::Keyboard))
                         || self.indicator_display() == IndicatorDisplay::AlwaysOn)
                         && self.indicator_window_state.id().is_none()
                     {
-                        task = self.open_indicator();
+                        self.set_to_be_opened(WindowMask::Indicator, false);
                     }
                     Some(&mut self.keyboard_window_state)
                 } else if self.is_indicator(id) {
@@ -811,13 +945,13 @@ where
                 };
                 if let Some(window_state) = window_state {
                     if let Some(snapshot) = snapshot {
-                        task =
-                            task.chain(window_state.close_checked(&mut self.wm, snapshot, source));
+                        window_state.close_checked(&mut self.wm, snapshot, source)
                     } else {
-                        task = task.chain(window_state.close(&mut self.wm, source));
+                        window_state.close(&mut self.wm, source)
                     }
+                } else {
+                    Message::from_nothing()
                 }
-                task
             }
             WindowEvent::Closed(id) => {
                 let mut task = self.wm.closed(id);
@@ -825,9 +959,20 @@ where
                     if Some(CloseOpSource::UserAction) == self.keyboard_window_state.set_closed() {
                         task = task.chain(self.fcitx5_hide().map_task());
                     }
-                    task = task.chain(self.wm.fetch_screen_info());
+                    // check if the keyboard needs to open again
+                    if let Some(t) = self.open_to_be_opened(WindowMask::Keyboard) {
+                        task = task.chain(t);
+                    }
+                    // check if the indicator needs to open again
+                    if let Some(t) = self.open_to_be_opened(WindowMask::Indicator) {
+                        task = task.chain(t);
+                    }
                 } else if self.is_indicator(id) {
                     self.indicator_window_state.set_closed();
+                    // check if the indicator needs to open again
+                    if let Some(t) = self.open_to_be_opened(WindowMask::Indicator) {
+                        task = task.chain(t);
+                    }
                 }
                 task
             }
@@ -863,80 +1008,7 @@ where
 
     pub fn on_event(&mut self, event: WindowManagerEvent) -> Task<WM::Message> {
         match event {
-            WindowManagerEvent::ScreenInfo(screen_size, scale_factor) => {
-                let update1 = self.update_screen_size(screen_size);
-                let update2 = self.update_scale_factor(scale_factor);
-                let portrait = self.is_portrait();
-                match self.to_be_opened.take() {
-                    Some(ToBeOpened::Keyboard) => {
-                        let task = if update1 || update2 {
-                            Task::done(WM::Message::from(ImEvent::ResetCandidateCursor.into()))
-                        } else {
-                            Message::from_nothing()
-                        };
-                        let mut size = self.size();
-                        let screen_size = self.wm.full_screen_size();
-                        // update unit if width is too large
-                        if size.width > screen_size.width {
-                            // update unit
-                            let layout = if portrait {
-                                &mut self.portrait_layout
-                            } else {
-                                &mut self.landscape_layout
-                            };
-                            let unit = layout.unit_within(screen_size.width as u16);
-                            if layout.update_unit(unit, screen_size.width as u16).is_ok() {
-                                size = layout.size();
-                            }
-                        }
-                        let mut window_settings = WindowSettings::new(Some(size), self.placement());
-                        // set default float position.
-                        if self.placement() == Placement::Float {
-                            window_settings = window_settings.set_position(
-                                (
-                                    (screen_size.width - size.width) / 2.,
-                                    screen_size.height - size.height,
-                                )
-                                    .into(),
-                            );
-                        }
-                        task.chain(self.keyboard_window_state.open(
-                            &mut self.wm,
-                            window_settings,
-                            portrait,
-                        ))
-                    }
-                    Some(ToBeOpened::Indicator) => {
-                        let window_settings = WindowSettings::new(
-                            Some(Size::new(
-                                self.indicator_width as f32,
-                                self.indicator_width as f32,
-                            )),
-                            Placement::Float,
-                        );
-                        self.indicator_window_state
-                            .open(&mut self.wm, window_settings, portrait)
-                    }
-                    None => {
-                        let mut task = Message::from_nothing();
-                        if update1 {
-                            if let Some(t) = self
-                                .keyboard_window_state
-                                .fix_position(&mut self.wm, portrait)
-                            {
-                                task = task.chain(t);
-                            }
-                            if let Some(t) = self
-                                .indicator_window_state
-                                .fix_position(&mut self.wm, portrait)
-                            {
-                                task = task.chain(t);
-                            }
-                        }
-                        task
-                    }
-                }
-            }
+            WindowManagerEvent::OutputChanged => self.sync_output(),
             WindowManagerEvent::OpenKeyboard => self.open_keyboard(),
             WindowManagerEvent::CloseKeyboard(source) => self.close_keyboard(source),
             WindowManagerEvent::OpenIndicator => self.open_indicator(),
@@ -946,6 +1018,11 @@ where
                 self.update_indicator_display(indicator_display)
             }
             WindowManagerEvent::UpdateUnit(unit) => self.update_unit(unit),
+            WindowManagerEvent::UpdatePreferredOutputName(name) => {
+                tracing::debug!("Set preferred name: {name}");
+                self.wm.set_preferred_output_name(&name);
+                self.sync_output()
+            }
         }
     }
 }
@@ -1009,11 +1086,12 @@ pub enum WindowManagerEvent {
     OpenKeyboard,
     CloseKeyboard(CloseOpSource),
     OpenIndicator,
-    ScreenInfo(Size, f32),
     UpdateMode(WindowManagerMode),
     UpdatePlacement(Placement),
     UpdateIndicatorDisplay(IndicatorDisplay),
     UpdateUnit(u16),
+    UpdatePreferredOutputName(String),
+    OutputChanged,
 }
 
 impl From<WindowManagerEvent> for Message {

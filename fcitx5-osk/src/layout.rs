@@ -8,6 +8,7 @@ use iced::{
     widget::{
         button::Style as ButtonStyle,
         scrollable::{Direction, Scrollbar},
+        text_input::TextInput,
         Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text,
     },
     window::Id,
@@ -27,8 +28,9 @@ use crate::{
     app::Message,
     config::IndicatorDisplay,
     state::{
-        CloseOpSource, EnumDesc, Field, FieldType, ImEvent, LayoutEvent, OwnedEnumDesc,
-        StateExtractor, StepDesc, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
+        CloseOpSource, DynamicEnumDesc, EnumDesc, Field, FieldType, ImEvent, LayoutEvent,
+        OwnedEnumDesc, StateExtractor, StepDesc, TextDesc, UpdateConfigEvent, WindowEvent,
+        WindowManagerEvent,
     },
     store::IdAndConfigPath,
     widget::{Movable, Toggle, ToggleCondition},
@@ -649,6 +651,7 @@ pub struct ToElementCommonParams<'a> {
 trait ToElementFieldType {
     fn to_element<'a>(
         &'a self,
+        field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: u16,
     ) -> Element<'a, Message>;
@@ -660,6 +663,7 @@ where
 {
     fn to_element<'a>(
         &'a self,
+        _field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: u16,
     ) -> Element<'a, Message> {
@@ -686,6 +690,7 @@ where
 {
     fn to_element<'a>(
         &'a self,
+        _field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: u16,
     ) -> Element<'a, Message> {
@@ -707,12 +712,36 @@ where
     }
 }
 
+impl<T> ToElementFieldType for DynamicEnumDesc<T>
+where
+    T: ToString + PartialEq + Clone,
+{
+    fn to_element<'a>(
+        &'a self,
+        _field: &'a Field,
+        state: &'a dyn StateExtractor,
+        text_size: u16,
+    ) -> Element<'a, Message> {
+        let (variants, selected) = self.variants_and_selected(state);
+        if self.is_enabled(state) {
+            PickList::new(variants, selected, |selected| {
+                self.on_selected(state, selected)
+            })
+            .text_size(text_size)
+            .into()
+        } else {
+            Text::new(selected.map(|s| s.to_string()).unwrap_or_default()).into()
+        }
+    }
+}
+
 impl<T> ToElementFieldType for StepDesc<T>
 where
     T: ToString,
 {
     fn to_element<'a>(
         &'a self,
+        _field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: u16,
     ) -> Element<'a, Message> {
@@ -730,6 +759,26 @@ where
                     .on_press_maybe(self.on_increased(state)),
             )
             .into()
+    }
+}
+
+impl ToElementFieldType for TextDesc {
+    fn to_element<'a>(
+        &'a self,
+        field: &'a Field,
+        state: &'a dyn StateExtractor,
+        text_size: u16,
+    ) -> Element<'a, Message> {
+        TextInput::new(
+            &self.placeholder(field, state).unwrap_or_default(),
+            &self.cur_value(field, state).unwrap_or_default(),
+        )
+        .on_input_maybe(self.on_input_maybe(field, state))
+        .on_paste_maybe(self.on_paste_maybe(field, state))
+        .on_submit_maybe(self.on_submit_maybe(field, state))
+        .width(text_size * 20)
+        .size(text_size)
+        .into()
     }
 }
 
@@ -783,9 +832,13 @@ fn field_value_element<'a>(
     text_size: u16,
 ) -> Element<'a, Message> {
     match field.typ() {
-        FieldType::StepU16(step_desc) => step_desc.to_element(state, text_size),
-        FieldType::OwnedEnumPlacement(enum_desc) => enum_desc.to_element(state, text_size),
-        FieldType::OwnedEnumIndicatorDisplay(enum_desc) => enum_desc.to_element(state, text_size),
-        FieldType::EnumString(enum_desc) => enum_desc.to_element(state, text_size),
+        FieldType::StepU16(step_desc) => step_desc.to_element(field, state, text_size),
+        FieldType::OwnedEnumPlacement(enum_desc) => enum_desc.to_element(field, state, text_size),
+        FieldType::OwnedEnumIndicatorDisplay(enum_desc) => {
+            enum_desc.to_element(field, state, text_size)
+        }
+        FieldType::EnumString(enum_desc) => enum_desc.to_element(field, state, text_size),
+        FieldType::DynamicEnumString(enum_desc) => enum_desc.to_element(field, state, text_size),
+        FieldType::Text(text_desc) => text_desc.to_element(field, state, text_size),
     }
 }

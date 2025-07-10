@@ -1,7 +1,4 @@
-use std::{
-    result::Result as StdResult,
-    sync::{Arc, Mutex, MutexGuard},
-};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::Result;
 use iced::{
@@ -10,38 +7,41 @@ use iced::{
     Subscription,
 };
 use tokio::task::JoinHandle;
-use wayland_client::{ConnectError, Connection};
 
 use crate::{app::wayland::WaylandMessage, dbus::client::Fcitx5Services};
 
+use super::connection::WaylandConnection;
+
 struct State {
     rx: Option<UnboundedReceiver<WaylandMessage>>,
-    connection: Option<Connection>,
     fcitx5_services: Option<Fcitx5Services>,
     bg_handle: Option<JoinHandle<()>>,
+    closed: bool,
 }
 
 impl State {
     pub fn new(rx: UnboundedReceiver<WaylandMessage>) -> Self {
         Self {
             rx: Some(rx),
-            connection: None,
             fcitx5_services: None,
             bg_handle: None,
+            closed: false,
         }
     }
 }
 
 #[derive(Clone)]
 pub struct InputMethodContext {
+    connection: WaylandConnection,
     tx: UnboundedSender<WaylandMessage>,
     state: Arc<Mutex<State>>,
 }
 
 impl InputMethodContext {
-    pub fn new() -> Self {
+    pub fn new(connection: WaylandConnection) -> Self {
         let (tx, rx) = mpsc::unbounded();
         Self {
+            connection,
             tx,
             state: Arc::new(Mutex::new(State::new(rx))),
         }
@@ -51,18 +51,6 @@ impl InputMethodContext {
         self.state
             .lock()
             .expect("input method context state is poisoned")
-    }
-
-    pub fn connection(&self) -> StdResult<Connection, ConnectError> {
-        let mut guard = self.state();
-        if let Some(connection) = &guard.connection {
-            Ok(connection.clone())
-        } else {
-            let connection = Connection::connect_to_env()?;
-
-            guard.connection = Some(connection.clone());
-            Ok(connection)
-        }
     }
 
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
@@ -81,17 +69,15 @@ impl InputMethodContext {
         if let Some(fcitx5_services) = &guard.fcitx5_services {
             Ok(fcitx5_services.clone())
         } else {
-            let Some(connection) = &guard.connection else {
-                anyhow::bail!(
-                    "no wayland connection, it can't use wayland input-method-v1 backend"
-                );
-            };
             // create a mock fcitx5 backend using input-method-v1, so that the keyboard can be
             // shown and input in kscreenlocker.
-            let (client, bg) = v1::new(connection, self.tx.clone())?;
+            let (client, bg) = v1::new(&self.connection, self.tx.clone())?;
             let handle = tokio::spawn(async move {
                 if let Err(e) = bg.await {
-                    tracing::error!("wayland input-method-v1 eventloop exit with error: {:?}", e);
+                    tracing::error!(
+                        "wayland input-method-v1 event queue exit with error: {:?}",
+                        e
+                    );
                 }
             });
             guard.bg_handle = Some(handle);
@@ -107,10 +93,19 @@ impl InputMethodContext {
             tracing::debug!("closing InputMethodContext, but lock is poisoned");
             return;
         };
+        if guard.closed {
+            return;
+        }
         tracing::debug!("close InputMethodContext");
         drop(guard.bg_handle.take());
         drop(guard.fcitx5_services.take());
-        drop(guard.connection.take());
+        guard.closed = true;
+    }
+}
+
+impl Drop for InputMethodContext {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
@@ -126,12 +121,7 @@ mod v1 {
     use anyhow::{Context, Result};
     use iced::futures::channel::mpsc::UnboundedSender;
     use tracing::instrument;
-    use wayland_client::{
-        event_created_child,
-        globals::{self, GlobalListContents},
-        protocol::wl_registry::WlRegistry,
-        Connection, Dispatch, Proxy, QueueHandle,
-    };
+    use wayland_client::{event_created_child, Connection, Dispatch, Proxy, QueueHandle};
     use wayland_protocols::wp::input_method::zv1::client::{
         zwp_input_method_context_v1::ZwpInputMethodContextV1,
         zwp_input_method_v1::{self, Event as ZwpInputMethodV1Event, ZwpInputMethodV1},
@@ -139,7 +129,10 @@ mod v1 {
     use zbus::{Error as ZbusError, Result as ZbusResult};
 
     use crate::{
-        app::{wayland::WaylandMessage, Message},
+        app::{
+            wayland::{connection::WaylandConnection, WaylandMessage},
+            Message,
+        },
         dbus::{
             client::{
                 IFcitx5ControllerService, IFcitx5VirtualKeyboardBackendService,
@@ -153,7 +146,6 @@ mod v1 {
     pub struct WaylandInputMethodV1Client {
         serial: AtomicU32,
         input_method_context: Arc<Mutex<Option<ZwpInputMethodContextV1>>>,
-        _input_method: ZwpInputMethodV1,
     }
 
     impl WaylandInputMethodV1Client {
@@ -288,18 +280,6 @@ mod v1 {
         }
     }
 
-    impl Dispatch<WlRegistry, GlobalListContents> for WaylandInputMethodV1Server {
-        fn event(
-            _state: &mut Self,
-            _proxy: &WlRegistry,
-            _event: <WlRegistry as Proxy>::Event,
-            _data: &GlobalListContents,
-            _conn: &Connection,
-            _qhandle: &QueueHandle<Self>,
-        ) {
-        }
-    }
-
     impl Dispatch<ZwpInputMethodContextV1, ()> for WaylandInputMethodV1Server {
         fn event(
             _state: &mut Self,
@@ -359,34 +339,33 @@ mod v1 {
     }
 
     pub fn new(
-        connection: &Connection,
+        connection: &WaylandConnection,
         tx: UnboundedSender<WaylandMessage>,
     ) -> Result<(
         WaylandInputMethodV1Client,
         impl Future<Output = Result<()>> + 'static,
     )> {
-        let (registry, _) = globals::registry_queue_init::<WaylandInputMethodV1Server>(connection)?;
+        let state = connection.state()?;
+        let connection = state.connection();
+        let global_list = state.global_list()?;
 
-        tracing::debug!("registry: {:?}", registry.contents(),);
-
-        let event_queue = connection.new_event_queue::<WaylandInputMethodV1Server>();
+        let mut event_queue = connection.new_event_queue::<WaylandInputMethodV1Server>();
         let qh = event_queue.handle();
         let input_method_context = Arc::new(Mutex::new(None));
-        let input_method = registry
+
+        global_list
             .bind::<ZwpInputMethodV1, _, _>(&qh, 1..=1, ())
             .context("failed to bind ZwpInputMethodV1")?;
+
         let client = WaylandInputMethodV1Client {
             serial: AtomicU32::new(0),
             input_method_context: input_method_context.clone(),
-            _input_method: input_method,
         };
-        let server = WaylandInputMethodV1Server {
+        let mut server = WaylandInputMethodV1Server {
             tx,
             input_method_context,
         };
         Ok((client, async move {
-            let mut event_queue = event_queue;
-            let mut server = server;
             // we should not use blocking_dispatch here. because layershellev uses blocking_dispatch, if we use blocking_dispatch it will freeze the eventloop of layershellev
             loop {
                 std::future::poll_fn(|cx| event_queue.poll_dispatch_pending(cx, &mut server))

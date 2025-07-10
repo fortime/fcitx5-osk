@@ -299,6 +299,11 @@ impl Fcitx5OskService {
     }
 
     #[instrument(level = "debug", skip(self), err, ret)]
+    async fn reopen_if_opened(&mut self) -> Result<(), Error> {
+        self.send(ImPanelEvent::ReopenIfOpened)
+    }
+
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn shutdown(&mut self) -> Result<(), Error> {
         self.shutdown_flag.shutdown();
         Ok(())
@@ -310,6 +315,7 @@ pub enum ImPanelEvent {
     Show,
     Hide,
     UpdateVisible(bool),
+    ReopenIfOpened,
 }
 
 impl From<ImPanelEvent> for Message {
