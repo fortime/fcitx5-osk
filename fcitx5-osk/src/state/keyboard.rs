@@ -7,7 +7,7 @@ use std::{
 use anyhow::Result;
 use iced::{
     alignment::{Horizontal, Vertical},
-    widget::{Column, Container, Row, Text},
+    widget::{text::Shaping, Column, Container, Row, Text},
     Element, Font, Padding, Task,
 };
 use tracing::instrument;
@@ -190,6 +190,7 @@ impl KeyboardState {
             KeyEventCommon::new(self.id, holding_key_state.name.clone(), key_value.to_thin());
         PopupKey::new(
             Text::new(key_value.symbol())
+                .shaping(Shaping::Advanced)
                 .align_x(Horizontal::Center)
                 .align_y(Vertical::Center)
                 .font(key_value.font().unwrap_or(self.font))
@@ -282,15 +283,20 @@ impl KeyboardState {
             } else {
                 (primary_key_value, secondary_key_values.first())
             };
-            let middle = Text::new(primary.symbol()).font(primary.font().unwrap_or(self.font));
+            let middle = Text::new(primary.symbol())
+                .shaping(Shaping::Advanced)
+                .font(primary.font().unwrap_or(self.font));
             let mut top = Row::new().spacing(unit);
+            let mut has_secondary = false;
             for secondary in secondary
                 .into_iter()
                 .chain(secondary_key_values.iter().skip(1))
             {
+                has_secondary = true;
                 let padding = Text::new(" ").size(TEXT_PADDING_LENGTH as f32);
                 let text = Text::new(secondary.symbol())
                     .font(secondary.font().unwrap_or(self.font))
+                    .shaping(Shaping::Advanced)
                     .width(inner_width)
                     .height(secondary_height)
                     .size(secondary_text_size as f32)
@@ -299,14 +305,26 @@ impl KeyboardState {
                 top = top.push(padding).push(text);
             }
             let key_value = key.key_value(is_shift_set, is_caps_lock_set);
-            column = column.push(top.height(secondary_height)).push(
-                middle
-                    .width(inner_width)
-                    .height(primary_height)
-                    .size(primary_text_size as f32)
-                    .align_y(Vertical::Center)
-                    .align_x(Horizontal::Center),
-            );
+            if has_secondary {
+                column = column.push(top.height(secondary_height)).push(
+                    middle
+                        .width(inner_width)
+                        .height(primary_height)
+                        .size(primary_text_size as f32)
+                        .align_y(Vertical::Center)
+                        .align_x(Horizontal::Center),
+                );
+            } else {
+                // If there is no secondary, set it in the middle of the key
+                column = column.push(
+                    middle
+                        .width(inner_width)
+                        .height(inner_height)
+                        .size(primary_text_size as f32)
+                        .align_y(Vertical::Center)
+                        .align_x(Horizontal::Center),
+                );
+            }
             let id = self.id;
             let common = KeyEventCommon::new(id, key_name, key_value);
             (

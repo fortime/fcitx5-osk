@@ -1352,7 +1352,6 @@ dependencies = [
  "getset",
  "humantime-serde",
  "iced",
- "iced_font_awesome",
  "iced_futures",
  "iced_graphics",
  "iced_layershell",
@@ -2056,17 +2055,6 @@ dependencies = [
  "smol_str",
  "thiserror",
  "web-time",
-]
-
-[[package]]
-name = "iced_font_awesome"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "810ef61d81cd4e164a540a043bd080495f8906981bca263cbe7dacb0d7f1a6f0"
-dependencies = [
- "iced",
- "serde",
- "serde_json",
 ]
 
 [[package]]

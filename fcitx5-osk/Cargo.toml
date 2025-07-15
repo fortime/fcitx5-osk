@@ -27,7 +27,6 @@ iced_layershell.workspace = true
 iced_futures.workspace = true
 iced_graphics.workspace = true
 humantime-serde.workspace = true
-iced_font_awesome.workspace = true
 x11rb.workspace = true
 strum.workspace = true
 async-trait.workspace = true

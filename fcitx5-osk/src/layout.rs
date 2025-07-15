@@ -8,13 +8,14 @@ use iced::{
     widget::{
         button::Style as ButtonStyle,
         scrollable::{Direction, Scrollbar},
+        text::Shaping,
         text_input::TextInput,
         Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text,
     },
     window::Id,
-    Color, Element, Font, Length,
+    Color, Element, Font, Length, Padding,
 };
-use iced_font_awesome::{FaIcon, IconFont};
+//use iced_font_awesome::{FaIcon, IconFont};
 use serde::{
     de::{Error, Unexpected},
     Deserialize, Deserializer,
@@ -457,8 +458,7 @@ impl ToolbarLayout {
         let mut row = Row::new().height(Length::Fill).align_y(Vertical::Center);
         row = row.push(
             fa_btn(
-                "caret-left",
-                IconFont::Solid,
+                '',
                 font_size,
                 if prev_message.is_some() {
                     color
@@ -474,8 +474,7 @@ impl ToolbarLayout {
         );
         row = row.push(
             fa_btn(
-                "caret-right",
-                IconFont::Solid,
+                '',
                 font_size,
                 if next_message.is_some() {
                     color
@@ -522,15 +521,7 @@ impl ToolbarLayout {
             }
         };
         if let Some(message) = indicator_message {
-            row = row.push(
-                fa_btn(
-                    "down-left-and-up-right-to-center",
-                    IconFont::Solid,
-                    font_size,
-                    color,
-                )
-                .on_press(message),
-            );
+            row = row.push(fa_btn('', font_size, color).on_press(message));
         }
 
         // padding
@@ -561,8 +552,9 @@ impl ToolbarLayout {
                 .align_y(Vertical::Center)
                 .spacing(unit)
                 .push(
-                    FaIcon::new("globe", IconFont::Solid)
+                    Text::new('')
                         .size(font_size)
+                        .shaping(Shaping::Advanced)
                         .color(color),
                 )
                 .push(
@@ -577,8 +569,9 @@ impl ToolbarLayout {
                 .align_y(Vertical::Center)
                 .spacing(unit)
                 .push(
-                    FaIcon::new("palette", IconFont::Solid)
+                    Text::new('')
                         .size(font_size)
+                        .shaping(Shaping::Advanced)
                         .color(color),
                 )
                 .push(
@@ -590,14 +583,12 @@ impl ToolbarLayout {
                     .text_size(font_size),
                 ),
         );
-        row = row.push(
-            fa_btn("gear", IconFont::Solid, font_size, color)
-                .on_press(LayoutEvent::ToggleSetting.into()),
-        );
+        row = row.push(fa_btn('', font_size, color).on_press(LayoutEvent::ToggleSetting.into()));
         Container::new(row)
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Horizontal::Right)
+            .padding(Padding::from([0, unit]))
             .into()
     }
 }
@@ -621,6 +612,7 @@ impl SettingLayout {
                 Container::new(
                     Text::new(field.name())
                         .size(text_size)
+                        .shaping(Shaping::Advanced)
                         .align_x(Horizontal::Left),
                 )
                 .center_y(height),
@@ -679,6 +671,8 @@ where
                     .map(|t| t.to_string())
                     .unwrap_or_default(),
             )
+            .size(text_size)
+            .shaping(Shaping::Advanced)
             .into()
         }
     }
@@ -707,6 +701,7 @@ where
                     .unwrap_or_default(),
             )
             .size(text_size)
+            .shaping(Shaping::Advanced)
             .into()
         }
     }
@@ -730,7 +725,10 @@ where
             .text_size(text_size)
             .into()
         } else {
-            Text::new(selected.map(|s| s.to_string()).unwrap_or_default()).into()
+            Text::new(selected.map(|s| s.to_string()).unwrap_or_default())
+                .size(text_size)
+                .shaping(Shaping::Advanced)
+                .into()
         }
     }
 }
@@ -782,16 +780,16 @@ impl ToElementFieldType for TextDesc {
     }
 }
 
-fn fa_btn<'a, Message: 'a>(
-    name: &'a str,
-    icon_font: IconFont,
-    font_size: u16,
-    color: Color,
-) -> Button<'a, Message> {
+fn fa_btn<'a, Message: 'a>(icon: char, font_size: u16, color: Color) -> Button<'a, Message> {
     Button::new(
-        Container::new(FaIcon::new(name, icon_font).size(font_size).color(color))
-            .height(Length::Fill)
-            .align_y(Vertical::Center),
+        Container::new(
+            Text::new(icon)
+                .size(font_size)
+                .shaping(Shaping::Advanced)
+                .color(color),
+        )
+        .height(Length::Fill)
+        .align_y(Vertical::Center),
     )
     .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
     .padding(0)
@@ -805,6 +803,7 @@ fn candidate_btn<Message>(
 ) -> Button<Message> {
     let text = Text::new(candidate)
         .font(font)
+        .shaping(Shaping::Advanced)
         .size(font_size)
         .align_x(Horizontal::Center)
         .align_y(Vertical::Center);
