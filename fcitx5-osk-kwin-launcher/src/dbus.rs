@@ -2,9 +2,9 @@ pub mod client {
     use anyhow::Result;
     use getset::Getters;
     use tracing::instrument;
-    use zbus::{proxy, zvariant::OwnedFd, Connection, Result as ZbusResult};
+    use zbus::{zvariant::OwnedFd, Connection, Result as ZbusResult};
 
-    #[proxy(
+    #[zbus::proxy(
         default_service = "org.fcitx.Fcitx5",
         default_path = "/controller",
         interface = "org.fcitx.Fcitx.Controller1"
@@ -21,7 +21,7 @@ pub mod client {
         fn open_wayland_connection_socket(&self, wayland_socket: OwnedFd) -> ZbusResult<()>;
     }
 
-    #[proxy(
+    #[zbus::proxy(
         default_service = "org.kde.keyboard",
         default_path = "/VirtualKeyboard",
         interface = "org.kde.kwin.VirtualKeyboard"
@@ -46,7 +46,7 @@ pub mod client {
         // Path=/org/kde/KWin  Interface=org.kde.KWin.TabletModeManager  Member=tabletModeChanged
     }
 
-    #[proxy(
+    #[zbus::proxy(
         default_service = "org.kde.KWin",
         default_path = "/org/kde/KWin",
         interface = "org.kde.KWin.TabletModeManager"
@@ -83,7 +83,7 @@ pub mod client {
     }
 
     // org.freedesktop.ScreenSaver /ScreenSaver org.freedesktop.ScreenSaver GetActive
-    #[proxy(
+    #[zbus::proxy(
         default_service = "org.freedesktop.ScreenSaver",
         default_path = "/org/freedesktop/ScreenSaver",
         interface = "org.freedesktop.ScreenSaver"

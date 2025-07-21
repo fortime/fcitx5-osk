@@ -23,46 +23,45 @@ pub mod entity {
 pub mod client {
     use anyhow::Result;
     use getset::Getters;
-    use tracing::instrument;
-    use zbus::{proxy, Connection, Result as ZbusResult};
+    use zbus::{Connection, Result as ZbusResult};
 
     use crate::dbus::entity::{Display, Socket, WindowManagerMode};
 
-    #[proxy(
+    #[zbus::proxy(
         default_service = "fyi.fortime.Fcitx5Osk",
         default_path = "/fyi/fortime/Fcitx5Osk/Controller",
         interface = "fyi.fortime.Fcitx5Osk.Controller1"
     )]
     pub trait Fcitx5OskControllerService {
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn show(&self) -> ZbusResult<()>;
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn hide(&self) -> ZbusResult<()>;
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn change_visible(&self, visible: bool) -> ZbusResult<()>;
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         /// tell the server to change mode.
         fn change_mode(&self, mode: WindowManagerMode) -> ZbusResult<()>;
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         #[zbus(property(emits_changed_signal = "false"))]
         fn mode(&self) -> ZbusResult<WindowManagerMode>;
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         #[zbus(property)]
         /// the server sets the property on dbus after mode is changed.
         fn set_mode(&self, mode: WindowManagerMode) -> ZbusResult<()>;
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn open_socket(&self, socket: Socket) -> ZbusResult<()>;
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn open_display(&self, d: Display) -> ZbusResult<()>;
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn shutdown(&self) -> ZbusResult<()>;
     }
 

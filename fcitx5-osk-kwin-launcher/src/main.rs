@@ -563,7 +563,7 @@ pub async fn main() {
         daemon().await
     };
     if let Err(e) = res {
-        eprintln!("worker[{}] run command failed: {e}", args.worker);
+        eprintln!("worker[{}] run command failed: {e:?}", args.worker);
         process::exit(1);
     }
 }

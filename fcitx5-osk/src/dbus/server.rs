@@ -7,7 +7,7 @@ use fcitx5_osk_common::{
 use getset::{CopyGetters, Getters};
 use iced::futures::channel::mpsc::UnboundedSender;
 use tracing::instrument;
-use zbus::{fdo::Error, interface, Connection};
+use zbus::{fdo::Error, Connection};
 
 use crate::{
     app::Message,
@@ -74,7 +74,7 @@ impl Fcitx5VirtualkeyboardImPanelService {
     }
 }
 
-#[interface(name = "org.fcitx.Fcitx5.VirtualKeyboard1")]
+#[zbus::interface(name = "org.fcitx.Fcitx5.VirtualKeyboard1")]
 impl Fcitx5VirtualkeyboardImPanelService {
     const SERVICE_NAME: &'static str = "org.fcitx.Fcitx5.VirtualKeyboard";
     const OBJECT_PATH: &'static str = "/org/fcitx/virtualkeyboard/impanel";
@@ -219,7 +219,7 @@ impl Fcitx5OskService {
     }
 }
 
-#[interface(name = "fyi.fortime.Fcitx5Osk.Controller1")]
+#[zbus::interface(name = "fyi.fortime.Fcitx5Osk.Controller1")]
 impl Fcitx5OskService {
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn show(&self) -> Result<(), Error> {
