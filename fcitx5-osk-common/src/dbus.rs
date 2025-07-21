@@ -66,6 +66,20 @@ pub mod client {
         fn shutdown(&self) -> ZbusResult<()>;
     }
 
+    #[zbus::proxy(
+        default_service = "fyi.fortime.Fcitx5OskKeyHelper",
+        default_path = "/fyi/fortime/Fcitx5OskKeyHelper/Controller",
+        interface = "fyi.fortime.Fcitx5OskKeyHelper.Controller1"
+    )]
+    pub trait Fcitx5OskKeyHelperControllerService {
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        fn reset_serial(&self) -> ZbusResult<u64>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        fn process_key_event(&self, serial: u64, keycode: u16, is_release: bool)
+            -> ZbusResult<u64>;
+    }
+
     #[derive(Clone, Debug, Getters)]
     pub struct Fcitx5OskServices {
         #[getset(get = "pub")]

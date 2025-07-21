@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    ops::DerefMut as _,
     sync::Arc,
     time::{Duration, UNIX_EPOCH},
 };
@@ -7,10 +8,10 @@ use std::{
 use anyhow::Result;
 use iced::{
     alignment::{Horizontal, Vertical},
+    futures::lock::Mutex as IcedFuturesMutex,
     widget::{text::Shaping, Column, Container, Row, Text},
     Element, Font, Padding, Task,
 };
-use tracing::instrument;
 use xkeysym::Keysym;
 
 use crate::{
@@ -207,7 +208,7 @@ impl KeyboardState {
         self.fcitx5_hidden = Fcitx5Hidden::Set;
     }
 
-    #[instrument(skip(self))]
+    #[tracing::instrument(skip(self))]
     fn change_selected_secondary(&mut self, common: KeyEventCommon, is_select: bool) {
         let Some(holding_key_state) = &mut self.holding_key_state else {
             tracing::warn!("there is no holding key");
@@ -414,7 +415,7 @@ impl KeyboardState {
 
     fn fcitx5_virtual_keyboard_backend_service(
         &self,
-    ) -> &Arc<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync> {
+    ) -> &Arc<IcedFuturesMutex<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync>> {
         self.fcitx5_services.virtual_keyboard_backend()
     }
 
@@ -462,13 +463,15 @@ impl KeyboardState {
         } else if modifier_state != ModifierState::CapsLock
             && modifier_state != ModifierState::Shift
         {
-            // not send caps lock and shift state.
+            // Don't send caps lock and shift state.
             let modifiers =
                 self.modifiers & !(ModifierState::CapsLock as u32) & !(ModifierState::Shift as u32);
             let next = super::call_dbus(
                 self.fcitx5_virtual_keyboard_backend_service(),
                 format!("send key pressed event failed: {}", common.key_name),
                 |s| async move {
+                    let mut s = s.lock().await;
+
                     let (keyval, keycode, modifiers) =
                         if let Some(keycode) = common.key_value.keycode() {
                             let keyval = u32::from(common.key_value.keysym());
@@ -483,7 +486,8 @@ impl KeyboardState {
                         keycode.unsigned_abs() as u32,
                         modifiers,
                         false,
-                        (pressed_time / 1000) as u32,
+                        // timestamp with millisecond granularity
+                        pressed_time as u32,
                     )
                     .await?;
                     Ok(Message::Nothing)
@@ -532,8 +536,10 @@ impl KeyboardState {
                     common.key_name
                 ),
                 |s| async move {
+                    let mut s = s.lock().await;
+
                     on_key_release(
-                        s,
+                        s.deref_mut(),
                         &key_state,
                         modifier_state,
                         modifiers,
@@ -676,7 +682,7 @@ fn to_modifier_state(key_value: ThinKeyValue) -> ModifierState {
 }
 
 async fn on_key_release(
-    s: Arc<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync>,
+    s: &mut (dyn IFcitx5VirtualKeyboardBackendService + Send + Sync),
     key_state: &KeyState,
     modifier_state: ModifierState,
     modifiers: u32,
@@ -704,8 +710,9 @@ async fn on_key_release(
     };
     let send_shift = keycode < 0;
     let keycode = keycode.unsigned_abs() as u32;
-    let pressed_time = (pressed_time / 1000) as u32;
-    let released_time = (released_time / 1000) as u32;
+    // timestamp with millisecond granularity
+    let pressed_time = pressed_time as u32;
+    let released_time = released_time as u32;
     let pressed_event_sent =
         modifier_state != ModifierState::NoState && modifier_state != ModifierState::Shift;
     if cancelled {

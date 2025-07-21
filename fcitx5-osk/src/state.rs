@@ -191,6 +191,10 @@ where
     }
 
     fn update_cur_im(&mut self, im_name: &str) -> Task<WM::Message> {
+        if self.im.im_name().filter(|n| *n == im_name).is_some() {
+            // Don't update
+            return Message::from_nothing();
+        }
         if let Some(task) = self.update_layout_by_im(Some(im_name)) {
             self.im.update_cur_im(im_name);
             self.window_manager

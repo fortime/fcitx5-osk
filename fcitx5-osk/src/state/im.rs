@@ -1,6 +1,6 @@
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
-use iced::Task;
+use iced::{futures::lock::Mutex as IcedFuturesMutex, Task};
 
 use crate::{
     app::Message,
@@ -131,7 +131,7 @@ impl ImState {
 
     fn fcitx5_virtual_keyboard_backend_service(
         &self,
-    ) -> &Arc<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync> {
+    ) -> &Arc<IcedFuturesMutex<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync>> {
         self.fcitx5_services.virtual_keyboard_backend()
     }
 
@@ -181,6 +181,7 @@ impl ImState {
             self.fcitx5_virtual_keyboard_backend_service(),
             format!("select candidate {} failed", cursor),
             |s| async move {
+                let s = s.lock().await;
                 s.select_candidate(cursor as i32).await?;
                 Ok(Message::Nothing)
             },
@@ -192,6 +193,7 @@ impl ImState {
             self.fcitx5_virtual_keyboard_backend_service(),
             "prev page failed".to_string(),
             |s| async move {
+                let s = s.lock().await;
                 s.prev_page(page_index).await?;
                 Ok(Message::Nothing)
             },
@@ -203,6 +205,7 @@ impl ImState {
             self.fcitx5_virtual_keyboard_backend_service(),
             "next page failed".to_string(),
             |s| async move {
+                let s = s.lock().await;
                 s.next_page(page_index).await?;
                 Ok(Message::Nothing)
             },

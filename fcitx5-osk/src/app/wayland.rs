@@ -157,6 +157,7 @@ pub fn start(
     config_manager: ConfigManager,
     init_task: Task<Message>,
     wait_for_socket: bool,
+    modifier_workaround: bool,
     shutdown_flag: ShutdownFlag,
 ) -> Result<()> {
     let default_font = if let Some(font) = config_manager.as_ref().default_font() {
@@ -164,6 +165,11 @@ pub fn start(
     } else {
         Default::default()
     };
+
+    let modifier_workaround_keycodes = config_manager
+        .as_ref()
+        .modifier_workaround_keycodes()
+        .clone();
 
     let connection = WaylandConnection::new();
     let input_method_context = InputMethodContext::new(connection.clone());
@@ -195,8 +201,11 @@ pub fn start(
         ..Default::default()
     })
     .run_with(move || {
-        let fcitx5_services = super::run_async(Fcitx5Services::new())
-            .expect("unable to create a fcitx5 service clients");
+        let fcitx5_services = super::run_async(Fcitx5Services::new(
+            modifier_workaround,
+            modifier_workaround_keycodes,
+        ))
+        .expect("unable to create a fcitx5 service clients");
         let fcitx5_osk_services = super::run_async(Fcitx5OskServices::new())
             .expect("unable to create a fcitx5 osk service clients");
         let (keyboard, task) = WaylandKeyboard::new(

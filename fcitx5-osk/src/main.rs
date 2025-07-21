@@ -41,6 +41,11 @@ struct Args {
     /// Waiting DISPLAY, WAYLAND_DISPLAY, WAYLAND_SOCKET from dbus.
     #[arg(long, default_missing_value = "true")]
     wait_for_socket: bool,
+
+    /// Fcitx5 doesn't forward modifier key correctly, and the PR for this is not going to merge in
+    /// near future. Use this option to send modifier key event to a remote libinput server.
+    #[arg(long, default_missing_value = "true")]
+    modifier_workaround: bool,
 }
 
 pub fn has_text_within_env(k: &str) -> bool {
@@ -100,6 +105,7 @@ fn run(args: Args) -> Result<()> {
                     config_manager,
                     init_task,
                     args.wait_for_socket,
+                    args.modifier_workaround,
                     shutdown_flag.clone(),
                 );
                 // make sure shutdown
@@ -137,6 +143,7 @@ fn run(args: Args) -> Result<()> {
             config_manager,
             init_task,
             args.wait_for_socket,
+            args.modifier_workaround,
             shutdown_flag.clone(),
         )
     } else {
@@ -153,7 +160,7 @@ fn run(args: Args) -> Result<()> {
 pub fn main() {
     let args = Args::parse();
     if let Err(e) = run(args) {
-        eprintln!("run command failed: {e}");
+        eprintln!("run command failed: {e:?}");
         process::exit(1);
     }
 }

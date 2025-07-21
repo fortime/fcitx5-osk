@@ -7,6 +7,7 @@ use iced::{
     Subscription,
 };
 use tokio::task::JoinHandle;
+use v1::Fcitx5ControllerServiceStub;
 
 use crate::{app::wayland::WaylandMessage, dbus::client::Fcitx5Services};
 
@@ -81,8 +82,9 @@ impl InputMethodContext {
                 }
             });
             guard.bg_handle = Some(handle);
-            let client = Arc::new(client);
-            let fcitx5_services = Fcitx5Services::new_with(client.clone(), client.clone(), client);
+            let stub = Arc::new(Fcitx5ControllerServiceStub);
+            let client = Arc::new(iced::futures::lock::Mutex::new(client));
+            let fcitx5_services = Fcitx5Services::new_with(stub.clone(), stub, client);
             guard.fcitx5_services = Some(fcitx5_services.clone());
             Ok(fcitx5_services)
         }
@@ -120,7 +122,6 @@ mod v1 {
 
     use anyhow::{Context, Result};
     use iced::futures::channel::mpsc::UnboundedSender;
-    use tracing::instrument;
     use wayland_client::{event_created_child, Connection, Dispatch, Proxy, QueueHandle};
     use wayland_protocols::wp::input_method::zv1::client::{
         zwp_input_method_context_v1::ZwpInputMethodContextV1,
@@ -143,14 +144,21 @@ mod v1 {
     };
 
     #[derive(Debug)]
+    pub struct Fcitx5ControllerServiceStub;
+
+    impl Fcitx5ControllerServiceStub {
+        const IM_NAME: &str = "wayland-im-v1";
+    }
+
+    /// WaylandInputMethodV1Client implements IFcitx5VirtualKeyboardBackendService only, so it
+    /// doesn't need to be `Clone`.
+    #[derive(Debug)]
     pub struct WaylandInputMethodV1Client {
         serial: AtomicU32,
         input_method_context: Arc<Mutex<Option<ZwpInputMethodContextV1>>>,
     }
 
     impl WaylandInputMethodV1Client {
-        const IM_NAME: &str = "wayland-im-v1";
-
         fn input_method_context(&self) -> MutexGuard<'_, Option<ZwpInputMethodContextV1>> {
             self.input_method_context
                 .lock()
@@ -165,8 +173,8 @@ mod v1 {
     }
 
     #[async_trait::async_trait]
-    impl IFcitx5ControllerService for WaylandInputMethodV1Client {
-        #[instrument(level = "debug", skip(self), err, ret)]
+    impl IFcitx5ControllerService for Fcitx5ControllerServiceStub {
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn full_input_method_group_info(
             &self,
             _name: &str,
@@ -176,19 +184,19 @@ mod v1 {
                 .map_err(|e| ZbusError::Failure(e.to_string()))
         }
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn current_input_method(&self) -> ZbusResult<String> {
             Ok(Self::IM_NAME.to_string())
         }
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn set_current_im(&self, _im: &str) -> ZbusResult<()> {
             Ok(())
         }
     }
 
     #[async_trait::async_trait]
-    impl IFcitx5VirtualKeyboardService for WaylandInputMethodV1Client {
+    impl IFcitx5VirtualKeyboardService for Fcitx5ControllerServiceStub {
         async fn show_virtual_keyboard(&self) -> ZbusResult<()> {
             Ok(())
         }
@@ -200,9 +208,9 @@ mod v1 {
 
     #[async_trait::async_trait]
     impl IFcitx5VirtualKeyboardBackendService for WaylandInputMethodV1Client {
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn process_key_event(
-            &self,
+            &mut self,
             keyval: u32,
             keycode: u32,
             state: u32,

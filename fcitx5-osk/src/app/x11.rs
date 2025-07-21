@@ -97,8 +97,14 @@ pub fn start(
     config_manager: ConfigManager,
     init_task: Task<Message>,
     wait_for_socket: bool,
+    modifier_workaround: bool,
     shutdown_flag: ShutdownFlag,
 ) -> Result<()> {
+    let modifier_workaround_keycodes = config_manager
+        .as_ref()
+        .modifier_workaround_keycodes()
+        .clone();
+
     // each eventloop should has its own connection.
     let output_context = OutputContext::new(xcb_connection)?;
 
@@ -106,8 +112,11 @@ pub fn start(
         .theme(X11Keyboard::theme)
         .subscription(X11Keyboard::subscription)
         .run_with(move || {
-            let fcitx5_services = super::run_async(Fcitx5Services::new())
-                .expect("unable to create a fcitx5 service clients");
+            let fcitx5_services = super::run_async(Fcitx5Services::new(
+                modifier_workaround,
+                modifier_workaround_keycodes,
+            ))
+            .expect("unable to create a fcitx5 service clients");
             let fcitx5_osk_services = super::run_async(Fcitx5OskServices::new())
                 .expect("unable to create a fcitx5 osk service clients");
             let (keyboard, task) = X11Keyboard::new(

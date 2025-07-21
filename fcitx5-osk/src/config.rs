@@ -86,6 +86,11 @@ pub struct Config {
     /// preferred output to be used.
     #[serde(default)]
     preferred_output_name: Option<String>,
+
+    /// These keycodes are x11 variant, they are +8 shift of evdev keycodes
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default = "default_modifier_workaround_keycodes")]
+    modifier_workaround_keycodes: Vec<u16>,
 }
 
 impl Config {
@@ -132,6 +137,17 @@ fn default_holding_timeout() -> Duration {
 
 fn default_theme() -> String {
     "Auto".to_string()
+}
+
+fn default_modifier_workaround_keycodes() -> Vec<u16> {
+    vec![
+        37,  // Left Ctrl
+        105, // Right Ctrl
+        50,  // Left Shift
+        62,  // Right Shift
+        64,  // Left Alt
+        108, // Right Alt
+    ]
 }
 
 pub struct ConfigManager {
