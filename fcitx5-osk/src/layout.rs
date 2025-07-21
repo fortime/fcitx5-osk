@@ -457,8 +457,8 @@ impl ToolbarLayout {
 
         let mut row = Row::new().height(Length::Fill).align_y(Vertical::Center);
         row = row.push(
-            fa_btn(
-                '',
+            nerd_btn(
+                '󰒮',
                 font_size,
                 if prev_message.is_some() {
                     color
@@ -473,8 +473,8 @@ impl ToolbarLayout {
             Container::new(candidate_element).center(Length::Fill),
         );
         row = row.push(
-            fa_btn(
-                '',
+            nerd_btn(
+                '󰒭',
                 font_size,
                 if next_message.is_some() {
                     color
@@ -521,7 +521,7 @@ impl ToolbarLayout {
             }
         };
         if let Some(message) = indicator_message {
-            row = row.push(fa_btn('', font_size, color).on_press(message));
+            row = row.push(nerd_btn('󰁄', font_size, color).on_press(message));
         }
 
         // padding
@@ -551,12 +551,7 @@ impl ToolbarLayout {
             Row::new()
                 .align_y(Vertical::Center)
                 .spacing(unit)
-                .push(
-                    Text::new('')
-                        .size(font_size)
-                        .shaping(Shaping::Advanced)
-                        .color(color),
-                )
+                .push(nerd_icon('󰏪', font_size, color))
                 .push(
                     PickList::new(state.im().im_names(), state.im().im_name(), |im| {
                         ImEvent::SelectIm(im).into()
@@ -568,12 +563,7 @@ impl ToolbarLayout {
             Row::new()
                 .align_y(Vertical::Center)
                 .spacing(unit)
-                .push(
-                    Text::new('')
-                        .size(font_size)
-                        .shaping(Shaping::Advanced)
-                        .color(color),
-                )
+                .push(nerd_icon('󰏘', font_size, color))
                 .push(
                     PickList::new(
                         state.store().theme_names(),
@@ -583,7 +573,7 @@ impl ToolbarLayout {
                     .text_size(font_size),
                 ),
         );
-        row = row.push(fa_btn('', font_size, color).on_press(LayoutEvent::ToggleSetting.into()));
+        row = row.push(nerd_btn('󰘮', font_size, color).on_press(LayoutEvent::ToggleSetting.into()));
         Container::new(row)
             .width(Length::Fill)
             .height(Length::Fill)
@@ -780,16 +770,20 @@ impl ToElementFieldType for TextDesc {
     }
 }
 
-fn fa_btn<'a, Message: 'a>(icon: char, font_size: u16, color: Color) -> Button<'a, Message> {
+fn nerd_icon<'a, Message: 'a>(icon: char, size: u16, color: Color) -> Element<'a, Message> {
+    Text::new(icon)
+        .size(size)
+        .font(Font::with_name("fcitx5 osk nerd"))
+        .shaping(Shaping::Advanced)
+        .color(color)
+        .into()
+}
+
+fn nerd_btn<'a, Message: 'a>(icon: char, font_size: u16, color: Color) -> Button<'a, Message> {
     Button::new(
-        Container::new(
-            Text::new(icon)
-                .size(font_size)
-                .shaping(Shaping::Advanced)
-                .color(color),
-        )
-        .height(Length::Fill)
-        .align_y(Vertical::Center),
+        Container::new(nerd_icon(icon, font_size, color))
+            .height(Length::Fill)
+            .align_y(Vertical::Center),
     )
     .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
     .padding(0)
