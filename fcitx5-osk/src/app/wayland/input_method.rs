@@ -263,6 +263,11 @@ mod v1 {
         async fn next_page(&self, _index: i32) -> ZbusResult<()> {
             Ok(())
         }
+
+        async fn reset_pressed_key_events(&mut self) -> ZbusResult<()> {
+            // Since only shift in all modifier keys is handled, there is no need to reset
+            Ok(())
+        }
     }
 
     struct WaylandInputMethodV1Server {

@@ -198,6 +198,9 @@ pub trait IFcitx5VirtualKeyboardBackendService: Debug {
     async fn prev_page(&self, index: i32) -> ZbusResult<()>;
 
     async fn next_page(&self, index: i32) -> ZbusResult<()>;
+
+    /// Reset pressed key events
+    async fn reset_pressed_key_events(&mut self) -> ZbusResult<()>;
 }
 
 #[zbus::proxy(
@@ -253,6 +256,11 @@ impl IFcitx5VirtualKeyboardBackendService for Fcitx5VirtualKeyboardBackendServic
 
     async fn next_page(&self, index: i32) -> ZbusResult<()> {
         Fcitx5VirtualKeyboardBackendServiceProxy::next_page(self, index).await
+    }
+
+    async fn reset_pressed_key_events(&mut self) -> ZbusResult<()> {
+        // There is no this kind api in fcitx5
+        Ok(())
     }
 }
 
@@ -352,6 +360,38 @@ impl IFcitx5VirtualKeyboardBackendService for FusedFcitx5VirtualKeyboardBackendS
     async fn next_page(&self, index: i32) -> ZbusResult<()> {
         self.virtual_keyboard_backend.next_page(index).await
     }
+
+    async fn reset_pressed_key_events(&mut self) -> ZbusResult<()> {
+        if self.key_helper_created {
+            // SAFETY `self.fcitx5_osk_key_helper_controller` will be initialized if not
+            let fcitx5_osk_key_helper_controller =
+                unsafe { self.fcitx5_osk_key_helper_controller.assume_init_ref() };
+            // Keys will be released after serial is reset
+            self.key_helper_serial = Some(fcitx5_osk_key_helper_controller.reset_serial().await?);
+        }
+        Ok(())
+    }
+}
+
+/// Reset pressed keys before calling hide
+#[derive(Debug, Clone)]
+pub struct Fcitx5VirtualKeyboardServiceExt {
+    virtual_keyboard: Arc<dyn IFcitx5VirtualKeyboardService + Send + Sync>,
+    virtual_keyboard_backend:
+        Arc<IcedFuturesMutex<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync>>,
+}
+
+#[async_trait::async_trait]
+impl IFcitx5VirtualKeyboardService for Fcitx5VirtualKeyboardServiceExt {
+    async fn show_virtual_keyboard(&self) -> ZbusResult<()> {
+        self.virtual_keyboard.show_virtual_keyboard().await
+    }
+
+    async fn hide_virtual_keyboard(&self) -> ZbusResult<()> {
+        let mut virtual_keyboard_backend = self.virtual_keyboard_backend.lock().await;
+        virtual_keyboard_backend.reset_pressed_key_events().await?;
+        self.virtual_keyboard.hide_virtual_keyboard().await
+    }
 }
 
 #[derive(Clone, Debug, Getters)]
@@ -359,7 +399,7 @@ pub struct Fcitx5Services {
     #[getset(get = "pub")]
     controller: Arc<dyn IFcitx5ControllerService + Send + Sync>,
     #[getset(get = "pub")]
-    virtual_keyboard: Arc<dyn IFcitx5VirtualKeyboardService + Send + Sync>,
+    virtual_keyboard: Fcitx5VirtualKeyboardServiceExt,
     // Ensure the usage of virtual_keyboard_backend are serialized so that key events from
     // different messages do not interfere with each other
     #[getset(get = "pub")]
@@ -384,19 +424,23 @@ impl Fcitx5Services {
                 modifier_workaround_keycodes
             );
             let virtual_keyboard = Arc::new(virtual_keyboard);
+            let virtual_keyboard_backend = Arc::new(IcedFuturesMutex::new(
+                FusedFcitx5VirtualKeyboardBackendService {
+                    virtual_keyboard: virtual_keyboard.clone(),
+                    virtual_keyboard_backend,
+                    key_helper_serial: None,
+                    key_helper_created: false,
+                    fcitx5_osk_key_helper_controller: MaybeUninit::uninit(),
+                    modifier_workaround_keycodes,
+                },
+            ));
             Ok(Self {
                 controller: Arc::new(controller),
-                virtual_keyboard: virtual_keyboard.clone(),
-                virtual_keyboard_backend: Arc::new(IcedFuturesMutex::new(
-                    FusedFcitx5VirtualKeyboardBackendService {
-                        virtual_keyboard,
-                        virtual_keyboard_backend,
-                        key_helper_serial: None,
-                        key_helper_created: false,
-                        fcitx5_osk_key_helper_controller: MaybeUninit::uninit(),
-                        modifier_workaround_keycodes,
-                    },
-                )),
+                virtual_keyboard: Fcitx5VirtualKeyboardServiceExt {
+                    virtual_keyboard,
+                    virtual_keyboard_backend: virtual_keyboard_backend.clone(),
+                },
+                virtual_keyboard_backend,
             })
         } else {
             tracing::debug!(
@@ -404,10 +448,15 @@ impl Fcitx5Services {
                 modifier_workaround,
                 modifier_workaround_keycodes
             );
+            let virtual_keyboard_backend =
+                Arc::new(IcedFuturesMutex::new(virtual_keyboard_backend));
             Ok(Self {
                 controller: Arc::new(controller),
-                virtual_keyboard: Arc::new(virtual_keyboard),
-                virtual_keyboard_backend: Arc::new(IcedFuturesMutex::new(virtual_keyboard_backend)),
+                virtual_keyboard: Fcitx5VirtualKeyboardServiceExt {
+                    virtual_keyboard: Arc::new(virtual_keyboard),
+                    virtual_keyboard_backend: virtual_keyboard_backend.clone(),
+                },
+                virtual_keyboard_backend,
             })
         }
     }
@@ -421,7 +470,10 @@ impl Fcitx5Services {
     ) -> Self {
         Self {
             controller,
-            virtual_keyboard,
+            virtual_keyboard: Fcitx5VirtualKeyboardServiceExt {
+                virtual_keyboard,
+                virtual_keyboard_backend: virtual_keyboard_backend.clone(),
+            },
             virtual_keyboard_backend,
         }
     }

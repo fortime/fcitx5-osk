@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, rc::Rc, sync::Arc, time::Duration};
+use std::{marker::PhantomData, rc::Rc, time::Duration};
 
 use anyhow::Result;
 use fcitx5_osk_common::dbus::{client::Fcitx5OskServices, entity};
@@ -8,7 +8,9 @@ use tokio::time;
 use crate::{
     app::{MapTask, Message},
     config::{Config, IndicatorDisplay, Placement},
-    dbus::client::{Fcitx5Services, IFcitx5VirtualKeyboardService},
+    dbus::client::{
+        Fcitx5Services, Fcitx5VirtualKeyboardServiceExt, IFcitx5VirtualKeyboardService,
+    },
     layout::{self, KeyAreaLayout, ToElementCommonParams},
     state::{LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
@@ -1052,9 +1054,7 @@ impl<WM> WindowManagerState<WM> {
         self.fcitx5_services = fcitx5_services;
     }
 
-    fn fcitx5_virtual_keyboard_service(
-        &self,
-    ) -> &Arc<dyn IFcitx5VirtualKeyboardService + Send + Sync> {
+    fn fcitx5_virtual_keyboard_service(&self) -> &Fcitx5VirtualKeyboardServiceExt {
         self.fcitx5_services.virtual_keyboard()
     }
 

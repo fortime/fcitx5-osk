@@ -17,7 +17,8 @@ use xkeysym::Keysym;
 use crate::{
     app::Message,
     dbus::client::{
-        Fcitx5Services, IFcitx5VirtualKeyboardBackendService, IFcitx5VirtualKeyboardService,
+        Fcitx5Services, Fcitx5VirtualKeyboardServiceExt, IFcitx5VirtualKeyboardBackendService,
+        IFcitx5VirtualKeyboardService,
     },
     font,
     key_set::{Key, KeyValue, ThinKeyValue},
@@ -419,9 +420,7 @@ impl KeyboardState {
         self.fcitx5_services.virtual_keyboard_backend()
     }
 
-    fn fcitx5_virtual_keyboard_service(
-        &self,
-    ) -> &Arc<dyn IFcitx5VirtualKeyboardService + Send + Sync> {
+    fn fcitx5_virtual_keyboard_service(&self) -> &Fcitx5VirtualKeyboardServiceExt {
         self.fcitx5_services.virtual_keyboard()
     }
 
