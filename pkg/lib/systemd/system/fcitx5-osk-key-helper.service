@@ -1,0 +1,9 @@
+[Unit]
+Description=A service emits key events through evdev for fcitx5-osk, by default it emits modifier key events only
+After=display-manager.service
+
+[Service]
+ExecStart=/usr/bin/fcitx5-osk-key-helper
+
+[Install]
+WantedBy=multi-user.target
