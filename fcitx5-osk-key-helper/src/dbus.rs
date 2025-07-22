@@ -41,6 +41,8 @@ mod server {
             #[zbus(header)] header: Header<'_>,
         ) -> Result<u64, Error> {
             tracing::info!("Reset serial request from sender: {:?}", header.sender(),);
+            // Reset all pressed keys
+            self.keyboard.reset();
             Ok(self.next_serial())
         }
 

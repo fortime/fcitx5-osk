@@ -43,16 +43,27 @@ impl Keyboard {
         self.device.emit(&[*event])?;
         Ok(true)
     }
+
+    /// Emit release event for remaining keycodes
+    pub fn reset(&mut self) -> (usize, usize) {
+        let mut suc = 0;
+        let mut fail = 0;
+        for keycode in self.pressed_keycodes.drain(..) {
+            let event = KeyEvent::new(KeyCode(keycode - 8), 0);
+            if let Err(e) = self.device.emit(&[*event]) {
+                fail += 1;
+                tracing::error!("Error to release key[{keycode}]: {e:?}");
+            } else {
+                suc += 1;
+            }
+        }
+        tracing::debug!("Release key: success[{suc}], fail[{fail}]");
+        (suc, fail)
+    }
 }
 
 impl Drop for Keyboard {
     fn drop(&mut self) {
-        // Emit release event for remaining keycodes
-        for keycode in self.pressed_keycodes.drain(..) {
-            let event = KeyEvent::new(KeyCode(keycode - 8), 0);
-            if let Err(e) = self.device.emit(&[*event]) {
-                tracing::error!("Error to release key[{keycode}]: {e:?}");
-            }
-        }
+        self.reset();
     }
 }
