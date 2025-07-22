@@ -3,6 +3,7 @@ use std::{
     fmt::{Debug, Formatter, Result as FmtResult},
     mem::MaybeUninit,
     sync::Arc,
+    time::Duration,
 };
 
 use anyhow::Result;
@@ -10,7 +11,8 @@ use fcitx5_osk_common::dbus::client::Fcitx5OskKeyHelperControllerServiceProxy;
 use getset::Getters;
 use iced::futures::lock::Mutex as IcedFuturesMutex;
 use serde::Deserialize;
-use zbus::{zvariant::OwnedValue, Connection, Result as ZbusResult};
+use tokio::time;
+use zbus::{fdo, zvariant::OwnedValue, Connection, Result as ZbusResult};
 use zvariant::Type;
 
 /// "sssa{sv}a(sssssssbsa{sv})"
@@ -338,14 +340,44 @@ impl IFcitx5VirtualKeyboardBackendService for FusedFcitx5VirtualKeyboardBackendS
                     .process_key_event(key_helper_serial, code, is_release)
                     .await?,
             );
+
+            // TODO sleep is not good enough, but i don't want more complicated method
+            // Sleep a while to let fcitx5 send hide event.
+            time::sleep(Duration::from_millis(20)).await;
+
             // fcitx5 will hide virtual keyboard, send a show request, otherwise, other key events
             // will be ignored
             self.virtual_keyboard.show_virtual_keyboard().await?;
             Ok(())
         } else {
-            self.virtual_keyboard_backend
+            let res = self
+                .virtual_keyboard_backend
                 .process_key_event(keyval, keycode, state, is_release, time)
-                .await
+                .await;
+
+            if let Err(e) = res {
+                // Fcitx5 has deregistered backend service, call show to make it register
+                let need_show = if let zbus::Error::FDO(fdo_e) = &e {
+                    matches!(fdo_e.as_ref(), fdo::Error::UnknownMethod(_))
+                } else {
+                    e == zbus::Error::InterfaceNotFound
+                };
+                if need_show {
+                    self.virtual_keyboard.show_virtual_keyboard().await?;
+
+                    // TODO sleep is not good enough, but i don't want more complicated method
+                    // Sleep a while to let fcitx5 register backend service.
+                    time::sleep(Duration::from_millis(20)).await;
+
+                    self.virtual_keyboard_backend
+                        .process_key_event(keyval, keycode, state, is_release, time)
+                        .await
+                } else {
+                    Err(e)
+                }
+            } else {
+                Ok(())
+            }
         }
     }
 
