@@ -13,7 +13,7 @@ use iced::{
         Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text,
     },
     window::Id,
-    Color, Element, Font, Length, Padding,
+    Color, Element, Font, Length,
 };
 //use iced_font_awesome::{FaIcon, IconFont};
 use serde::{
@@ -465,6 +465,7 @@ impl ToolbarLayout {
                 } else {
                     disabled_color
                 },
+                unit,
             )
             .on_press_maybe(prev_message),
         );
@@ -481,6 +482,7 @@ impl ToolbarLayout {
                 } else {
                     disabled_color
                 },
+                unit,
             )
             .on_press_maybe(next_message),
         );
@@ -521,7 +523,7 @@ impl ToolbarLayout {
             }
         };
         if let Some(message) = indicator_message {
-            row = row.push(nerd_btn('󰁄', font_size, color).on_press(message));
+            row = row.push(nerd_btn('󰁄', font_size, color, unit).on_press(message));
         }
 
         // padding
@@ -573,12 +575,13 @@ impl ToolbarLayout {
                     .text_size(font_size),
                 ),
         );
-        row = row.push(nerd_btn('󰘮', font_size, color).on_press(LayoutEvent::ToggleSetting.into()));
+        row = row.push(
+            nerd_btn('󰘮', font_size, color, unit).on_press(LayoutEvent::ToggleSetting.into()),
+        );
         Container::new(row)
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Horizontal::Right)
-            .padding(Padding::from([0, unit]))
             .into()
     }
 }
@@ -779,12 +782,20 @@ fn nerd_icon<'a, Message: 'a>(icon: char, size: u16, color: Color) -> Element<'a
         .into()
 }
 
-fn nerd_btn<'a, Message: 'a>(icon: char, font_size: u16, color: Color) -> Button<'a, Message> {
+fn nerd_btn<'a, Message: 'a>(
+    icon: char,
+    font_size: u16,
+    color: Color,
+    unit: u16,
+) -> Button<'a, Message> {
     Button::new(
         Container::new(nerd_icon(icon, font_size, color))
             .height(Length::Fill)
+            .width(font_size + 2 * unit)
+            .align_x(Horizontal::Center)
             .align_y(Vertical::Center),
     )
+    .height(Length::Fill)
     .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
     .padding(0)
 }
