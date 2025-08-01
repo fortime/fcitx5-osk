@@ -32,7 +32,7 @@ figment = { version = "0.10.19", features = ["toml"] }
 getset = "0.1.3"
 iced = { version = "0.13.1", features = ["tokio", "image", "svg", "advanced"] }
 serde = { version = "1.0.216", features = ["derive"] }
-tokio = { version = "1.46", features = ["fs", "macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1.47", features = ["fs", "macros", "rt-multi-thread", "signal"] }
 toml = "0.8.23"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
