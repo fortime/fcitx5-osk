@@ -27,7 +27,7 @@ jobs:
       - name: Check format
         run: cargo fmt --all --check
       - name: Check typos
-        uses: crate-ci/typos@v1.34.0
+        uses: crate-ci/typos@v1.35.5
       - name: Clippy
         run: cargo clippy
       - name: Build
