@@ -51,7 +51,7 @@ async-trait = "0.1.88"
 wayland-client = "0.31.8"
 wayland-protocols = "0.32.6"
 wayland-protocols-wlr = { version = "0.3.5", default-features = false, features = ["client"] }
-tempfile = "3.20.0"
+tempfile = "3.21.0"
 evdev = { version = "0.13.1", features = ["tokio"] }
 rand = "0.9.1"
 
