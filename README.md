@@ -57,7 +57,7 @@ sudo pacman -U fcitx5-osk*git*.pkg.tar.zst
 
 * build
 ```bash
-cargo build --frozen --release
+cargo build --release
 ```
 
 * install
@@ -65,15 +65,16 @@ cargo build --frozen --release
 ```bash
 sudo mkdir -p /usr/local/share/applications
 sudo mkdir -p /usr/local/share/dbus-1/services
-sudo mkdir -p /usr/local/share/dbus-1/system.d
 sudo mkdir -p /usr/local/lib/systemd/system
+sudo mkdir -p /etc/dbus-1/system.d
 sudo cp target/release/fcitx5-osk /usr/local/bin/
 sudo cp target/release/fcitx5-osk-key-helper /usr/local/bin/
 sudo cp target/release/fcitx5-osk-kwin-launcher /usr/local/bin/
-sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service > /usr/local/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service
-sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/lib/systemd/system/fcitx5-osk-key-helper.service > /usr/local/lib/systemd/system/fcitx5-osk-key-helper.service
-sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/applications/fcitx5-osk-kwin-launcher.desktop > /usr/local/share/applications/fcitx5-osk-kwin-launcher.desktop
-cp pkg/share/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf /usr/local/share/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf
+sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service | sudo tee /usr/local/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service
+sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/lib/systemd/system/fcitx5-osk-key-helper.service | sudo tee /usr/local/lib/systemd/system/fcitx5-osk-key-helper.service
+sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/applications/fcitx5-osk-kwin-launcher.desktop | sudo tee /usr/local/share/applications/fcitx5-osk-kwin-launcher.desktop
+# /usr/local/share/dbus-1/system.d is not a valid path.
+sudo cp pkg/share/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf /etc/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf
 ```
 
 ## Usage
@@ -113,6 +114,18 @@ GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell
 
 [Wayland]
 CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1 --inputmethod "fcitx5-osk-kwin-launcher --sddm"
+```
+
+* For a maunal build, `/usr/local/bin` might not be in `$PATH` of the process of `SDDM`, use the absolute path of `fcitx5-osk-kwin-launcher`:
+
+```ini
+# /etc/sddm.conf.d/rootless.conf
+[General]
+DisplayServer=wayland
+GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell
+
+[Wayland]
+CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1 --inputmethod "/usr/local/bin/fcitx5-osk-kwin-launcher --sddm"
 ```
 
 ### Open Keyboard Manually
@@ -208,6 +221,12 @@ kc = 61
 c = "?"
 kc = -61
 ```
+
+## Troubleshoot
+
+### `GTK_IM_MODULE` and `QT_IM_MODULE` are set
+
+With `QT_IM_MODULE` set, the virtual keyboard won't be shown in the SDDM login screen and the KDE lock screen. In a distribution with `im-config` installed, like Debian 13, it will set `*_IM_MODULE` by default. You can set `IM_CONFIG_DEFAULT_MODE` to `none` in `/etc/default/im-config`.
 
 ## Issues
 
