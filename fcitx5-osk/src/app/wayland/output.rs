@@ -661,11 +661,11 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for OutputListener {
             } => {
                 match state.find_request_mut(output_name) {
                     Some(r) => {
+                        // Output has been added to OutputContext state
                         r.logical_width = Some(width);
                         r.logical_height = Some(height);
                     }
                     None => {
-                        // Output has been added to OutputContext state
                         let mut request = OutputChangedRequest::new(output_name);
                         request.logical_width = Some(width);
                         request.logical_height = Some(height);
