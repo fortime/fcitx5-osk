@@ -42,16 +42,7 @@ Creating a keyboard with evdev requires root privileges, and it may not be safe 
 
 ### Arch Linux
 
-```bash
-# Download PKGBUILD
-curl -o PKGBUILD https://raw.githubusercontent.com/fortime/fcitx5-osk/refs/heads/main/pkg/archlinux/PKGBUILD
-
-# Build
-makepkg
-
-# Installation
-sudo pacman -U fcitx5-osk*git*.pkg.tar.zst
-```
+Packages are available in the AUR: [fcitx5-osk-git](https://aur.archlinux.org/packages/fcitx5-osk-git) and [fcitx5-osk-kwin-launcher-git](https://aur.archlinux.org/packages/fcitx5-osk-kwin-launcher-git).
 
 ### Manual
 

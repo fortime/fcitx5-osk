@@ -1,5 +1,7 @@
-# Maintainer: Morgan <morganamilo@archlinux.org>
-pkgbase=fcitx5-osk
+# Maintainer: fortime <palfortime@gmail.com>
+
+_pkgbase=fcitx5-osk
+pkgbase=fcitx5-osk-git
 pkgname=(
     fcitx5-osk-git
     fcitx5-osk-kwin-launcher-git
@@ -16,25 +18,25 @@ depends=('fcitx5' 'ttf-font-nerd')
 sha256sums=(SKIP)
 
 pkgver() {
-  cd "$srcdir/${pkgbase}"
+  cd "$srcdir/$_pkgbase"
   git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g'
 }
 
 prepare() {
-  cd "$pkgbase"
+  cd "$_pkgbase"
   # We use a patched iced_layershell, so we can't use --offline
   #cargo fetch --offline --target "$(rustc -vV | sed -n 's|host: ||p')"
   cargo fetch --target "$(rustc -vV | sed -n 's|host: ||p')"
 }
 
 build () {
-  cd "$srcdir/$pkgbase"
+  cd "$srcdir/$_pkgbase"
 
   cargo build --frozen --release
 }
 
 package_fcitx5-osk-git() {
-  cd "$srcdir/$pkgbase"
+  cd "$srcdir/$_pkgbase"
 
   name=fcitx5-osk
 
@@ -47,7 +49,7 @@ package_fcitx5-osk-git() {
 }
 
 package_fcitx5-osk-kwin-launcher-git() {
-  cd "$srcdir/$pkgbase"
+  cd "$srcdir/$_pkgbase"
 
   name=fcitx5-osk-kwin-launcher
 
