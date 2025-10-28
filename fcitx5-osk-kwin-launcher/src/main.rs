@@ -200,6 +200,7 @@ async fn watch_kwin_virtual_keyboard(
     fcitx5_osk_services: &Fcitx5OskServices,
     kwin_services: &KwinServices,
     in_lockscreen: bool,
+    tablet_mode_check: bool,
 ) -> Result<()> {
     let expected_mode = if in_lockscreen {
         WindowManagerMode::KwinLockScreen
@@ -268,9 +269,13 @@ async fn watch_kwin_virtual_keyboard(
             .await?;
         while stream.next().await.is_some() {
             let active = kwin_services.virtual_keyboard().active().await?;
-            let tablet_mode = kwin_services.tablet_mode().tablet_mode().await?;
+            let tablet_mode = if tablet_mode_check {
+                kwin_services.tablet_mode().tablet_mode().await?
+            } else {
+                true
+            };
             // check tablet mode, show only if it is in tablet mode.
-            tracing::debug!("kwin virtual keyboard active: {active}, tablet mode: {tablet_mode}");
+            tracing::debug!("kwin virtual keyboard active: {active}, tablet_mode_check: {tablet_mode_check}, tablet mode: {tablet_mode}");
             if active && tablet_mode {
                 fcitx5_osk_services.controller().show().await?;
             }
@@ -294,6 +299,9 @@ async fn watch_lockscreen_state(fdo_services: &FdoServices, in_lockscreen: bool)
 
 async fn run(args: &Args) -> Result<()> {
     let _log_guard = fcitx5_osk_common::log::init_log(&[], args.log_timestamp)?;
+    let tablet_mode_check = env::var("FCITX5_OSK_KWIN_LAUNCHER_TABLET_MODE_CHECK")
+        .map(|s| !s.eq_ignore_ascii_case("off"))
+        .unwrap_or(true);
 
     let (mut shutdown_flag, signal_handle) = fcitx5_osk_common::signal::shutdown_flag();
     tokio::spawn(signal_handle);
@@ -391,7 +399,7 @@ async fn run(args: &Args) -> Result<()> {
                 tracing::info!("the state of lockscreen is changed");
             }
         }
-        res = watch_kwin_virtual_keyboard(&services, &kwin_services, lockscreen_active) => {
+        res = watch_kwin_virtual_keyboard(&services, &kwin_services, lockscreen_active, tablet_mode_check) => {
             if let Err(e) = res {
                 tracing::error!("watch_kwin_virtual_keyboard exits abnormally: {e:?}");
             } else {
@@ -515,7 +523,7 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
 
     // only the latest match rule will work in zbus::receive_signal. so I create two connections.
     tokio::select! {
-        res = watch_kwin_virtual_keyboard(&services, &kwin_services, true) => {
+        res = watch_kwin_virtual_keyboard(&services, &kwin_services, true, true) => {
             if let Err(e) = res {
                 tracing::error!("watch_kwin_virtual_keyboard exits abnormally: {e:?}");
             } else {
