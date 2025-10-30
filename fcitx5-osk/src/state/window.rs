@@ -348,6 +348,7 @@ pub struct WindowManagerState<WM> {
     fcitx5_services: Fcitx5Services,
     fcitx5_osk_services: Fcitx5OskServices,
     wm: WM,
+    hide_delay: Duration,
 }
 
 impl<WM> WindowManagerState<WM> {
@@ -377,6 +378,7 @@ impl<WM> WindowManagerState<WM> {
             fcitx5_services,
             fcitx5_osk_services,
             wm,
+            hide_delay: *config.hide_delay(),
         })
     }
 
@@ -620,7 +622,7 @@ where
         match source {
             CloseOpSource::Fcitx5 => self
                 .keyboard_window_state
-                .close_with_delay(Duration::from_millis(1000), source)
+                .close_with_delay(self.hide_delay, source)
                 .map_task(),
             CloseOpSource::UserAction | CloseOpSource::DbusController => {
                 let task = self.keyboard_window_state.close(&mut self.wm, source);
