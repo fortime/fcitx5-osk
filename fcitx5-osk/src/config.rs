@@ -57,12 +57,12 @@ pub struct Config {
     #[serde(default)]
     placement: Placement,
 
-    /// default font to be used.
+    /// Default font to be used.
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
     default_font: Option<String>,
 
-    /// load fonts by path
+    /// Load fonts by path.
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
     external_font_paths: Vec<PathBuf>,
@@ -83,14 +83,19 @@ pub struct Config {
     #[serde(default)]
     indicator_display: IndicatorDisplay,
 
-    /// preferred output to be used.
+    /// Preferred output to be used.
     #[serde(default)]
     preferred_output_name: Option<String>,
 
-    /// These keycodes are x11 variant, they are +8 shift of evdev keycodes
+    /// These keycodes are x11 variant, they are +8 shift of evdev keycodes.
     #[getset(get = "pub", set = "pub")]
     #[serde(default = "default_modifier_workaround_keycodes")]
     modifier_workaround_keycodes: Vec<u16>,
+
+    /// How long will the keyboard wait after receiving a signal from fcitx5.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(with = "humantime_serde", default = "default_hide_delay")]
+    hide_delay: Duration,
 }
 
 impl Config {
@@ -133,6 +138,10 @@ fn default_indicator_width() -> u16 {
 
 fn default_holding_timeout() -> Duration {
     Duration::from_millis(200)
+}
+
+fn default_hide_delay() -> Duration {
+    Duration::from_millis(1000)
 }
 
 fn default_theme() -> String {
