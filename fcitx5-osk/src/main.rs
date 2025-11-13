@@ -20,6 +20,7 @@ mod key_set;
 mod layout;
 mod state;
 mod store;
+mod theme;
 mod widget;
 mod window;
 

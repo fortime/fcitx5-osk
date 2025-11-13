@@ -6,6 +6,7 @@ use crate::{
     font,
     key_set::{Key, KeySet},
     layout::{KeyAreaLayout, KeyId},
+    theme::Theme,
 };
 
 use anyhow::Result;
@@ -13,10 +14,12 @@ use figment::{
     providers::{Format, Toml},
     Figment,
 };
-use iced::{Font, Theme};
+use iced::{Font, Theme as IcedTheme};
 use serde::Deserialize;
 
 mod default_value;
+
+const BUILTIN_ICED_THEMES: [&str; 4] = ["Light", "Dark", "Tokyo Night Storm", "Tokyo Night Light"];
 
 pub(crate) trait IdAndConfigPath {
     type IdType;
@@ -30,7 +33,7 @@ pub(crate) trait IdAndConfigPath {
 
 pub struct Store {
     theme_names: Vec<String>,
-    themes: HashMap<String, Theme>,
+    themes: HashMap<String, IcedTheme>,
     default_key_area_layouts: (Rc<KeyAreaLayout>, Rc<KeyAreaLayout>),
     key_area_layouts: HashMap<String, Rc<KeyAreaLayout>>,
     default_key_set: Rc<KeySet>,
@@ -41,15 +44,20 @@ pub struct Store {
 
 impl Store {
     pub fn new(config: &Config) -> Result<Self> {
-        let themes = Theme::ALL
+        let mut themes: HashMap<String, IcedTheme> = IcedTheme::ALL
             .iter()
-            .map(|t| (t.to_string().to_lowercase(), t.clone()))
+            .filter(|t| BUILTIN_ICED_THEMES.iter().any(|bt| bt == &t.to_string()))
+            .map(|t| (t.to_string(), t.clone()))
             .collect();
-        let mut theme_names = Vec::with_capacity(Theme::ALL.len() + 1);
-        theme_names.push("Auto".to_string());
-        Theme::ALL
-            .iter()
-            .for_each(|t| theme_names.push(t.to_string()));
+        init_confs::<_, Theme>(config.theme_folders())?
+            .into_iter()
+            .for_each(|(name, theme)| {
+                themes.insert(name, theme.iced_theme().clone());
+            });
+        let mut theme_names = themes.values().map(|t| t.to_string()).collect::<Vec<_>>();
+        theme_names.sort_unstable();
+        theme_names.insert(0, "Auto".to_string());
+
         let default_landscape_key_area_layout = Rc::new(init_default(
             default_value::DEFAULT_LANDSCAPE_KEY_AREA_LAYOUT_TOML,
         )?);
@@ -84,8 +92,8 @@ impl Store {
         &self.theme_names
     }
 
-    pub fn theme(&self, name: &str) -> Option<&Theme> {
-        self.themes.get(&name.to_ascii_lowercase())
+    pub fn theme(&self, name: &str) -> Option<&IcedTheme> {
+        self.themes.get(name)
     }
 
     fn default_key_area_layout(&self, portrait: bool) -> Rc<KeyAreaLayout> {

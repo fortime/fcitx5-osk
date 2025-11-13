@@ -31,6 +31,10 @@ pub struct Config {
     #[serde(default)]
     key_set_folders: Vec<PathBuf>,
 
+    #[getset(get = "pub")]
+    #[serde(default)]
+    theme_folders: Vec<PathBuf>,
+
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default = "default_landscape_width")]
     landscape_width: u16,

@@ -3,7 +3,7 @@ use std::{
     fmt::{Display, Formatter, Result as FmtResult},
 };
 
-use iced::{Task, Theme};
+use iced::Task;
 use strum::IntoEnumIterator;
 
 use crate::{
@@ -325,10 +325,6 @@ pub struct ConfigState {
 
 impl ConfigState {
     pub fn new(config_manager: ConfigManager) -> Self {
-        let themes = Theme::ALL
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
         Self {
             config_manager,
             updatable_fields: vec![
@@ -402,22 +398,59 @@ impl ConfigState {
                 Field {
                     name: "Dark Theme",
                     id: "dark_theme",
-                    typ: EnumDesc::<String> {
-                        cur_value: |state| state.config().dark_theme(),
-                        variants: themes.clone(),
+                    typ: DynamicEnumDesc::<String> {
+                        variants_and_selected: |state| {
+                            let mut theme_names = vec![];
+                            for theme_name in state.theme_names() {
+                                if theme_name != "Auto" {
+                                    theme_names.push(ValueAndDescription {
+                                        value: theme_name.clone(),
+                                        desc: theme_name.clone(),
+                                    });
+                                }
+                            }
+                            (
+                                theme_names,
+                                state
+                                    .config()
+                                    .dark_theme()
+                                    .map(|theme_name| ValueAndDescription {
+                                        value: theme_name.clone(),
+                                        desc: theme_name.clone(),
+                                    }),
+                            )
+                        },
                         is_enabled: |_| true,
-                        on_selected: |_, d| Message::from(UpdateConfigEvent::DarkTheme(d)),
+                        on_selected: |_, d| Message::from(UpdateConfigEvent::DarkTheme(d.value)),
                     }
                     .into(),
                 },
                 Field {
                     name: "Light Theme",
                     id: "light_theme",
-                    typ: EnumDesc::<String> {
-                        cur_value: |state| state.config().light_theme(),
-                        variants: themes,
+                    typ: DynamicEnumDesc::<String> {
+                        variants_and_selected: |state| {
+                            let mut theme_names = vec![];
+                            for theme_name in state.theme_names() {
+                                if theme_name != "Auto" {
+                                    theme_names.push(ValueAndDescription {
+                                        value: theme_name.clone(),
+                                        desc: theme_name.clone(),
+                                    });
+                                }
+                            }
+                            (
+                                theme_names,
+                                state.config().light_theme().map(|theme_name| {
+                                    ValueAndDescription {
+                                        value: theme_name.clone(),
+                                        desc: theme_name.clone(),
+                                    }
+                                }),
+                            )
+                        },
                         is_enabled: |_| true,
-                        on_selected: |_, d| Message::from(UpdateConfigEvent::LightTheme(d)),
+                        on_selected: |_, d| Message::from(UpdateConfigEvent::LightTheme(d.value)),
                     }
                     .into(),
                 },

@@ -246,6 +246,8 @@ pub trait StateExtractor {
 
     fn theme(&self) -> &Theme;
 
+    fn theme_names(&self) -> &[String];
+
     fn config(&self) -> &Config;
 
     fn updatable_fields(&self) -> &[Field];
@@ -290,6 +292,10 @@ where
 
     fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    fn theme_names(&self) -> &[String] {
+        self.store.theme_names()
     }
 
     fn config(&self) -> &Config {
