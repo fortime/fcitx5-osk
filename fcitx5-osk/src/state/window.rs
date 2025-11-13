@@ -1039,7 +1039,9 @@ where
 {
     pub fn appearance(&self, theme: &Theme, id: Id) -> WM::Appearance {
         if self.is_keyboard(id) {
-            WM::Appearance::default(theme)
+            let mut appearance = WM::Appearance::default(theme);
+            appearance.set_background_color(theme.extended_palette().background.strong.color);
+            appearance
         } else if self.is_indicator(id) {
             let mut appearance = WM::Appearance::default(theme);
             appearance.set_background_color(Color::TRANSPARENT);

@@ -15,7 +15,6 @@ use iced::{
     window::Id,
     Color, Element, Font, Length,
 };
-//use iced_font_awesome::{FaIcon, IconFont};
 use serde::{
     de::{Error, Unexpected},
     Deserialize, Deserializer,
@@ -34,7 +33,7 @@ use crate::{
         WindowManagerEvent,
     },
     store::IdAndConfigPath,
-    widget::{Movable, Toggle, ToggleCondition},
+    widget::{self, Movable, Toggle, ToggleCondition},
     window::WindowManagerMode,
 };
 
@@ -450,6 +449,7 @@ impl ToolbarLayout {
                 candidate_row,
                 Direction::Horizontal(Scrollbar::new().width(1).spacing(unit)),
             )
+            .style(widget::scrollable_style)
             .into()
         } else {
             candidate_row.into()
@@ -614,15 +614,18 @@ impl SettingLayout {
                 Container::new(field_value_element(state, field, text_size)).center_y(height),
             );
         }
-        Container::new(Scrollable::with_direction(
-            Row::new()
-                .push(name_column)
-                .push(Column::new().width(2 * unit))
-                .push(value_column)
-                // don't overlap with the scrollbar
-                .push(Column::new().width(2 * unit)),
-            Direction::Vertical(Scrollbar::new().width(unit).scroller_width(unit)),
-        ))
+        Container::new(
+            Scrollable::with_direction(
+                Row::new()
+                    .push(name_column)
+                    .push(Column::new().width(2 * unit))
+                    .push(value_column)
+                    // don't overlap with the scrollbar
+                    .push(Column::new().width(2 * unit)),
+                Direction::Vertical(Scrollbar::new().width(unit).scroller_width(unit)),
+            )
+            .style(widget::scrollable_style),
+        )
         .height(Length::Fill)
         .into()
     }
