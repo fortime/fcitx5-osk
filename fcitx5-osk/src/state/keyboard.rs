@@ -9,7 +9,7 @@ use anyhow::Result;
 use iced::{
     alignment::{Horizontal, Vertical},
     futures::lock::Mutex as IcedFuturesMutex,
-    widget::{text::Shaping, Column, Container, Row, Text},
+    widget::{container::Style as ContainerStyle, text::Shaping, Column, Container, Row, Text},
     Element, Font, Padding, Task,
 };
 use xkeysym::Keysym;
@@ -31,6 +31,8 @@ const TEXT_PADDING_LENGTH: u16 = 3;
 
 /// #define KEY_LEFTSHIFT       42, val + 8
 const KEYCODE_LEFT_SHIFT: u32 = 50;
+
+const BORDER_RADIUS: f32 = 5.;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -187,6 +189,7 @@ impl KeyboardState {
         holding_key_state: &'a HoldingKeyState,
         key_value: &'a KeyValue,
         unit: u16,
+        border_radius: f32,
     ) -> PopupKey<'a, Message> {
         let common =
             KeyEventCommon::new(self.id, holding_key_state.name.clone(), key_value.to_thin());
@@ -198,6 +201,7 @@ impl KeyboardState {
                 .font(key_value.font().unwrap_or(self.font))
                 .size(self.primary_text_size_u * unit),
             holding_key_state.key_widget_event.finger,
+            border_radius,
         )
         .width(self.popup_key_width_u * unit)
         .height(self.popup_key_height_u * unit)
@@ -351,7 +355,7 @@ impl KeyboardState {
             tracing::debug!("{key_name} is not found");
             (Element::from(Text::new("")), None, None)
         };
-        KeyWidget::new(content)
+        KeyWidget::new(content, BORDER_RADIUS)
             .on_press_with(press_cb)
             .on_release_with(release_cb)
             .padding(Padding::new(TEXT_PADDING_LENGTH as f32))
@@ -374,12 +378,13 @@ impl KeyboardState {
         let mut skip = 0;
         let mut popup_key_area_width = 0;
         if Key::is_shifted(is_shift_set, is_caps_lock_set) {
-            row = row.push(self.new_popup_key(holding_key_state, key.primary(), unit));
+            row =
+                row.push(self.new_popup_key(holding_key_state, key.primary(), unit, BORDER_RADIUS));
             skip = 1;
             popup_key_area_width += self.popup_key_width_u * unit;
         }
         for secondary in key.secondaries().iter().skip(skip) {
-            row = row.push(self.new_popup_key(holding_key_state, secondary, unit));
+            row = row.push(self.new_popup_key(holding_key_state, secondary, unit, BORDER_RADIUS));
             popup_key_area_width += self.popup_key_width_u * unit;
         }
 
@@ -399,11 +404,19 @@ impl KeyboardState {
         // calculate padding.
         let padding = Padding::default().left(left_x as f32).top(top_y as f32);
         Some(
-            Container::new(row)
-                .padding(padding)
-                .width(width)
-                .height(height)
-                .into(),
+            Container::new(Container::new(row).style(|theme| {
+                let mut style = ContainerStyle::default();
+                style.shadow.offset = [1.0, 1.0].into();
+                style.shadow.color = theme.extended_palette().background.weak.color;
+                style.shadow.blur_radius = 5.;
+                style.border = style.border.rounded(5);
+                style.background = Some(theme.extended_palette().primary.weak.color.into());
+                style
+            }))
+            .padding(padding)
+            .width(width)
+            .height(height)
+            .into(),
         )
     }
 }
