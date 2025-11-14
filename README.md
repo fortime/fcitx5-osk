@@ -126,34 +126,25 @@ A key event from a keyboard of evdev will make `fcitx5` to hide a virtual keyboa
 busctl --user call fyi.fortime.Fcitx5Osk /fyi/fortime/Fcitx5Osk/Controller fyi.fortime.Fcitx5Osk.Controller1 Show
 ```
 
-### Custom Layouts and Keys
+### Custom Layouts, Keys and Themes
 
-You can create your own layouts and keys, and specify the layout to be used in a specified input method. Keys are organized by a key set.
+You can create your own layouts, keys and themes, and specify the layout to be used in a specified input method. Keys are organized by a key set.
 
-* Specify the folders contains key sets 
-```toml
-key_set_folders = ["/opt/fcitx5-osk/key_sets"]
-```
-
-* Specify the folders contains layouts
-```toml
-key_area_layout_folders = ["/opt/fcitx5-osk/layouts"]
-```
+* By default, `fcitx5-osk` will search toml files in 'fcitx5-osk/layouts', 'fcitx5-osk/key\_sets' and 'fcitx5-osk/themes' under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. If `$XDG_CONFIG_HOME` is not set, `$HOME/.config` will be used. If there are multiple config has the same name, the latter one has higher priority.
 
 * Set the layout to be used 
 ```toml
 # Layouts to be used in landscape view. If no layout is specified for an input method, the builtin one will be used.
 [im_layout_mapping.landscape]
-# custom-layout-for-rime-landscape is the name of the layout
+# custom-layout-for-rime-landscape is the name of the layout. rime is the input method name. You can find it in the input method drop-down list of `fcitx5-osk`.
+
 rime = "custom-layout-for-rime-landscape"
 
 # Layouts to be used in portrait view. If no layout is specified for an input method, the builtin one will be used.
 [im_layout_mapping.portrait]
-# custom-layout-for-rime-portrait is the name of the layout
+# custom-layout-for-rime-portrait is the name of the layout. rime is the input method name. You can find it in the input method drop-down list of `fcitx5-osk`.
 rime = "custom-layout-for-rime-portrait"
 ```
-
-The application will load all "\*.toml" files from these folders, layout and key set files should not be in the same folder. 
 
 #### Layout Toml File
 
@@ -211,6 +202,75 @@ kc = 61
 # The third secondary form: character is '?', keycode(x11 variant) is -61
 c = "?"
 kc = -61
+```
+
+#### Theme Toml File
+
+Here is an example.
+
+```toml
+name = "Breeze Light"
+
+[palette]
+background = "#ffffff"
+text = "#232629"
+primary = "#3daee9"
+success = "#27ae60"
+danger = "#da4453"
+
+# This is the extended palette for advanced settings
+[extended_palette]
+is_dark = false
+
+[extended_palette.background.base]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.background.weak]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.background.strong]
+color = "#ffffff"
+text = "#232629"
+
+[extended_palette.primary.base]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.primary.weak]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.primary.strong]
+color = "#ffffff"
+text = "#232629"
+
+[extended_palette.secondary.base]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.secondary.weak]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.secondary.strong]
+color = "#ffffff"
+text = "#232629"
+
+[extended_palette.success.base]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.success.weak]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.success.strong]
+color = "#ffffff"
+text = "#232629"
+
+[extended_palette.danger.base]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.danger.weak]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.danger.strong]
+color = "#ffffff"
+text = "#232629"
 ```
 
 ## Troubleshoot
