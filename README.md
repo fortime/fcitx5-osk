@@ -64,8 +64,14 @@ sudo cp target/release/fcitx5-osk-kwin-launcher /usr/local/bin/
 sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service | sudo tee /usr/local/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service
 sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/lib/systemd/system/fcitx5-osk-key-helper.service | sudo tee /usr/local/lib/systemd/system/fcitx5-osk-key-helper.service
 sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/applications/fcitx5-osk-kwin-launcher.desktop | sudo tee /usr/local/share/applications/fcitx5-osk-kwin-launcher.desktop
+sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/applications/fyi.fortime.Fcitx5Osk.desktop | sudo tee /usr/local/share/applications/fyi.fortime.Fcitx5Osk.desktop
 # /usr/local/share/dbus-1/system.d is not a valid path.
 sudo cp pkg/share/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf /etc/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf
+sudo cp -r pkg/share/fcitx5-osk /usr/local/share/
+sudo cp assets/icons/fcitx5-osk.svg /usr/share/icons/hicolor/scalable/apps/fyi.fortime.Fcitx5Osk.svg
+
+sudo mkdir -p /etc/xdg/fcitx5-osk/themes
+ln -s /usr/local/share/fcitx5-osk/themes/breeze-light.toml /etc/xdg/fcitx5-osk/themes/breeze-light.toml
 ```
 
 ## Usage
@@ -73,11 +79,8 @@ sudo cp pkg/share/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf /etc/dbus-
 ### Enable Fcitx5 Osk Key Helper
 
 ```bash
-# enable auto start
-sudo systemctl enable fcitx5-osk-key-helper
-
-# start
-sudo systemctl start fcitx5-osk-key-helper
+# enable and start
+sudo systemctl enable --now fcitx5-osk-key-helper
 ```
 
 ### Use without Fcitx5 Osk Key Helper
@@ -122,9 +125,12 @@ CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --loc
 ### Open Keyboard Manually
 
 A key event from a keyboard of evdev will make `fcitx5` to hide a virtual keyboard. If the indicator is set to be `AlwaysOff`, and you want to open the keyboard. You can use this command.
+
 ```bash
-busctl --user call fyi.fortime.Fcitx5Osk /fyi/fortime/Fcitx5Osk/Controller fyi.fortime.Fcitx5Osk.Controller1 Show
+fcitx5-osk --show
 ```
+
+Or you can click "Fcitx 5 Osk" in the application menu directly. You can add a quick launcher in the panel too.
 
 ### Custom Layouts, Keys and Themes
 

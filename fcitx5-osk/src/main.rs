@@ -5,12 +5,14 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use app::Message;
 use clap::Parser;
 use config::{Config, ConfigManager};
+use fcitx5_osk_common::dbus::client::Fcitx5OskControllerServiceProxy;
 use iced::Task;
 use window::{wayland, x11};
+use zbus::Connection;
 
 mod app;
 mod config;
@@ -30,6 +32,10 @@ struct Args {
     /// The path of config file.
     #[arg(short, long, value_name = "PATH")]
     config: Option<PathBuf>,
+
+    /// Send a dbus message to show the virtual keyboard.
+    #[arg(long, default_missing_value = "true")]
+    show: bool,
 
     /// Force the program running on wayland.
     #[arg(long, default_missing_value = "true")]
@@ -92,6 +98,10 @@ fn run(args: Args) -> Result<()> {
         config_manager.as_ref().log_directives(),
         config_manager.as_ref().log_timestamp().unwrap_or(false),
     )?;
+
+    if args.show {
+        return async_run(show_keyboard);
+    }
 
     load_external_fonts(config_manager.as_ref())?;
 
@@ -157,6 +167,23 @@ fn run(args: Args) -> Result<()> {
     } else {
         Err(anyhow::anyhow!("No Wayland or X11 Environment"))
     }
+}
+
+async fn show_keyboard() -> Result<()> {
+    let connection = Connection::session().await?;
+    let controller = Fcitx5OskControllerServiceProxy::new(&connection).await?;
+    Ok(controller.show().await?)
+}
+
+fn async_run<F>(f: F) -> Result<()>
+where
+    F: AsyncFn() -> Result<()>,
+{
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("Unable to create tokio runtime")?;
+    rt.block_on(f())
 }
 
 /// on:
