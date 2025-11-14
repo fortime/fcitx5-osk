@@ -45,7 +45,17 @@ package_fcitx5-osk-git() {
   install -Dm644 pkg/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service "${pkgdir}/usr/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service"
   install -Dm644 pkg/lib/systemd/system/${name}-key-helper.service "${pkgdir}/usr/lib/systemd/system/${name}-key-helper.service"
   install -Dm644 pkg/share/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf "${pkgdir}/usr/share/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf"
+  install -Dm644 pkg/share/applications/fyi.fortime.Fcitx5Osk.desktop "${pkgdir}/usr/share/applications/fyi.fortime.Fcitx5Osk.desktop"
+
+  install -Dm644 pkg/share/fcitx5-osk "${pkgdir}/usr/share/fcitx5-osk"
+  install -Dm644 assets/layouts "${pkgdir}/usr/share/fcitx5-osk/examples/layouts"
+  install -Dm644 assets/key_sets "${pkgdir}/usr/share/fcitx5-osk/examples/key_sets"
+
+  install -Dm644 assets/icons/fcitx5-osk.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/fyi.fortime.Fcitx5Osk.svg"
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${name}"
+
+  mkdir -p "${pkgdir}/etc/xdg/fcitx5-osk/themes"
+  ln -s /usr/share/fcitx5-osk/themes/breeze-light.toml "${pkgdir}/etc/xdg/fcitx5-osk/themes/breeze-light.toml"
 }
 
 package_fcitx5-osk-kwin-launcher-git() {
