@@ -23,14 +23,17 @@ pub struct Config {
     #[serde(default)]
     log_directives: Vec<String>,
 
+    /// Folders storing layout toml files. If not set, the program will search toml files in `fcitx5-osk/layouts` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
     #[getset(get = "pub")]
     #[serde(default)]
     key_area_layout_folders: Vec<PathBuf>,
 
+    /// Folders storing key set toml files. If not set, the program will search toml files in `fcitx5-osk/key_sets` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
     #[getset(get = "pub")]
     #[serde(default)]
     key_set_folders: Vec<PathBuf>,
 
+    /// Folders storing theme toml files. If not set, the program will search toml files in `fcitx5-osk/themes` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
     #[getset(get = "pub")]
     #[serde(default)]
     theme_folders: Vec<PathBuf>,

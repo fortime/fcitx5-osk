@@ -1,5 +1,5 @@
 use core::hash::Hash;
-use std::{collections::HashMap, fmt::Display, path::PathBuf, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, env, fmt::Display, path::PathBuf, rc::Rc};
 
 use crate::{
     config::Config,
@@ -49,11 +49,14 @@ impl Store {
             .filter(|t| BUILTIN_ICED_THEMES.iter().any(|bt| bt == &t.to_string()))
             .map(|t| (t.to_string(), t.clone()))
             .collect();
-        init_confs::<_, Theme>(config.theme_folders())?
-            .into_iter()
-            .for_each(|(name, theme)| {
-                themes.insert(name, theme.iced_theme().clone());
-            });
+        init_confs::<_, Theme>(&xdg_config_folders_if_empty(
+            config.theme_folders(),
+            "themes",
+        ))?
+        .into_iter()
+        .for_each(|(name, theme)| {
+            themes.insert(name, theme.iced_theme().clone());
+        });
         let mut theme_names = themes.values().map(|t| t.to_string()).collect::<Vec<_>>();
         theme_names.sort_unstable();
         theme_names.insert(0, "Auto".to_string());
@@ -64,9 +67,15 @@ impl Store {
         let default_portrait_key_area_layout = Rc::new(init_default(
             default_value::DEFAULT_PORTRAIT_KEY_AREA_LAYOUT_TOML,
         )?);
-        let key_area_layouts = init_confs(config.key_area_layout_folders())?;
+        let key_area_layouts = init_confs(&xdg_config_folders_if_empty(
+            config.key_area_layout_folders(),
+            "layouts",
+        ))?;
         let default_key_set = Rc::new(init_default(default_value::DEFAULT_KEY_SET_TOML)?);
-        let key_sets = init_confs(config.key_set_folders())?;
+        let key_sets = init_confs(&xdg_config_folders_if_empty(
+            config.key_set_folders(),
+            "key_sets",
+        ))?;
         let im_layout_mapping = config.im_layout_mapping().clone();
         let im_font_mapping = config
             .im_font_mapping()
@@ -143,6 +152,36 @@ impl Store {
     }
 }
 
+fn xdg_config_folders_if_empty<'a>(dir_paths: &'a [PathBuf], sub_dir: &str) -> Cow<'a, [PathBuf]> {
+    if dir_paths.is_empty() {
+        let mut paths = vec![];
+        if let Ok(config_dir_paths) = env::var("XDG_CONFIG_DIRS") {
+            for path in config_dir_paths.split(":") {
+                paths.push(path.trim().to_string());
+            }
+        }
+        if let Ok(config_home_path) = env::var("XDG_CONFIG_HOME") {
+            paths.push(config_home_path.trim().to_string());
+        } else if let Ok(home_path) = env::var("HOME") {
+            paths.push(format!("{home_path}/.config"));
+        }
+
+        paths
+            .into_iter()
+            .filter(|p| !p.is_empty())
+            .map(|p| {
+                let mut buf = PathBuf::from(p);
+                buf.push("fcitx5-osk");
+                buf.push(sub_dir);
+                buf
+            })
+            .collect::<Vec<_>>()
+            .into()
+    } else {
+        dir_paths.into()
+    }
+}
+
 fn init_confs<'de, K, V>(dir_paths: &[PathBuf]) -> Result<HashMap<K, Rc<V>>>
 where
     V: IdAndConfigPath<IdType = K> + Deserialize<'de>,
@@ -163,7 +202,7 @@ where
                 m.entry(new.id().clone())
                     .and_modify(|old| {
                         tracing::warn!(
-                            "duplicate configs for id: {}, {:?} and {:?}, later will be used",
+                            "Duplicate configs for id: {}, {:?} and {:?}, later will be used",
                             old.id(),
                             old.path(),
                             new.path()
@@ -171,6 +210,7 @@ where
                         *old = new.clone();
                     })
                     .or_insert(new.clone());
+                tracing::debug!("Load {} from {:?}", new.id(), file.path());
             }
         }
     }
