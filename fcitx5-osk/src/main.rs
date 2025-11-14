@@ -71,13 +71,20 @@ fn run(args: Args) -> Result<()> {
         Path::new(&path).to_path_buf()
     } else if let Some(path) = &args.config {
         path.clone()
-    } else if let Ok(home_path) = env::var("HOME") {
-        let mut buf = PathBuf::new();
-        buf.push(home_path);
-        buf.push(".config/fcitx5-osk/config.toml");
-        buf
     } else {
-        anyhow::bail!("can't get the path of config file, specify it by -c or FCITX5_OSK_CONFIG");
+        let mut buf = if let Ok(config_home_path) = env::var("XDG_CONFIG_HOME") {
+            PathBuf::from(config_home_path)
+        } else if let Ok(home_path) = env::var("HOME") {
+            let mut buf = PathBuf::from(home_path);
+            buf.push(".config");
+            buf
+        } else {
+            anyhow::bail!(
+                "can't get the path of config file, specify it by -c or FCITX5_OSK_CONFIG"
+            );
+        };
+        buf.push("fcitx5-osk/config.toml");
+        buf
     };
     let (config_manager, config_write_bg) = ConfigManager::new(&config_path)?;
 
