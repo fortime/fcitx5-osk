@@ -103,6 +103,16 @@ pub struct Config {
     #[getset(get = "pub", set = "pub")]
     #[serde(with = "humantime_serde", default = "default_hide_delay")]
     hide_delay: Duration,
+
+    /// Override the builtin landscape layout globally.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_landscape_layout: String,
+
+    /// Override the builtin portrait layout globally.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_portrait_layout: String,
 }
 
 impl Config {
