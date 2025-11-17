@@ -48,30 +48,17 @@ Packages are available in the AUR: [fcitx5-osk-git](https://aur.archlinux.org/pa
 
 * build
 ```bash
-cargo build --release
+cmake -B build -S .
+cmake --build build
 ```
 
 * install
 
 ```bash
-sudo mkdir -p /usr/local/share/applications
-sudo mkdir -p /usr/local/share/dbus-1/services
-sudo mkdir -p /usr/local/lib/systemd/system
-sudo mkdir -p /etc/dbus-1/system.d
-sudo cp target/release/fcitx5-osk /usr/local/bin/
-sudo cp target/release/fcitx5-osk-key-helper /usr/local/bin/
-sudo cp target/release/fcitx5-osk-kwin-launcher /usr/local/bin/
-sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service | sudo tee /usr/local/share/dbus-1/services/fyi.fortime.Fcitx5Osk.service
-sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/lib/systemd/system/fcitx5-osk-key-helper.service | sudo tee /usr/local/lib/systemd/system/fcitx5-osk-key-helper.service
-sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/applications/fcitx5-osk-kwin-launcher.desktop | sudo tee /usr/local/share/applications/fcitx5-osk-kwin-launcher.desktop
-sed 's/\/usr\/bin/\/usr\/local\/bin/g' pkg/share/applications/fyi.fortime.Fcitx5Osk.desktop | sudo tee /usr/local/share/applications/fyi.fortime.Fcitx5Osk.desktop
-# /usr/local/share/dbus-1/system.d is not a valid path.
-sudo cp pkg/share/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf /etc/dbus-1/system.d/fyi.fortime.Fcitx5OskKeyHelper.conf
-sudo cp -r pkg/share/fcitx5-osk /usr/local/share/
-sudo cp assets/icons/fcitx5-osk.svg /usr/share/icons/hicolor/scalable/apps/fyi.fortime.Fcitx5Osk.svg
+cmake --install build --component Fcitx5Osk
 
-sudo mkdir -p /etc/xdg/fcitx5-osk/themes
-ln -s /usr/local/share/fcitx5-osk/themes/breeze-light.toml /etc/xdg/fcitx5-osk/themes/breeze-light.toml
+# install kwin launcher
+cmake --install build --component Fcitx5OskKwinLauncher
 ```
 
 ## Usage
