@@ -422,7 +422,11 @@ where
     }
 
     pub fn appearance(&self, theme: &Theme, id: Id) -> WM::Appearance {
-        self.state.window_manager().appearance(theme, id)
+        let mut appearance = self.state.window_manager().appearance(theme, id);
+        if !self.visible {
+            appearance.set_background_color(Color::TRANSPARENT);
+        }
+        appearance
     }
 
     pub fn theme(&self, id: Id) -> Theme {
