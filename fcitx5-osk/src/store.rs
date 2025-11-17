@@ -86,8 +86,14 @@ impl Store {
             theme_names,
             themes,
             default_key_area_layouts: (
-                default_landscape_key_area_layout,
-                default_portrait_key_area_layout,
+                key_area_layouts
+                    .get(config.default_landscape_layout())
+                    .cloned()
+                    .unwrap_or(default_landscape_key_area_layout),
+                key_area_layouts
+                    .get(config.default_portrait_layout())
+                    .cloned()
+                    .unwrap_or(default_portrait_key_area_layout),
             ),
             key_area_layouts,
             default_key_set,
