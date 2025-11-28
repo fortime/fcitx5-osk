@@ -9,6 +9,7 @@ use strum::IntoEnumIterator;
 use crate::{
     app::Message,
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
+    dbus::server::ImPanelEvent,
     state::{ImEvent, StateExtractor, ThemeEvent, WindowManagerEvent},
     window::WindowManagerMode,
 };
@@ -252,6 +253,26 @@ impl TextDesc {
     }
 }
 
+pub struct BoolDesc {
+    cur_value: fn(&dyn StateExtractor) -> bool,
+    is_enabled: fn(&dyn StateExtractor) -> bool,
+    on_changed: fn(&dyn StateExtractor, bool) -> Message,
+}
+
+impl BoolDesc {
+    pub fn cur_value(&self, state: &dyn StateExtractor) -> bool {
+        (self.cur_value)(state)
+    }
+
+    pub fn is_enabled(&self, state: &dyn StateExtractor) -> bool {
+        (self.is_enabled)(state)
+    }
+
+    pub fn on_changed(&self, state: &dyn StateExtractor, value: bool) -> Message {
+        (self.on_changed)(state, value)
+    }
+}
+
 pub enum FieldType {
     StepU16(StepDesc<u16>),
     OwnedEnumPlacement(OwnedEnumDesc<Placement>),
@@ -259,6 +280,7 @@ pub enum FieldType {
     EnumString(EnumDesc<String>),
     DynamicEnumString(DynamicEnumDesc<String>),
     Text(TextDesc),
+    Bool(BoolDesc),
 }
 
 impl From<StepDesc<u16>> for FieldType {
@@ -294,6 +316,12 @@ impl From<DynamicEnumDesc<String>> for FieldType {
 impl From<TextDesc> for FieldType {
     fn from(value: TextDesc) -> Self {
         Self::Text(value)
+    }
+}
+
+impl From<BoolDesc> for FieldType {
+    fn from(value: BoolDesc) -> Self {
+        Self::Bool(value)
     }
 }
 
@@ -392,6 +420,16 @@ impl ConfigState {
                         on_selected: |_, d| {
                             Message::from(WindowManagerEvent::UpdateIndicatorDisplay(d))
                         },
+                    }
+                    .into(),
+                },
+                Field {
+                    name: "Manual Mode",
+                    id: "manual_mode",
+                    typ: BoolDesc {
+                        cur_value: |state| state.config().manual_mode(),
+                        is_enabled: |_state| true,
+                        on_changed: |_, v| Message::from(UpdateConfigEvent::ManualMode(v)),
                     }
                     .into(),
                 },
@@ -508,6 +546,11 @@ impl ConfigState {
                 set_preferred_output_name,
                 |v| Message::from(WindowManagerEvent::UpdatePreferredOutputName(v))
             },
+            @ManualMode => {
+                config_eq!(manual_mode),
+                set_manual_mode,
+                |v| Message::from(ImPanelEvent::UpdateManualMode(v))
+            },
             UpdateConfigEvent::ChangeTempText {key, init_value, value} => {
                 tracing::error!("Update temp_text[{key}] to {value}, init value[{init_value}]");
                 self.temp_texts.insert(key, (init_value, value));
@@ -613,6 +656,7 @@ pub enum UpdateConfigEvent {
         init_value: String,
         producer: fn(String) -> UpdateConfigEvent,
     },
+    ManualMode(bool),
 }
 
 impl From<UpdateConfigEvent> for Message {

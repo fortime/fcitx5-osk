@@ -145,6 +145,7 @@ impl KeyboardError {
 pub struct Keyboard<WM> {
     state: State<WM>,
     visible: bool,
+    manual_mode: bool,
     rx: RefCell<Option<UnboundedReceiver<Message>>>,
     socket_env_context: RefCell<(
         Option<std::sync::mpsc::Receiver<SocketEnv>>,
@@ -171,6 +172,7 @@ impl<WM> Keyboard<WM> {
         } else {
             (None, None)
         };
+        let manual_mode = config_manager.as_ref().manual_mode();
         let state = State::new(config_manager, wm, fcitx5_services, fcitx5_osk_services)?;
         let mut init_task = Task::future(init(tx, socket_env_tx, shutdown_flag.clone()));
         if !wait_for_socket {
@@ -182,6 +184,7 @@ impl<WM> Keyboard<WM> {
             Self {
                 state,
                 visible: true,
+                manual_mode,
                 rx: RefCell::new(Some(rx)),
                 socket_env_context: RefCell::new((socket_env_rx, None)),
                 error: None,
@@ -359,18 +362,22 @@ where
                 match event {
                     Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
                         self.visible = true;
-                        task = task.chain(self.state.window_manager_mut().open_keyboard());
+                        if !self.manual_mode {
+                            task = task.chain(self.state.window_manager_mut().open_keyboard());
+                        }
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard => {
                         // Always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated
                         self.state.keyboard_mut().set_fcitx5_hidden();
-                        // Close keyboard only when setting isn't shown
-                        if !self.state.window_manager().is_setting_shown() {
-                            task = task.chain(
-                                self.state
-                                    .window_manager_mut()
-                                    .close_keyboard(CloseOpSource::Fcitx5),
-                            );
+                        if !self.manual_mode {
+                            // Close keyboard only when setting isn't shown
+                            if !self.state.window_manager().is_setting_shown() {
+                                task = task.chain(
+                                    self.state
+                                        .window_manager_mut()
+                                        .close_keyboard(CloseOpSource::Fcitx5),
+                                );
+                            }
                         }
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(state) => {
@@ -381,21 +388,26 @@ where
             }
             Message::ImPanelEvent(event) => {
                 match event {
-                    ImPanelEvent::Show => {
+                    ImPanelEvent::Show(force) => {
                         self.visible = true;
-                        task = task.chain(self.state.window_manager_mut().open_keyboard());
+                        if force || !self.manual_mode {
+                            task = task.chain(self.state.window_manager_mut().open_keyboard());
+                        }
                     }
-                    ImPanelEvent::Hide => {
+                    ImPanelEvent::Hide(force) => {
                         // always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated.
                         self.state.keyboard_mut().set_fcitx5_hidden();
-                        // Unlike hiding request from Fcitx5, we always think that request from DbusController should be followed.
-                        task = task.chain(
-                            self.state
-                                .window_manager_mut()
-                                .close_keyboard(CloseOpSource::DbusController),
-                        );
+                        if force || !self.manual_mode {
+                            // Unlike hiding request from Fcitx5, we always think that request from DbusController should be followed.
+                            task = task.chain(
+                                self.state
+                                    .window_manager_mut()
+                                    .close_keyboard(CloseOpSource::DbusController),
+                            );
+                        }
                     }
                     ImPanelEvent::UpdateVisible(visible) => self.visible = visible,
+                    ImPanelEvent::UpdateManualMode(manual_mode) => self.manual_mode = manual_mode,
                     ImPanelEvent::ReopenIfOpened => {
                         if let Some(next_task) =
                             self.state.window_manager_mut().reopen_keyboard_if_opened()

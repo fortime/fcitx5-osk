@@ -22,8 +22,8 @@ mod layout;
 mod window;
 
 pub use config::{
-    ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc, TextDesc,
-    UpdateConfigEvent,
+    BoolDesc, ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc,
+    TextDesc, UpdateConfigEvent,
 };
 pub use im::{ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};

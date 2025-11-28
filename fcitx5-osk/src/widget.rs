@@ -94,7 +94,45 @@ mod scrollable {
     }
 }
 
+mod toggler {
+    use iced::{
+        widget::toggler::{self, Status, Style},
+        Theme,
+    };
+
+    /// Edited version of `iced::widget::toggler::default`
+    pub fn toggler_style(theme: &Theme, status: Status) -> Style {
+        let mut style = toggler::default(theme, status);
+        let palette = theme.extended_palette();
+        style.background = palette.background.weak.color;
+        style.background_border_color = palette.background.base.color;
+        style.background_border_width = 1.;
+        style.foreground = palette.background.base.color;
+        style.foreground_border_color = palette.background.strong.color;
+        style.foreground_border_width = 1.;
+        match status {
+            Status::Active { is_toggled } => {
+                if is_toggled {
+                    style.background = palette.primary.weak.color;
+                    style.background_border_color = palette.primary.strong.color;
+                }
+            }
+            Status::Hovered { is_toggled } => {
+                if is_toggled {
+                    style.background = palette.primary.weak.color;
+                    style.background_border_color = palette.primary.strong.color;
+                }
+                style.foreground_border_color = palette.primary.strong.color;
+                style.foreground_border_width = 1.;
+            }
+            Status::Disabled => {}
+        }
+        style
+    }
+}
+
 pub use key::{Key, KeyEvent, PopupKey};
 pub use movable::Movable;
 pub use scrollable::scrollable_style;
 pub use toggle::{Toggle, ToggleCondition};
+pub use toggler::toggler_style;

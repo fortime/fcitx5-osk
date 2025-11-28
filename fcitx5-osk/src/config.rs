@@ -104,6 +104,11 @@ pub struct Config {
     #[serde(with = "humantime_serde", default = "default_hide_delay")]
     hide_delay: Duration,
 
+    /// Show or hide only by the user.
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    manual_mode: bool,
+
     /// Override the builtin landscape layout globally.
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]

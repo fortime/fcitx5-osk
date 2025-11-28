@@ -35,7 +35,11 @@ struct Args {
 
     /// Send a dbus message to show the virtual keyboard.
     #[arg(long, default_missing_value = "true")]
-    show: bool,
+    force_show: bool,
+
+    /// Send a dbus message to change the value of manual mode.
+    #[arg(long)]
+    manual_mode: Option<bool>,
 
     /// Force the program running on wayland.
     #[arg(long, default_missing_value = "true")]
@@ -99,8 +103,11 @@ fn run(args: Args) -> Result<()> {
         config_manager.as_ref().log_timestamp().unwrap_or(false),
     )?;
 
-    if args.show {
-        return async_run(show_keyboard);
+    if args.force_show {
+        return async_run(force_show_keyboard);
+    }
+    if let Some(manual_mode) = args.manual_mode {
+        return async_run(async || change_manual_mode(manual_mode).await);
     }
 
     load_external_fonts(config_manager.as_ref())?;
@@ -169,10 +176,16 @@ fn run(args: Args) -> Result<()> {
     }
 }
 
-async fn show_keyboard() -> Result<()> {
+async fn force_show_keyboard() -> Result<()> {
     let connection = Connection::session().await?;
     let controller = Fcitx5OskControllerServiceProxy::new(&connection).await?;
-    Ok(controller.show().await?)
+    Ok(controller.force_show().await?)
+}
+
+async fn change_manual_mode(manual_mode: bool) -> Result<()> {
+    let connection = Connection::session().await?;
+    let controller = Fcitx5OskControllerServiceProxy::new(&connection).await?;
+    Ok(controller.change_manual_mode(manual_mode).await?)
 }
 
 fn async_run<F>(f: F) -> Result<()>

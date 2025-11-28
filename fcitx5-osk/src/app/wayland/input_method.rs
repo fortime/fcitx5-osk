@@ -322,9 +322,9 @@ mod v1 {
                     if let Some(old) = old {
                         old.destroy();
                     }
-                    state
-                        .tx
-                        .unbounded_send(WaylandMessage::from(Message::from(ImPanelEvent::Show)))
+                    state.tx.unbounded_send(WaylandMessage::from(Message::from(
+                        ImPanelEvent::Show(false),
+                    )))
                 }
                 ZwpInputMethodV1Event::Deactivate { context } => {
                     tracing::debug!("wayland input method v1 deactivate");

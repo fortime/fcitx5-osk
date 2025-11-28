@@ -34,10 +34,19 @@ pub mod client {
     )]
     pub trait Fcitx5OskControllerService {
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        fn force_show(&self) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn show(&self) -> ZbusResult<()>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        fn force_hide(&self) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn hide(&self) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        fn change_manual_mode(&self, manual_mode: bool) -> ZbusResult<()>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn change_visible(&self, visible: bool) -> ZbusResult<()>;

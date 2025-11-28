@@ -247,8 +247,9 @@ async fn watch_kwin_virtual_keyboard(
                         // show and hide will cause visible changed signal, so we remove
                         // previous one in case it enters a infinite loop.
                         visible_changes.clear();
-                        fcitx5_osk_services.controller().hide().await?;
-                        fcitx5_osk_services.controller().show().await?;
+                        // ignore manual mode
+                        fcitx5_osk_services.controller().force_hide().await?;
+                        fcitx5_osk_services.controller().force_show().await?;
                         continue;
                     }
                 }

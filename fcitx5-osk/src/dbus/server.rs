@@ -11,7 +11,7 @@ use zbus::{fdo::Error, Connection};
 
 use crate::{
     app::Message,
-    state::{ImEvent, WindowManagerEvent},
+    state::{ImEvent, UpdateConfigEvent, WindowManagerEvent},
     window::WindowManagerMode,
 };
 
@@ -222,13 +222,28 @@ impl Fcitx5OskService {
 #[zbus::interface(name = "fyi.fortime.Fcitx5Osk.Controller1")]
 impl Fcitx5OskService {
     #[instrument(level = "debug", skip(self), err, ret)]
+    async fn force_show(&self) -> Result<(), Error> {
+        self.send(ImPanelEvent::Show(true))
+    }
+
+    #[instrument(level = "debug", skip(self), err, ret)]
     async fn show(&self) -> Result<(), Error> {
-        self.send(ImPanelEvent::Show)
+        self.send(ImPanelEvent::Show(false))
+    }
+
+    #[instrument(level = "debug", skip(self), err, ret)]
+    async fn force_hide(&self) -> Result<(), Error> {
+        self.send(ImPanelEvent::Hide(true))
     }
 
     #[instrument(level = "debug", skip(self), err, ret)]
     async fn hide(&self) -> Result<(), Error> {
-        self.send(ImPanelEvent::Hide)
+        self.send(ImPanelEvent::Hide(false))
+    }
+
+    #[instrument(level = "debug", skip(self), err, ret)]
+    async fn change_manual_mode(&self, manual_mode: bool) -> Result<(), Error> {
+        self.send(UpdateConfigEvent::ManualMode(manual_mode))
     }
 
     /// Unlike show/hide, setting visible to false will cause the program generating a transparent
@@ -312,10 +327,11 @@ impl Fcitx5OskService {
 
 #[derive(Clone, Debug)]
 pub enum ImPanelEvent {
-    Show,
-    Hide,
+    Show(bool),
+    Hide(bool),
     UpdateVisible(bool),
     ReopenIfOpened,
+    UpdateManualMode(bool),
 }
 
 impl From<ImPanelEvent> for Message {
