@@ -54,6 +54,8 @@ wayland-protocols-wlr = { version = "0.3.5", default-features = false, features 
 tempfile = "3.20.0"
 evdev = { version = "0.13.1", features = ["tokio"] }
 rand = "0.9.1"
+cvt = "0.1.2"
+libc = "0.2.172"
 
 [patch.crates-io]
 iced_layershell = { git = "https://github.com/fortime/exwlshelleventloop.git", rev = "4b0b981826" }
