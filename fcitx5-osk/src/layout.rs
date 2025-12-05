@@ -517,7 +517,7 @@ impl ToolbarLayout {
             }
             IndicatorDisplay::AlwaysOff => {
                 if state.window_manager_mode() == WindowManagerMode::KwinLockScreen {
-                    Some(ImPanelEvent::UpdateVisible(true).into())
+                    Some(ImPanelEvent::NewVisibleRequest(false).into())
                 } else {
                     Some(WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into())
                 }

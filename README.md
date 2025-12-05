@@ -114,7 +114,7 @@ CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --loc
 A key event from a keyboard of evdev will make `fcitx5` to hide a virtual keyboard. If the indicator is set to be `AlwaysOff`, and you want to open the keyboard. You can use this command.
 
 ```bash
-fcitx5-osk --show
+fcitx5-osk force-show
 ```
 
 Or you can click "Fcitx 5 Osk" in the application menu directly. You can add a quick launcher in the panel too.

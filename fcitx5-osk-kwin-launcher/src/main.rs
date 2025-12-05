@@ -1,5 +1,4 @@
 use std::{
-    collections::VecDeque,
     env,
     os::fd::{FromRawFd, OwnedFd},
     process,
@@ -7,7 +6,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use anyhow::Result;
@@ -17,7 +16,7 @@ use fcitx5_osk_common::{
     dbus::{self as common_dbus, client::Fcitx5OskServices, entity::WindowManagerMode},
     signal::ShutdownFlag,
 };
-use futures_util::StreamExt;
+use futures_util::{FutureExt as _, StreamExt};
 use tokio::process::Command;
 use zbus::{
     fdo::{DBusProxy, Result as ZbusFdoResult},
@@ -222,44 +221,53 @@ async fn watch_kwin_virtual_keyboard(
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    // in lockscreen, if the keyboard is set hidden, then trigger a hide-and-show of the keyboard to reset the input panel surface.
     if in_lockscreen {
-        const TIMEOUT: Duration = Duration::from_secs(4);
-        const MAX_AMOUNT: usize = 5;
-        let mut visible_changes = VecDeque::with_capacity(MAX_AMOUNT);
-        let mut last_visible = true;
-        let mut stream = kwin_services
+        // Make sure the input method window is created, so the `VirtualKeyboard` button works
+        fcitx5_osk_services.controller().force_show().await?;
+        let mut last_visible_request_id = None;
+        let mut last_visible = false;
+        let mut visible_request_stream = fcitx5_osk_services
+            .controller()
+            .receive_visible_request_changed()
+            .await;
+        let mut visible_changed_stream = kwin_services
             .virtual_keyboard()
             .receive_visible_changed()
             .await?;
-        while stream.next().await.is_some() {
-            let visible = kwin_services.virtual_keyboard().visible().await?;
-            tracing::debug!("kwin virtual keyboard visible: {visible}");
-            let now = Instant::now();
-            visible_changes.push_back(now);
-            while visible_changes.len() >= MAX_AMOUNT {
-                // In some cases, keyboard will be lost for ever in lockscreen. in these
-                // cases, we should replace the input panel surface to let the keyboard
-                // show again. If the user clicks the virtual keyboard button more than n
-                // times during m seconds, we will replace the surface.
-                if let Some(oldest) = visible_changes.pop_front() {
-                    if now.saturating_duration_since(oldest) < TIMEOUT {
-                        // show and hide will cause visible changed signal, so we remove
-                        // previous one in case it enters a infinite loop.
-                        visible_changes.clear();
-                        // ignore manual mode
-                        fcitx5_osk_services.controller().force_hide().await?;
-                        fcitx5_osk_services.controller().force_show().await?;
+        let mut visible_changed_future = visible_changed_stream.next().fuse();
+        let mut visible_request_future = visible_request_stream.next().fuse();
+        loop {
+            let visible;
+            futures_util::select! {
+                visible_changed_res = visible_changed_future => {
+                    visible_changed_future = visible_changed_stream.next().fuse();
+                    if visible_changed_res.is_some() {
+                        visible = kwin_services.virtual_keyboard().visible().await?;
+                        tracing::debug!("kwin virtual keyboard visible: {visible}");
+                    } else {
                         continue;
                     }
-                }
+                },
+                visible_request_res = visible_request_future => {
+                    visible_request_future = visible_request_stream.next().fuse();
+                    if let Some(changed) = visible_request_res {
+                        let req = changed.get().await?;
+                        let req_id = req.0;
+                        visible = req.1;
+                        tracing::debug!("fcitx5-osk visible request: ({req_id}, {visible})");
+                        if last_visible_request_id == Some(req_id) {
+                            // Ignore if the id is the same
+                            continue;
+                        }
+                        last_visible_request_id = Some(req_id);
+                    } else {
+                        continue;
+                    }
+                },
             }
-            if visible != last_visible {
-                // only run if visible is different from the last one.
-                fcitx5_osk_services
-                    .controller()
-                    .change_visible(visible)
-                    .await?;
+            if visible != last_visible && !visible {
+                // Destroy current surface and create a new one
+                fcitx5_osk_services.controller().reopen_if_opened().await?;
             }
             last_visible = visible;
         }
@@ -278,7 +286,10 @@ async fn watch_kwin_virtual_keyboard(
             // check tablet mode, show only if it is in tablet mode.
             tracing::debug!("kwin virtual keyboard active: {active}, tablet_mode_check: {tablet_mode_check}, tablet mode: {tablet_mode}");
             if active && tablet_mode {
-                fcitx5_osk_services.controller().show().await?;
+                if let Err(e) = fcitx5_osk_services.controller().show().await {
+                    // allow error
+                    tracing::error!("Unable to call `show` of fcitx5 osk: {e:#?}");
+                }
             }
         }
     }
@@ -354,7 +365,7 @@ async fn run(args: &Args) -> Result<()> {
             )
             .await
             {
-                tracing::error!("watch_fcitx5_osk exits abnormally: {e:?}");
+                tracing::error!("watch_fcitx5_osk exits abnormally: {e:#?}");
             } else {
                 tracing::info!("watch_fcitx5_osk exits");
             }
@@ -388,21 +399,21 @@ async fn run(args: &Args) -> Result<()> {
             }
         } => {
             if let Err(e) = res {
-                tracing::error!("watch_fcitx5 exits abnormally: {e:?}");
+                tracing::error!("watch_fcitx5 exits abnormally: {e:#?}");
             } else {
                 tracing::info!("watch_fcitx5 exits");
             }
         }
         res = watch_lockscreen_state(&fdo_services, lockscreen_active) => {
             if let Err(e) = res {
-                tracing::error!("watch_lockscreen_state exits abnormally: {e:?}");
+                tracing::error!("watch_lockscreen_state exits abnormally: {e:#?}");
             } else {
                 tracing::info!("the state of lockscreen is changed");
             }
         }
         res = watch_kwin_virtual_keyboard(&services, &kwin_services, lockscreen_active, tablet_mode_check) => {
             if let Err(e) = res {
-                tracing::error!("watch_kwin_virtual_keyboard exits abnormally: {e:?}");
+                tracing::error!("watch_kwin_virtual_keyboard exits abnormally: {e:#?}");
             } else {
                 tracing::info!("watch_kwin_virtual_keyboard exits");
             }
@@ -456,7 +467,7 @@ async fn daemon() -> Result<()> {
                     tracing::warn!("worker exit with code: {code}");
                 },
                 Err(e) => {
-                    tracing::warn!("failed to worker to exit: {e:?}");
+                    tracing::warn!("failed to worker to exit: {e:#?}");
                 }
             }
         }
@@ -511,7 +522,7 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
             if let Err(e) =
                 watch_fcitx5_osk(&connection, socket, wayland_display, shutdown_flag.clone()).await
             {
-                tracing::error!("watch_fcitx5_osk exits abnormally: {e:?}");
+                tracing::error!("watch_fcitx5_osk exits abnormally: {e:#?}");
             } else {
                 tracing::info!("watch_fcitx5_osk exits");
             }
@@ -526,7 +537,7 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
     tokio::select! {
         res = watch_kwin_virtual_keyboard(&services, &kwin_services, true, true) => {
             if let Err(e) = res {
-                tracing::error!("watch_kwin_virtual_keyboard exits abnormally: {e:?}");
+                tracing::error!("watch_kwin_virtual_keyboard exits abnormally: {e:#?}");
             } else {
                 tracing::info!("watch_kwin_virtual_keyboard exits");
             }
@@ -572,7 +583,7 @@ pub async fn main() {
         daemon().await
     };
     if let Err(e) = res {
-        eprintln!("worker[{}] run command failed: {e:?}", args.worker);
+        eprintln!("worker[{}] run command failed: {e:#?}", args.worker);
         process::exit(1);
     }
 }

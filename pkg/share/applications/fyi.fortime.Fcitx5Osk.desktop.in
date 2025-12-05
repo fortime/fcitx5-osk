@@ -2,7 +2,7 @@
 Name=Fcitx 5 Osk
 GenericName=Input Method
 Comment=Show Fcitx 5 Osk
-Exec=@INSTALL_BIN_DIR@/fcitx5-osk --force-show
+Exec=@INSTALL_BIN_DIR@/fcitx5-osk force-show
 Icon=fyi.fortime.Fcitx5Osk
 Terminal=false
 Type=Application

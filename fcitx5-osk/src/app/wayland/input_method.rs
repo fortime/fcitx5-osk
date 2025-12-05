@@ -323,7 +323,7 @@ mod v1 {
                         old.destroy();
                     }
                     state.tx.unbounded_send(WaylandMessage::from(Message::from(
-                        ImPanelEvent::Show(false),
+                        ImPanelEvent::Show(true),
                     )))
                 }
                 ZwpInputMethodV1Event::Deactivate { context } => {
@@ -333,6 +333,8 @@ mod v1 {
                         guard.take();
                     }
                     context.destroy();
+                    // TODO it actually should hide itself, but we use `hide`,
+                    // there is no way to show itself again, because we destroy the window.
                     //state.tx.unbounded_send(
                     //    Message::from(ImPanelEvent::Hide)
                     //        .into(),

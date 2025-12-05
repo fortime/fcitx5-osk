@@ -2,12 +2,11 @@ use std::future::Future;
 
 use anyhow::Result;
 use dark_light::Mode;
-use fcitx5_osk_common::dbus::client::Fcitx5OskServices;
 use getset::{Getters, MutGetters};
 use iced::{window::Id, Element, Task, Theme, Vector};
 
 use crate::{
-    app::{self, MapTask, Message},
+    app::{self, error_with_context, MapTask, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
     dbus::client::Fcitx5Services,
     layout::ToElementCommonParams,
@@ -46,14 +45,9 @@ pub struct State<WM> {
 }
 
 impl<WM> State<WM> {
-    pub fn new(
-        config_manager: ConfigManager,
-        wm: WM,
-        fcitx5_services: Fcitx5Services,
-        fcitx5_osk_services: Fcitx5OskServices,
-    ) -> Result<Self> {
+    pub fn new(config_manager: ConfigManager, wm: WM, fcitx5_services: Fcitx5Services) -> Self {
         let config = config_manager.as_ref();
-        let store = Store::new(config)?;
+        let store = Store::new();
         let portrait = false;
         // key_area_layout will be updated when cur_im is updated.
         let key_area_layout = store.key_area_layout_by_im("", portrait);
@@ -71,15 +65,14 @@ impl<WM> State<WM> {
                 portrait,
                 key_area_layout,
                 fcitx5_services,
-                fcitx5_osk_services,
-            )?,
+            ),
             theme: Default::default(),
             theme_detecting: false,
             config: ConfigState::new(config_manager),
             store,
         };
         state.sync_theme(None);
-        Ok(state)
+        state
     }
 
     fn is_auto_theme(&self) -> bool {
@@ -186,6 +179,8 @@ where
         if task.is_some() {
             self.keyboard
                 .update_key_area_layout(&key_area_layout, &self.store);
+            self.window_manager
+                .update_candidate_font(self.store.font_by_im(im_name));
         }
         task
     }
@@ -197,8 +192,6 @@ where
         }
         if let Some(task) = self.update_layout_by_im(Some(im_name)) {
             self.im.update_cur_im(im_name);
-            self.window_manager
-                .update_candidate_font(self.store.font_by_im(im_name));
             task
         } else {
             Message::from_nothing()
@@ -232,6 +225,24 @@ where
             task
         } else {
             Message::from_nothing()
+        }
+    }
+
+    pub fn on_store_event(&mut self, event: StoreEvent) -> Task<WM::Message> {
+        match event {
+            StoreEvent::Load => match Store::load(self.config.config()) {
+                Ok(s) => {
+                    self.store = s;
+                    // Update theme after store is changed
+                    self.sync_theme(None);
+                    // Update layout by cur im after store is changed
+                    self.update_layout_by_im(None)
+                        .unwrap_or_else(Message::from_nothing)
+                }
+                Err(e) => {
+                    Task::done(error_with_context(e, "Unable to load `Store` from config").into())
+                }
+            },
         }
     }
 }
@@ -360,6 +371,17 @@ pub enum ThemeEvent {
 impl From<ThemeEvent> for Message {
     fn from(value: ThemeEvent) -> Self {
         Self::ThemeEvent(value)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum StoreEvent {
+    Load,
+}
+
+impl From<StoreEvent> for Message {
+    fn from(value: StoreEvent) -> Self {
+        Self::StoreEvent(value)
     }
 }
 

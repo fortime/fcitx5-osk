@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::{Context as _, Result};
 use app::Message;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use config::{Config, ConfigManager};
 use fcitx5_osk_common::dbus::client::Fcitx5OskControllerServiceProxy;
 use iced::Task;
@@ -29,13 +29,28 @@ mod window;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Start a virtual keyboard.
+    Keyboard(KeyboardArgs),
+    /// Removes an existing item.
+    ForceShow,
+    /// Get the value of a property.
+    GetProperty { name: String },
+    /// Set the value of a property.
+    SetProperty { name: String, value: String },
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct KeyboardArgs {
     /// The path of config file.
     #[arg(short, long, value_name = "PATH")]
     config: Option<PathBuf>,
-
-    /// Send a dbus message to show the virtual keyboard.
-    #[arg(long, default_missing_value = "true")]
-    force_show: bool,
 
     /// Send a dbus message to change the value of manual mode.
     #[arg(long)]
@@ -77,38 +92,64 @@ fn load_external_fonts(config: &Config) -> Result<()> {
 }
 
 fn run(args: Args) -> Result<()> {
+    let config_path = match &args.command {
+        Command::Keyboard(keyboard_args) => keyboard_args.config.as_ref(),
+        _ => None,
+    };
+
     let config_path = if let Ok(path) = env::var("FCITX5_OSK_CONFIG") {
-        Path::new(&path).to_path_buf()
-    } else if let Some(path) = &args.config {
-        path.clone()
+        Some(Path::new(&path).to_path_buf())
+    } else if let Some(path) = config_path {
+        Some(path.clone())
     } else {
-        let mut buf = if let Ok(config_home_path) = env::var("XDG_CONFIG_HOME") {
-            PathBuf::from(config_home_path)
+        let buf = if let Ok(config_home_path) = env::var("XDG_CONFIG_HOME") {
+            Some(PathBuf::from(config_home_path))
         } else if let Ok(home_path) = env::var("HOME") {
             let mut buf = PathBuf::from(home_path);
             buf.push(".config");
-            buf
+            Some(buf)
         } else {
-            anyhow::bail!(
-                "can't get the path of config file, specify it by -c or FCITX5_OSK_CONFIG"
-            );
+            eprintln!("can't get the path of config file, specify it by -c or FCITX5_OSK_CONFIG");
+            None
         };
-        buf.push("fcitx5-osk/config.toml");
-        buf
+        buf.map(|mut b| {
+            b.push("fcitx5-osk/config.toml");
+            b
+        })
     };
-    let (config_manager, config_write_bg) = ConfigManager::new(&config_path)?;
+    let (config_manager, config_write_bg) = match ConfigManager::new(config_path.as_ref()) {
+        Ok(r) => r,
+        Err(e) => {
+            if config_path.is_none() {
+                // It shouldn't happen, default config should be able to built.
+                return Err(e);
+            } else {
+                eprintln!(
+                    "Unable to parse config file[{:?}]: {e:#?}, try to use default config",
+                    config_path
+                );
+                ConfigManager::new(None)?
+            }
+        }
+    };
 
     let _log_guard = fcitx5_osk_common::log::init_log(
         config_manager.as_ref().log_directives(),
         config_manager.as_ref().log_timestamp().unwrap_or(false),
     )?;
 
-    if args.force_show {
-        return async_run(force_show_keyboard);
-    }
-    if let Some(manual_mode) = args.manual_mode {
-        return async_run(async || change_manual_mode(manual_mode).await);
-    }
+    let keyboard_args = match args.command {
+        Command::Keyboard(keyboard_args) => keyboard_args,
+        Command::ForceShow => {
+            return async_run(force_show_keyboard);
+        }
+        Command::GetProperty { name } => {
+            return async_run(async move || get_property(name).await);
+        }
+        Command::SetProperty { name, value } => {
+            return async_run(async move || set_property(name, value).await);
+        }
+    };
 
     load_external_fonts(config_manager.as_ref())?;
 
@@ -122,15 +163,15 @@ fn run(args: Args) -> Result<()> {
         Message::Nothing
     });
 
-    if args.force_wayland || (!args.force_x11 && wayland::is_available()) {
+    if keyboard_args.force_wayland || (!keyboard_args.force_x11 && wayland::is_available()) {
         let handle = thread::spawn({
             let shutdown_flag = shutdown_flag.clone();
             move || {
                 let res = app::wayland::start(
                     config_manager,
                     init_task,
-                    args.wait_for_socket,
-                    args.modifier_workaround,
+                    keyboard_args.wait_for_socket,
+                    keyboard_args.modifier_workaround,
                     shutdown_flag.clone(),
                 );
                 // make sure shutdown
@@ -155,8 +196,8 @@ fn run(args: Args) -> Result<()> {
             Ok(res) => res,
             Err(e) => anyhow::bail!("join error: {e:?}"),
         }
-    } else if args.force_x11 || x11::is_available() {
-        if args.force_x11 {
+    } else if keyboard_args.force_x11 || x11::is_available() {
+        if keyboard_args.force_x11 {
             // unset wayland env, otherwise, winit will use wayland to open windows.
             unsafe {
                 // Safety, currently there is no other thread running, except console_subscriber.
@@ -167,8 +208,8 @@ fn run(args: Args) -> Result<()> {
         app::x11::start(
             config_manager,
             init_task,
-            args.wait_for_socket,
-            args.modifier_workaround,
+            keyboard_args.wait_for_socket,
+            keyboard_args.modifier_workaround,
             shutdown_flag.clone(),
         )
     } else {
@@ -182,15 +223,36 @@ async fn force_show_keyboard() -> Result<()> {
     Ok(controller.force_show().await?)
 }
 
-async fn change_manual_mode(manual_mode: bool) -> Result<()> {
+async fn get_property(name: String) -> Result<()> {
     let connection = Connection::session().await?;
     let controller = Fcitx5OskControllerServiceProxy::new(&connection).await?;
-    Ok(controller.change_manual_mode(manual_mode).await?)
+    let value = match name.as_str() {
+        "manual_mode" => controller.manual_mode().await?.to_string(),
+        _ => {
+            anyhow::bail!(format!("Unknow property: {name}"));
+        }
+    };
+    println!("{value}");
+    Ok(())
+}
+
+async fn set_property(name: String, value: String) -> Result<()> {
+    let connection = Connection::session().await?;
+    let controller = Fcitx5OskControllerServiceProxy::new(&connection).await?;
+    match name.as_str() {
+        "manual_mode" => {
+            controller.change_manual_mode(value.parse()?).await?;
+        }
+        _ => {
+            anyhow::bail!(format!("Unknow property: {name}"));
+        }
+    }
+    Ok(())
 }
 
 fn async_run<F>(f: F) -> Result<()>
 where
-    F: AsyncFn() -> Result<()>,
+    F: AsyncFnOnce() -> Result<()>,
 {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

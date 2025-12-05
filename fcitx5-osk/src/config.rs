@@ -182,25 +182,26 @@ fn default_modifier_workaround_keycodes() -> Vec<u16> {
 }
 
 pub struct ConfigManager {
-    _path: PathBuf,
+    _path: Option<PathBuf>,
     config: Config,
     writer: UnboundedSender<String>,
 }
 
 impl ConfigManager {
-    pub fn new(path: &PathBuf) -> Result<(Self, impl Future<Output = ()> + 'static + Send + Sync)> {
-        let config = if path.exists() {
-            Figment::new().merge(Toml::file(path)).extract()?
-        } else {
-            Figment::new().extract()?
+    pub fn new(
+        path: Option<&PathBuf>,
+    ) -> Result<(Self, impl Future<Output = ()> + 'static + Send + Sync)> {
+        let config = match path {
+            Some(path) if path.exists() => Figment::new().merge(Toml::file(path)).extract()?,
+            _ => Figment::new().extract()?,
         };
         let (tx, mut rx) = mpsc::unbounded();
         let res = Self {
-            _path: path.clone(),
+            _path: path.cloned(),
             config,
             writer: tx,
         };
-        let path = path.clone();
+        let path = path.cloned();
         let bg = async move {
             while let Some(mut latest) = rx.next().await {
                 let closed = loop {
@@ -213,16 +214,18 @@ impl ConfigManager {
                     }
                 };
 
-                if let Some(parent) = path.parent() {
-                    if !parent.exists() {
-                        if let Err(e) = fs::create_dir_all(parent).await {
-                            tracing::error!("writing {parent:?} failed: {e}");
+                if let Some(path) = path.as_ref() {
+                    if let Some(parent) = path.parent() {
+                        if !parent.exists() {
+                            if let Err(e) = fs::create_dir_all(parent).await {
+                                tracing::error!("writing {parent:?} failed: {e}");
+                            }
                         }
                     }
-                }
 
-                if let Err(e) = fs::write(&path, latest).await {
-                    tracing::error!("writing {path:?} failed: {e}");
+                    if let Err(e) = fs::write(&path, latest).await {
+                        tracing::error!("writing {path:?} failed: {e}");
+                    }
                 }
 
                 if closed {

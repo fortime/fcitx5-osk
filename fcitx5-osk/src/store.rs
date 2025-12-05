@@ -43,7 +43,43 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn new(config: &Config) -> Result<Self> {
+    pub fn new() -> Self {
+        let themes: HashMap<String, IcedTheme> = IcedTheme::ALL
+            .iter()
+            .filter(|t| BUILTIN_ICED_THEMES.iter().any(|bt| bt == &t.to_string()))
+            .map(|t| (t.to_string(), t.clone()))
+            .collect();
+        let mut theme_names = themes.values().map(|t| t.to_string()).collect::<Vec<_>>();
+        theme_names.sort_unstable();
+        theme_names.insert(0, "Auto".to_string());
+        let default_landscape_key_area_layout = Rc::new(
+            init_default(default_value::DEFAULT_LANDSCAPE_KEY_AREA_LAYOUT_TOML)
+                .expect("Unable to load default_landscape_key_area_layout"),
+        );
+        let default_portrait_key_area_layout = Rc::new(
+            init_default(default_value::DEFAULT_PORTRAIT_KEY_AREA_LAYOUT_TOML)
+                .expect("Unable to load default_portrait_key_area_layout"),
+        );
+        let default_key_set = Rc::new(
+            init_default(default_value::DEFAULT_KEY_SET_TOML)
+                .expect("Unable to load default_key_set"),
+        );
+        Self {
+            theme_names,
+            themes,
+            default_key_area_layouts: (
+                default_landscape_key_area_layout,
+                default_portrait_key_area_layout,
+            ),
+            key_area_layouts: Default::default(),
+            default_key_set,
+            key_sets: Default::default(),
+            im_layout_mapping: Default::default(),
+            im_font_mapping: Default::default(),
+        }
+    }
+
+    pub fn load(config: &Config) -> Result<Self> {
         let mut themes: HashMap<String, IcedTheme> = IcedTheme::ALL
             .iter()
             .filter(|t| BUILTIN_ICED_THEMES.iter().any(|bt| bt == &t.to_string()))
