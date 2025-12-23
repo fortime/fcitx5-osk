@@ -34,6 +34,10 @@ pub mod client {
         fn active_changed(&self);
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        #[zbus(property, name = "active")]
+        fn set_active(&self, value: bool) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         #[zbus(property(emits_changed_signal = "false"), name = "visible")]
         fn visible(&self) -> ZbusResult<bool>;
 

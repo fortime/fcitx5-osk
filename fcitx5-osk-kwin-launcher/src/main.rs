@@ -222,8 +222,10 @@ async fn watch_kwin_virtual_keyboard(
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     if in_lockscreen {
-        // Make sure the input method window is created, so the `VirtualKeyboard` button works
-        fcitx5_osk_services.controller().force_show().await?;
+        // The keyboard will be open through activate signal of wayland input-method, there is no
+        // need to open it manually. Otherwise, the state of kwin virtual keyboard in lockscreen
+        // will be wrong (The virtual keyboard won't block auto hide of lockscreen).
+        // fcitx5_osk_services.controller().force_show().await?;
         let mut last_visible_request_id = None;
         let mut last_visible = false;
         let mut visible_request_stream = fcitx5_osk_services
@@ -266,8 +268,8 @@ async fn watch_kwin_virtual_keyboard(
                 },
             }
             if visible != last_visible && !visible {
-                // Destroy current surface and create a new one
-                fcitx5_osk_services.controller().reopen_if_opened().await?;
+                // Deactivate the input method, so the virtual keyboard will be closed.
+                kwin_services.virtual_keyboard().set_active(false).await?;
             }
             last_visible = visible;
         }
