@@ -335,10 +335,9 @@ mod v1 {
                     context.destroy();
                     // Hide the window. In Kwin, if the virtual keyboard button is clicked in
                     // kscreenlock, a activate signal will be sent, the window will show again.
-                    state.tx.unbounded_send(
-                        Message::from(ImPanelEvent::Hide(true))
-                            .into(),
-                    )
+                    state
+                        .tx
+                        .unbounded_send(Message::from(ImPanelEvent::Hide(true)).into())
                 }
                 _ => Ok(()),
             };
