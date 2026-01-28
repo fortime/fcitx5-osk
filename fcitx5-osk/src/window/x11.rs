@@ -79,7 +79,7 @@ impl X11WindowManager {
     {
         Self {
             settings: Default::default(),
-            screen_size: Default::default(),
+            screen_size: Size::new(1024., 768.),
             x11_state: Default::default(),
             connection_supplier: Box::new(connection_supplier),
             output_context,
