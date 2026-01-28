@@ -12,7 +12,6 @@ fcitx5-osk-common.workspace = true
 
 anyhow.workspace = true
 clap.workspace = true
-dark-light.workspace = true
 figment.workspace = true
 getset.workspace = true
 iced.workspace = true

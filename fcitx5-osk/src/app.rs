@@ -2,7 +2,10 @@ use std::{
     cell::RefCell,
     future::{self, Future},
     os::fd::{AsRawFd, OwnedFd},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -27,7 +30,7 @@ use zbus::Connection;
 use crate::{
     config::{Config, ConfigManager},
     dbus::{
-        client::Fcitx5Services,
+        client::{Fcitx5Services, FdoPortalSettingsServiceProxy},
         server::{
             Fcitx5OskService, Fcitx5OskServiceClient, Fcitx5VirtualkeyboardImPanelEvent,
             Fcitx5VirtualkeyboardImPanelService, ImPanelEvent, SocketEnv,
@@ -152,6 +155,7 @@ pub struct AsyncAppState {
     fcitx5_osk_service_client: Fcitx5OskServiceClient,
     rx: RefCell<Option<UnboundedReceiver<Message>>>,
     display_socket: Option<OwnedFd>,
+    detect_theme_enabled: Arc<AtomicBool>,
 }
 
 impl AsyncAppState {
@@ -192,12 +196,18 @@ impl AsyncAppState {
             config.modifier_workaround_keycodes().clone(),
         )
         .await?;
-        tokio::spawn(start_detect_theme(tx, shutdown_flag.clone()));
+        let detect_theme_enabled = Arc::new(AtomicBool::new(false));
+        tokio::spawn(detect_theme(
+            tx,
+            shutdown_flag,
+            detect_theme_enabled.clone(),
+        ));
         Ok(Self {
             fcitx5_services,
             fcitx5_osk_service_client,
             rx: RefCell::new(Some(rx)),
             display_socket,
+            detect_theme_enabled,
         })
     }
 }
@@ -227,10 +237,11 @@ impl<WM> Keyboard<WM> {
             fcitx5_osk_service_client,
             rx,
             display_socket,
+            detect_theme_enabled,
         } = async_state;
 
         fcitx5_osk_service_client.set_manual_mode(config_manager.as_ref().manual_mode());
-        let state = State::new(config_manager, wm, fcitx5_services);
+        let state = State::new(config_manager, wm, fcitx5_services, detect_theme_enabled);
         let mut init_task = Task::done(StoreEvent::Load.into());
         if !wait_for_socket {
             // open indicator if it is not waiting for a socket.
@@ -395,7 +406,7 @@ where
                 task = task.chain(self.state.on_store_event(event));
             }
             Message::ThemeEvent(event) => {
-                task = task.chain(self.state.on_theme_event(event).map_task());
+                self.state.on_theme_event(event);
             }
             Message::UpdateConfigEvent(event) => {
                 task = task.chain(self.state.on_update_config_event(event));
@@ -526,11 +537,62 @@ fn modal<'a>(
     .into()
 }
 
-async fn start_detect_theme(tx: UnboundedSender<Message>, shutdown_flag: ShutdownFlag) {
-    while !shutdown_flag.get() {
-        if tx.unbounded_send(ThemeEvent::Detect.into()).is_err() {
-            tracing::warn!("failed to send ThemeEvent::Check message, close the task");
-            break;
+async fn detect_theme(
+    tx: UnboundedSender<Message>,
+    shutdown_flag: ShutdownFlag,
+    detect_theme_enabled: Arc<AtomicBool>,
+) {
+    async fn service() -> Result<(Connection, FdoPortalSettingsServiceProxy<'static>)> {
+        let connection = Connection::session().await?;
+        let fdo_portal_settings_service = FdoPortalSettingsServiceProxy::new(&connection).await?;
+        Ok((connection, fdo_portal_settings_service))
+    }
+
+    let mut ctx = None;
+
+    'outer: while !shutdown_flag.get() {
+        'inner: {
+            if !detect_theme_enabled.load(Ordering::SeqCst) {
+                break 'inner;
+            }
+            if ctx.is_none() {
+                match service().await {
+                    Ok(c) => ctx = Some(c),
+                    Err(e) => tracing::error!("Failed to get FdoPortalSettingsService: {e:#?}"),
+                };
+            }
+
+            let Some(ctx) = &ctx else {
+                break 'inner;
+            };
+
+            let color_scheme = match ctx
+                .1
+                .read_one("org.freedesktop.appearance", "color-scheme")
+                .await
+            {
+                Ok(color_scheme) => color_scheme,
+                Err(e) => {
+                    tracing::warn!("Failed to get color theme: {e:#?}");
+                    break 'inner;
+                }
+            };
+
+            let color_scheme = match u32::try_from(color_scheme) {
+                Ok(color_scheme) => color_scheme,
+                Err(e) => {
+                    tracing::warn!("Unknown type of color theme: {e:#?}");
+                    break 'inner;
+                }
+            };
+
+            if tx
+                .unbounded_send(ThemeEvent::Detected(color_scheme).into())
+                .is_err()
+            {
+                tracing::warn!("failed to send ThemeEvent::Check message, close the task");
+                break 'outer;
+            }
         }
         time::sleep(Duration::from_millis(500)).await;
     }
@@ -572,7 +634,7 @@ async fn start_dbus_services(
             if count > 4 {
                 break;
             }
-            let _ = tokio::time::sleep(Duration::from_millis(500)).await;
+            let _ = time::sleep(Duration::from_millis(500)).await;
         }
         // there is no way to have a graceful shutdown if the wayland socket is from kwin, kwin is
         // running in a signal thread, when input method is shutting down, kwin can't handle other

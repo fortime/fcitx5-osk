@@ -27,7 +27,6 @@ fcitx5-osk-common = { version = "0.1", path = "./fcitx5-osk-common" }
 
 anyhow = "1.0.94"
 clap = { version = "4.5.23", features = ["cargo", "derive"] }
-dark-light = "1.1.1"
 figment = { version = "0.10.19", features = ["toml"] }
 getset = "0.1.3"
 iced = { version = "0.13.1", features = ["tokio", "image", "svg", "advanced"] }
