@@ -33,7 +33,7 @@ impl X11Keyboard {
             output_context.clone(),
             config_manager.as_ref().preferred_output_name().cloned(),
         );
-        let (async_state, config_manager) = super::run_async({
+        let (async_state, config_manager) = match super::run_async({
             let shutdown_flag = shutdown_flag.clone();
             async move {
                 let res = AsyncAppState::new(
@@ -45,8 +45,13 @@ impl X11Keyboard {
                 .await;
                 res.map(|r| (r, config_manager))
             }
-        })
-        .expect("Unable to create `AsyncAppState`");
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Unable to create AsyncAppState: {e:#?}");
+                panic!("Unable to create AsyncAppState");
+            }
+        };
         let (inner, task) = Keyboard::new(
             async_state,
             config_manager,
