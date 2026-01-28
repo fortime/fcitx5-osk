@@ -21,3 +21,6 @@ zvariant.workspace = true
 futures-util.workspace = true
 cvt.workspace = true
 libc.workspace = true
+
+[features]
+console-subscriber = ["fcitx5-osk-common/console-subscriber"]

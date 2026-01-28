@@ -23,3 +23,6 @@ zbus.workspace = true
 zvariant.workspace = true
 evdev.workspace = true
 rand.workspace = true
+
+[features]
+console-subscriber = ["fcitx5-osk-common/console-subscriber"]
