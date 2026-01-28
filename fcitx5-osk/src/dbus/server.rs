@@ -15,7 +15,6 @@ use iced::futures::{
     },
     StreamExt as _,
 };
-use tracing::instrument;
 use zbus::{
     fdo::Error,
     object_server::{InterfaceRef, SignalEmitter},
@@ -95,31 +94,31 @@ impl Fcitx5VirtualkeyboardImPanelService {
     const SERVICE_NAME: &'static str = "org.fcitx.Fcitx5.VirtualKeyboard";
     const OBJECT_PATH: &'static str = "/org/fcitx/virtualkeyboard/impanel";
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn show_virtual_keyboard(&self) -> Result<(), Error> {
         self.send(Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard)
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn hide_virtual_keyboard(&self) -> Result<(), Error> {
         self.send(Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard)
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn update_preedit_caret(&self, preedit_cursor: i32) -> Result<(), Error> {
         self.send(Fcitx5VirtualkeyboardImPanelEvent::UpdatePreeditCaret(
             preedit_cursor,
         ))
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn update_preedit_area(&self, preedit_text: String) -> Result<(), Error> {
         self.send(Fcitx5VirtualkeyboardImPanelEvent::UpdatePreeditArea(
             preedit_text,
         ))
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn update_candidate_area(
         &self,
         candidate_text_list: Vec<String>,
@@ -140,19 +139,19 @@ impl Fcitx5VirtualkeyboardImPanelService {
     }
 
     #[zbus(name = "NotifyIMActivated")]
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_activated(&self, im: String) -> Result<(), Error> {
         self.send(ImEvent::UpdateCurrentIm(im))
     }
 
     #[zbus(name = "NotifyIMDeactivated")]
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_deactivated(&self, im: String) -> Result<(), Error> {
         self.send(ImEvent::DeactivateIm(im))
     }
 
     #[zbus(name = "NotifyIMListChanged")]
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn notify_im_list_changed(&self) -> Result<(), Error> {
         self.send(ImEvent::SyncImList)
     }
@@ -345,22 +344,22 @@ impl Fcitx5OskService {
 
 #[zbus::interface(name = "fyi.fortime.Fcitx5Osk.Controller1")]
 impl Fcitx5OskService {
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn force_show(&self) -> Result<(), Error> {
         self.send(ImPanelEvent::Show(true))
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn show(&self) -> Result<(), Error> {
         self.send(ImPanelEvent::Show(false))
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn force_hide(&self) -> Result<(), Error> {
         self.send(ImPanelEvent::Hide(true))
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn hide(&self) -> Result<(), Error> {
         self.send(ImPanelEvent::Hide(false))
     }
@@ -371,7 +370,7 @@ impl Fcitx5OskService {
         Ok(self.state()?.manual_mode)
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn change_manual_mode(&self, manual_mode: bool) -> Result<(), Error> {
         self.send(UpdateConfigEvent::ManualMode(manual_mode))
     }
@@ -384,7 +383,7 @@ impl Fcitx5OskService {
 
     /// Unlike show/hide, setting visible to false will cause the program generating a transparent
     /// view, it won't open/close the window.
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn change_visible(
         &self,
         #[zbus(signal_emitter)] signal_emitter: SignalEmitter<'_>,
@@ -401,13 +400,13 @@ impl Fcitx5OskService {
         Ok(self.state()?.visible_request)
     }
 
-    #[instrument(level = "debug", skip(self), ret)]
+    #[tracing::instrument(level = "debug", skip(self), ret)]
     #[zbus(property)]
     async fn mode(&self) -> Result<entity::WindowManagerMode, Error> {
         Ok(self.state()?.mode)
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn change_mode(&self, mode: entity::WindowManagerMode) -> Result<(), Error> {
         let mode = match mode {
             entity::WindowManagerMode::Normal => WindowManagerMode::Normal,
@@ -417,7 +416,7 @@ impl Fcitx5OskService {
     }
 
     /// Socket can be open once only.
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn open_socket(&mut self, socket: entity::Socket) -> Result<(), Error> {
         if let Some(socket_env_tx) = self.socket_env_tx.take() {
             match socket {
@@ -439,7 +438,7 @@ impl Fcitx5OskService {
     }
 
     /// Socket can be open once only.
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn open_display(&mut self, d: entity::Display) -> Result<(), Error> {
         if let Some(socket_env_tx) = self.socket_env_tx.take() {
             let socket_env = match d {
@@ -457,12 +456,12 @@ impl Fcitx5OskService {
         Ok(())
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn reopen_if_opened(&mut self) -> Result<(), Error> {
         self.send(ImPanelEvent::ReopenIfOpened)
     }
 
-    #[instrument(level = "debug", skip(self), err, ret)]
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn shutdown(&mut self) -> Result<(), Error> {
         self.shutdown_flag.shutdown();
         Ok(())
