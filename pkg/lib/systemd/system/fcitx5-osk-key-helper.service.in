@@ -3,7 +3,7 @@ Description=A service emits key events through evdev for fcitx5-osk, by default 
 After=display-manager.service
 
 [Service]
-ExecStart=/usr/bin/fcitx5-osk-key-helper
+ExecStart=@INSTALL_BIN_DIR@/fcitx5-osk-key-helper
 
 [Install]
 WantedBy=multi-user.target

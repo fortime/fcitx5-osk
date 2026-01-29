@@ -1,11 +1,12 @@
 use core::hash::Hash;
-use std::{collections::HashMap, fmt::Display, path::PathBuf, rc::Rc};
+use std::{borrow::Cow, collections::HashMap, env, fmt::Display, path::PathBuf, rc::Rc};
 
 use crate::{
     config::Config,
     font,
     key_set::{Key, KeySet},
     layout::{KeyAreaLayout, KeyId},
+    theme::Theme,
 };
 
 use anyhow::Result;
@@ -13,10 +14,12 @@ use figment::{
     providers::{Format, Toml},
     Figment,
 };
-use iced::{Font, Theme};
+use iced::{Font, Theme as IcedTheme};
 use serde::Deserialize;
 
 mod default_value;
+
+const BUILTIN_ICED_THEMES: [&str; 4] = ["Light", "Dark", "Tokyo Night Storm", "Tokyo Night Light"];
 
 pub(crate) trait IdAndConfigPath {
     type IdType;
@@ -30,7 +33,7 @@ pub(crate) trait IdAndConfigPath {
 
 pub struct Store {
     theme_names: Vec<String>,
-    themes: HashMap<String, Theme>,
+    themes: HashMap<String, IcedTheme>,
     default_key_area_layouts: (Rc<KeyAreaLayout>, Rc<KeyAreaLayout>),
     key_area_layouts: HashMap<String, Rc<KeyAreaLayout>>,
     default_key_set: Rc<KeySet>,
@@ -40,25 +43,75 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn new(config: &Config) -> Result<Self> {
-        let themes = Theme::ALL
+    pub fn new() -> Self {
+        let themes: HashMap<String, IcedTheme> = IcedTheme::ALL
             .iter()
-            .map(|t| (t.to_string().to_lowercase(), t.clone()))
+            .filter(|t| BUILTIN_ICED_THEMES.iter().any(|bt| bt == &t.to_string()))
+            .map(|t| (t.to_string(), t.clone()))
             .collect();
-        let mut theme_names = Vec::with_capacity(Theme::ALL.len() + 1);
-        theme_names.push("Auto".to_string());
-        Theme::ALL
+        let mut theme_names = themes.values().map(|t| t.to_string()).collect::<Vec<_>>();
+        theme_names.sort_unstable();
+        theme_names.insert(0, "Auto".to_string());
+        let default_landscape_key_area_layout = Rc::new(
+            init_default(default_value::DEFAULT_LANDSCAPE_KEY_AREA_LAYOUT_TOML)
+                .expect("Unable to load default_landscape_key_area_layout"),
+        );
+        let default_portrait_key_area_layout = Rc::new(
+            init_default(default_value::DEFAULT_PORTRAIT_KEY_AREA_LAYOUT_TOML)
+                .expect("Unable to load default_portrait_key_area_layout"),
+        );
+        let default_key_set = Rc::new(
+            init_default(default_value::DEFAULT_KEY_SET_TOML)
+                .expect("Unable to load default_key_set"),
+        );
+        Self {
+            theme_names,
+            themes,
+            default_key_area_layouts: (
+                default_landscape_key_area_layout,
+                default_portrait_key_area_layout,
+            ),
+            key_area_layouts: Default::default(),
+            default_key_set,
+            key_sets: Default::default(),
+            im_layout_mapping: Default::default(),
+            im_font_mapping: Default::default(),
+        }
+    }
+
+    pub fn load(config: &Config) -> Result<Self> {
+        let mut themes: HashMap<String, IcedTheme> = IcedTheme::ALL
             .iter()
-            .for_each(|t| theme_names.push(t.to_string()));
+            .filter(|t| BUILTIN_ICED_THEMES.iter().any(|bt| bt == &t.to_string()))
+            .map(|t| (t.to_string(), t.clone()))
+            .collect();
+        init_confs::<_, Theme>(&xdg_config_folders_if_empty(
+            config.theme_folders(),
+            "themes",
+        ))?
+        .into_iter()
+        .for_each(|(name, theme)| {
+            themes.insert(name, theme.iced_theme().clone());
+        });
+        let mut theme_names = themes.values().map(|t| t.to_string()).collect::<Vec<_>>();
+        theme_names.sort_unstable();
+        theme_names.insert(0, "Auto".to_string());
+
         let default_landscape_key_area_layout = Rc::new(init_default(
             default_value::DEFAULT_LANDSCAPE_KEY_AREA_LAYOUT_TOML,
         )?);
         let default_portrait_key_area_layout = Rc::new(init_default(
             default_value::DEFAULT_PORTRAIT_KEY_AREA_LAYOUT_TOML,
         )?);
-        let key_area_layouts = init_confs(config.key_area_layout_folders())?;
+        let key_area_layouts = init_confs(&xdg_config_folders_if_empty(
+            config.key_area_layout_folders(),
+            "layouts",
+        ))?;
         let default_key_set = Rc::new(init_default(default_value::DEFAULT_KEY_SET_TOML)?);
-        let key_sets = init_confs(config.key_set_folders())?;
+        let key_sets = init_confs(&xdg_config_folders_if_empty(
+            config.key_set_folders(),
+            "key_sets",
+        ))?;
         let im_layout_mapping = config.im_layout_mapping().clone();
         let im_font_mapping = config
             .im_font_mapping()
@@ -69,8 +122,14 @@ impl Store {
             theme_names,
             themes,
             default_key_area_layouts: (
-                default_landscape_key_area_layout,
-                default_portrait_key_area_layout,
+                key_area_layouts
+                    .get(config.default_landscape_layout())
+                    .cloned()
+                    .unwrap_or(default_landscape_key_area_layout),
+                key_area_layouts
+                    .get(config.default_portrait_layout())
+                    .cloned()
+                    .unwrap_or(default_portrait_key_area_layout),
             ),
             key_area_layouts,
             default_key_set,
@@ -84,8 +143,8 @@ impl Store {
         &self.theme_names
     }
 
-    pub fn theme(&self, name: &str) -> Option<&Theme> {
-        self.themes.get(&name.to_ascii_lowercase())
+    pub fn theme(&self, name: &str) -> Option<&IcedTheme> {
+        self.themes.get(name)
     }
 
     fn default_key_area_layout(&self, portrait: bool) -> Rc<KeyAreaLayout> {
@@ -135,6 +194,36 @@ impl Store {
     }
 }
 
+fn xdg_config_folders_if_empty<'a>(dir_paths: &'a [PathBuf], sub_dir: &str) -> Cow<'a, [PathBuf]> {
+    if dir_paths.is_empty() {
+        let mut paths = vec![];
+        if let Ok(config_dir_paths) = env::var("XDG_CONFIG_DIRS") {
+            for path in config_dir_paths.split(":") {
+                paths.push(path.trim().to_string());
+            }
+        }
+        if let Ok(config_home_path) = env::var("XDG_CONFIG_HOME") {
+            paths.push(config_home_path.trim().to_string());
+        } else if let Ok(home_path) = env::var("HOME") {
+            paths.push(format!("{home_path}/.config"));
+        }
+
+        paths
+            .into_iter()
+            .filter(|p| !p.is_empty())
+            .map(|p| {
+                let mut buf = PathBuf::from(p);
+                buf.push("fcitx5-osk");
+                buf.push(sub_dir);
+                buf
+            })
+            .collect::<Vec<_>>()
+            .into()
+    } else {
+        dir_paths.into()
+    }
+}
+
 fn init_confs<'de, K, V>(dir_paths: &[PathBuf]) -> Result<HashMap<K, Rc<V>>>
 where
     V: IdAndConfigPath<IdType = K> + Deserialize<'de>,
@@ -155,7 +244,7 @@ where
                 m.entry(new.id().clone())
                     .and_modify(|old| {
                         tracing::warn!(
-                            "duplicate configs for id: {}, {:?} and {:?}, later will be used",
+                            "Duplicate configs for id: {}, {:?} and {:?}, later will be used",
                             old.id(),
                             old.path(),
                             new.path()
@@ -163,6 +252,7 @@ where
                         *old = new.clone();
                     })
                     .or_insert(new.clone());
+                tracing::debug!("Load {} from {:?}", new.id(), file.path());
             }
         }
     }

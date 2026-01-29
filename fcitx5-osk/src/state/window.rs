@@ -1,7 +1,5 @@
 use std::{marker::PhantomData, rc::Rc, time::Duration};
 
-use anyhow::Result;
-use fcitx5_osk_common::dbus::{client::Fcitx5OskServices, entity};
 use iced::{window::Id, Color, Element, Font, Point, Size, Task, Theme};
 use tokio::time;
 
@@ -334,6 +332,8 @@ enum WindowMask {
 }
 
 pub struct WindowManagerState<WM> {
+    /// Used only in the sync output to check if a SyncLayout Event should be sent
+    _screen_size: Size,
     scale_factor: f32,
     portrait: bool,
     layout: LayoutState,
@@ -346,8 +346,8 @@ pub struct WindowManagerState<WM> {
     indicator_display: IndicatorDisplay,
     to_be_opened_flag: u16,
     fcitx5_services: Fcitx5Services,
-    fcitx5_osk_services: Fcitx5OskServices,
     wm: WM,
+    hide_delay: Duration,
 }
 
 impl<WM> WindowManagerState<WM> {
@@ -357,17 +357,17 @@ impl<WM> WindowManagerState<WM> {
         portrait: bool,
         key_area_layout: Rc<KeyAreaLayout>,
         fcitx5_services: Fcitx5Services,
-        fcitx5_osk_services: Fcitx5OskServices,
-    ) -> Result<Self> {
+    ) -> Self {
         let max_width = if portrait {
             config.portrait_width()
         } else {
             config.landscape_width()
         };
-        Ok(Self {
+        Self {
+            _screen_size: Default::default(),
             scale_factor: 1.,
             portrait,
-            layout: LayoutState::new(max_width, key_area_layout)?,
+            layout: LayoutState::new(max_width, key_area_layout),
             keyboard_window_state: WindowState::new("keyboard"),
             indicator_window_state: WindowState::new("indicator"),
             placement: config.placement(),
@@ -375,9 +375,9 @@ impl<WM> WindowManagerState<WM> {
             indicator_display: config.indicator_display(),
             to_be_opened_flag: 0,
             fcitx5_services,
-            fcitx5_osk_services,
             wm,
-        })
+            hide_delay: *config.hide_delay(),
+        }
     }
 
     pub fn on_layout_event(&mut self, event: LayoutEvent) {
@@ -392,14 +392,9 @@ impl<WM> WindowManagerState<WM> {
         if scale_factor == self.scale_factor {
             return false;
         }
-        let res = self.layout.update_scale_factor(scale_factor);
-        if res.is_err() {
-            tracing::warn!("unable to update scale factor of layout: {}", scale_factor);
-            false
-        } else {
-            self.scale_factor = scale_factor;
-            true
-        }
+        self.layout.update_scale_factor(scale_factor);
+        self.scale_factor = scale_factor;
+        true
     }
 
     pub fn update_candidate_font(&mut self, font: Font) {
@@ -620,7 +615,7 @@ where
         match source {
             CloseOpSource::Fcitx5 => self
                 .keyboard_window_state
-                .close_with_delay(Duration::from_millis(1000), source)
+                .close_with_delay(self.hide_delay, source)
                 .map_task(),
             CloseOpSource::UserAction | CloseOpSource::DbusController => {
                 let task = self.keyboard_window_state.close(&mut self.wm, source);
@@ -640,36 +635,20 @@ where
     fn update_mode(&mut self, mode: WindowManagerMode) -> Task<WM::Message> {
         let res = self.wm.set_mode(mode);
 
-        // use current mode.
-        let mode = self.wm.mode();
-        let mut task = super::call_dbus(
-            self.fcitx5_osk_services.controller(),
-            "setting fcitx5 osk mode failed".to_string(),
-            |s| async move {
-                let mode = match mode {
-                    WindowManagerMode::Normal => entity::WindowManagerMode::Normal,
-                    WindowManagerMode::KwinLockScreen => entity::WindowManagerMode::KwinLockScreen,
-                };
-                s.set_mode(mode).await?;
-                Ok(Message::Nothing)
-            },
-        )
-        .map_task();
-
         if !res {
-            return task;
+            return Message::from_nothing();
         }
 
         match mode {
             WindowManagerMode::Normal => {
-                task = task.chain(self.reset_indicator());
+                let mut task = self.reset_indicator();
                 if let Some(next_task) = self.reopen_keyboard_if_opened() {
                     task = task.chain(next_task)
                 }
                 task
             }
-            WindowManagerMode::KwinLockScreen => task
-                .chain(self.close_indicator())
+            WindowManagerMode::KwinLockScreen => self
+                .close_indicator()
                 // open keyboard in input-method activation
                 .chain(self.close_keyboard(CloseOpSource::UserAction)),
         }
@@ -772,23 +751,20 @@ where
     ) -> Option<Task<WM::Message>> {
         let old_size = self.size();
         let max_width = max_width.min(self.wm.screen_size().width as u16);
-        let res = self
-            .layout
+        self.layout
             .update_key_area_layout(max_width, key_area_layout);
-        if res.is_ok() {
-            // resize if the size is changed
-            let new_size = self.size();
-            if new_size != old_size {
-                Some(self.keyboard_window_state.resize(&mut self.wm, new_size))
-            } else {
-                Some(Message::from_nothing())
-            }
+        // resize if the size is changed
+        let new_size = self.size();
+        if new_size != old_size {
+            Some(self.keyboard_window_state.resize(&mut self.wm, new_size))
         } else {
-            None
+            Some(Message::from_nothing())
         }
     }
 
     fn sync_output(&mut self) -> Task<WM::Message> {
+        tracing::debug!("Sync output");
+
         let res = self.wm.sync_output();
 
         let mut tasks = vec![];
@@ -797,9 +773,14 @@ where
         let mut reopen = false;
         let old_unit = self.unit();
 
-        let portrait = screen_size.height > screen_size.width;
-        if portrait != self.portrait {
-            self.portrait = portrait;
+        if screen_size != self._screen_size {
+            tracing::debug!(
+                "Screen size is changed from {:?} to {:?}",
+                self._screen_size,
+                screen_size
+            );
+            self.portrait = screen_size.height > screen_size.width;
+            self._screen_size = screen_size;
             tasks.push(Task::done(Message::from(LayoutEvent::SyncLayout).into()));
         }
 
@@ -1037,7 +1018,9 @@ where
 {
     pub fn appearance(&self, theme: &Theme, id: Id) -> WM::Appearance {
         if self.is_keyboard(id) {
-            WM::Appearance::default(theme)
+            let mut appearance = WM::Appearance::default(theme);
+            appearance.set_background_color(theme.extended_palette().background.strong.color);
+            appearance
         } else if self.is_indicator(id) {
             let mut appearance = WM::Appearance::default(theme);
             appearance.set_background_color(Color::TRANSPARENT);

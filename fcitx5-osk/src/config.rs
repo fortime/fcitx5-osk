@@ -23,13 +23,20 @@ pub struct Config {
     #[serde(default)]
     log_directives: Vec<String>,
 
+    /// Folders storing layout toml files. If not set, the program will search toml files in `fcitx5-osk/layouts` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
     #[getset(get = "pub")]
     #[serde(default)]
     key_area_layout_folders: Vec<PathBuf>,
 
+    /// Folders storing key set toml files. If not set, the program will search toml files in `fcitx5-osk/key_sets` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
     #[getset(get = "pub")]
     #[serde(default)]
     key_set_folders: Vec<PathBuf>,
+
+    /// Folders storing theme toml files. If not set, the program will search toml files in `fcitx5-osk/themes` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
+    #[getset(get = "pub")]
+    #[serde(default)]
+    theme_folders: Vec<PathBuf>,
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default = "default_landscape_width")]
@@ -57,12 +64,12 @@ pub struct Config {
     #[serde(default)]
     placement: Placement,
 
-    /// default font to be used.
+    /// Default font to be used.
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
     default_font: Option<String>,
 
-    /// load fonts by path
+    /// Load fonts by path.
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
     external_font_paths: Vec<PathBuf>,
@@ -83,14 +90,34 @@ pub struct Config {
     #[serde(default)]
     indicator_display: IndicatorDisplay,
 
-    /// preferred output to be used.
+    /// Preferred output to be used.
     #[serde(default)]
     preferred_output_name: Option<String>,
 
-    /// These keycodes are x11 variant, they are +8 shift of evdev keycodes
+    /// These keycodes are x11 variant, they are +8 shift of evdev keycodes.
     #[getset(get = "pub", set = "pub")]
     #[serde(default = "default_modifier_workaround_keycodes")]
     modifier_workaround_keycodes: Vec<u16>,
+
+    /// How long will the keyboard wait after receiving a signal from fcitx5.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(with = "humantime_serde", default = "default_hide_delay")]
+    hide_delay: Duration,
+
+    /// Show or hide only by the user.
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    manual_mode: bool,
+
+    /// Override the builtin landscape layout globally.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_landscape_layout: String,
+
+    /// Override the builtin portrait layout globally.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_portrait_layout: String,
 }
 
 impl Config {
@@ -135,6 +162,10 @@ fn default_holding_timeout() -> Duration {
     Duration::from_millis(200)
 }
 
+fn default_hide_delay() -> Duration {
+    Duration::from_millis(1000)
+}
+
 fn default_theme() -> String {
     "Auto".to_string()
 }
@@ -151,25 +182,26 @@ fn default_modifier_workaround_keycodes() -> Vec<u16> {
 }
 
 pub struct ConfigManager {
-    _path: PathBuf,
+    _path: Option<PathBuf>,
     config: Config,
     writer: UnboundedSender<String>,
 }
 
 impl ConfigManager {
-    pub fn new(path: &PathBuf) -> Result<(Self, impl Future<Output = ()> + 'static + Send + Sync)> {
-        let config = if path.exists() {
-            Figment::new().merge(Toml::file(path)).extract()?
-        } else {
-            Figment::new().extract()?
+    pub fn new(
+        path: Option<&PathBuf>,
+    ) -> Result<(Self, impl Future<Output = ()> + 'static + Send + Sync)> {
+        let config = match path {
+            Some(path) if path.exists() => Figment::new().merge(Toml::file(path)).extract()?,
+            _ => Figment::new().extract()?,
         };
         let (tx, mut rx) = mpsc::unbounded();
         let res = Self {
-            _path: path.clone(),
+            _path: path.cloned(),
             config,
             writer: tx,
         };
-        let path = path.clone();
+        let path = path.cloned();
         let bg = async move {
             while let Some(mut latest) = rx.next().await {
                 let closed = loop {
@@ -182,16 +214,18 @@ impl ConfigManager {
                     }
                 };
 
-                if let Some(parent) = path.parent() {
-                    if !parent.exists() {
-                        if let Err(e) = fs::create_dir_all(parent).await {
-                            tracing::error!("writing {parent:?} failed: {e}");
+                if let Some(path) = path.as_ref() {
+                    if let Some(parent) = path.parent() {
+                        if !parent.exists() {
+                            if let Err(e) = fs::create_dir_all(parent).await {
+                                tracing::error!("writing {parent:?} failed: {e}");
+                            }
                         }
                     }
-                }
 
-                if let Err(e) = fs::write(&path, latest).await {
-                    tracing::error!("writing {path:?} failed: {e}");
+                    if let Err(e) = fs::write(&path, latest).await {
+                        tracing::error!("writing {path:?} failed: {e}");
+                    }
                 }
 
                 if closed {

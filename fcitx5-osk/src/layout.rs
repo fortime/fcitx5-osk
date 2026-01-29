@@ -10,12 +10,11 @@ use iced::{
         scrollable::{Direction, Scrollbar},
         text::Shaping,
         text_input::TextInput,
-        Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text,
+        Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text, Toggler,
     },
     window::Id,
     Color, Element, Font, Length,
 };
-//use iced_font_awesome::{FaIcon, IconFont};
 use serde::{
     de::{Error, Unexpected},
     Deserialize, Deserializer,
@@ -28,13 +27,14 @@ use std::{
 use crate::{
     app::Message,
     config::IndicatorDisplay,
+    dbus::server::ImPanelEvent,
     state::{
-        CloseOpSource, DynamicEnumDesc, EnumDesc, Field, FieldType, ImEvent, LayoutEvent,
+        BoolDesc, CloseOpSource, DynamicEnumDesc, EnumDesc, Field, FieldType, ImEvent, LayoutEvent,
         OwnedEnumDesc, StateExtractor, StepDesc, TextDesc, UpdateConfigEvent, WindowEvent,
         WindowManagerEvent,
     },
     store::IdAndConfigPath,
-    widget::{Movable, Toggle, ToggleCondition},
+    widget::{self, Movable, Toggle, ToggleCondition},
     window::WindowManagerMode,
 };
 
@@ -450,6 +450,7 @@ impl ToolbarLayout {
                 candidate_row,
                 Direction::Horizontal(Scrollbar::new().width(1).spacing(unit)),
             )
+            .style(widget::scrollable_style)
             .into()
         } else {
             candidate_row.into()
@@ -516,7 +517,7 @@ impl ToolbarLayout {
             }
             IndicatorDisplay::AlwaysOff => {
                 if state.window_manager_mode() == WindowManagerMode::KwinLockScreen {
-                    None
+                    Some(ImPanelEvent::NewVisibleRequest(false).into())
                 } else {
                     Some(WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into())
                 }
@@ -614,15 +615,18 @@ impl SettingLayout {
                 Container::new(field_value_element(state, field, text_size)).center_y(height),
             );
         }
-        Container::new(Scrollable::with_direction(
-            Row::new()
-                .push(name_column)
-                .push(Column::new().width(2 * unit))
-                .push(value_column)
-                // don't overlap with the scrollbar
-                .push(Column::new().width(2 * unit)),
-            Direction::Vertical(Scrollbar::new().width(unit).scroller_width(unit)),
-        ))
+        Container::new(
+            Scrollable::with_direction(
+                Row::new()
+                    .push(name_column)
+                    .push(Column::new().width(2 * unit))
+                    .push(value_column)
+                    // don't overlap with the scrollbar
+                    .push(Column::new().width(2 * unit)),
+                Direction::Vertical(Scrollbar::new().width(unit).scroller_width(unit)),
+            )
+            .style(widget::scrollable_style),
+        )
         .height(Length::Fill)
         .into()
     }
@@ -773,6 +777,24 @@ impl ToElementFieldType for TextDesc {
     }
 }
 
+impl ToElementFieldType for BoolDesc {
+    fn to_element<'a>(
+        &'a self,
+        _field: &'a Field,
+        state: &'a dyn StateExtractor,
+        text_size: u16,
+    ) -> Element<'a, Message> {
+        let cur_value = self.cur_value(state);
+        let mut toggler = Toggler::new(cur_value)
+            .text_size(text_size)
+            .style(widget::toggler_style);
+        if self.is_enabled(state) {
+            toggler = toggler.on_toggle(|value| self.on_changed(state, value))
+        }
+        toggler.into()
+    }
+}
+
 fn nerd_icon<'a, Message: 'a>(icon: char, size: u16, color: Color) -> Element<'a, Message> {
     Text::new(icon)
         .size(size)
@@ -844,5 +866,6 @@ fn field_value_element<'a>(
         FieldType::EnumString(enum_desc) => enum_desc.to_element(field, state, text_size),
         FieldType::DynamicEnumString(enum_desc) => enum_desc.to_element(field, state, text_size),
         FieldType::Text(text_desc) => text_desc.to_element(field, state, text_size),
+        FieldType::Bool(bool_desc) => bool_desc.to_element(field, state, text_size),
     }
 }

@@ -2,15 +2,21 @@ use std::{
     cell::RefCell,
     future::{self, Future},
     os::fd::{AsRawFd, OwnedFd},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
 use anyhow::{Context, Error, Result};
-use fcitx5_osk_common::{dbus::client::Fcitx5OskServices, signal::ShutdownFlag};
+use fcitx5_osk_common::signal::ShutdownFlag;
 use iced::{
     futures::{
-        channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
+        channel::{
+            mpsc::{self, UnboundedReceiver, UnboundedSender},
+            oneshot::{self, Sender},
+        },
         stream,
     },
     widget::{self, Column},
@@ -22,19 +28,19 @@ use tokio::time;
 use zbus::Connection;
 
 use crate::{
-    config::ConfigManager,
+    config::{Config, ConfigManager},
     dbus::{
-        client::Fcitx5Services,
+        client::{Fcitx5Services, FdoPortalSettingsServiceProxy},
         server::{
-            Fcitx5OskService, Fcitx5VirtualkeyboardImPanelEvent,
+            Fcitx5OskService, Fcitx5OskServiceClient, Fcitx5VirtualkeyboardImPanelEvent,
             Fcitx5VirtualkeyboardImPanelService, ImPanelEvent, SocketEnv,
         },
     },
     state::{
         CloseOpSource, ImEvent, KeyEvent, KeyboardEvent, LayoutEvent, State, StateExtractor,
-        ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
+        StoreEvent, ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
-    window::{self, WindowAppearance, WindowManager, WindowManagerMode},
+    window::{self, WindowAppearance, WindowManager},
 };
 
 pub mod wayland;
@@ -42,20 +48,21 @@ pub mod x11;
 
 #[derive(Clone, Debug)]
 pub enum Message {
-    Nothing,
-    KeyboardEvent(KeyboardEvent),
-    Error(KeyboardError),
     AfterError,
+    Error(KeyboardError),
+    Fcitx5VirtualkeyboardImPanelEvent(Fcitx5VirtualkeyboardImPanelEvent),
     ImEvent(ImEvent),
-    LayoutEvent(LayoutEvent),
+    ImPanelEvent(ImPanelEvent),
     KeyEvent(KeyEvent),
-    WindowEvent(WindowEvent),
-    WindowManagerEvent(WindowManagerEvent),
+    KeyboardEvent(KeyboardEvent),
+    LayoutEvent(LayoutEvent),
+    Nothing,
+    StoreEvent(StoreEvent),
     ThemeEvent(ThemeEvent),
     UpdateConfigEvent(UpdateConfigEvent),
-    Fcitx5VirtualkeyboardImPanelEvent(Fcitx5VirtualkeyboardImPanelEvent),
-    ImPanelEvent(ImPanelEvent),
     UpdateFcitx5Services(Fcitx5Services),
+    WindowEvent(WindowEvent),
+    WindowManagerEvent(WindowManagerEvent),
 }
 
 impl Message {
@@ -142,54 +149,116 @@ impl KeyboardError {
     }
 }
 
-pub struct Keyboard<WM> {
-    state: State<WM>,
-    visible: bool,
+/// State that should be initialized in a async runtime.
+pub struct AsyncAppState {
+    fcitx5_services: Fcitx5Services,
+    fcitx5_osk_service_client: Fcitx5OskServiceClient,
     rx: RefCell<Option<UnboundedReceiver<Message>>>,
-    socket_env_context: RefCell<(
-        Option<std::sync::mpsc::Receiver<SocketEnv>>,
-        Option<OwnedFd>,
-    )>,
-    error: Option<KeyboardError>,
-    shutdown_flag: ShutdownFlag,
-    shutdown_sent: bool,
+    display_socket: Option<OwnedFd>,
+    detect_theme_enabled: Arc<AtomicBool>,
 }
 
-impl<WM> Keyboard<WM> {
-    pub fn new(
-        config_manager: ConfigManager,
-        wm: WM,
-        fcitx5_services: Fcitx5Services,
-        fcitx5_osk_services: Fcitx5OskServices,
+impl AsyncAppState {
+    pub async fn new(
+        config: &Config,
         wait_for_socket: bool,
+        modifier_workaround: bool,
         shutdown_flag: ShutdownFlag,
-    ) -> Result<(Self, Task<Message>)> {
+    ) -> Result<Self> {
         let (tx, rx) = mpsc::unbounded();
         let (socket_env_tx, socket_env_rx) = if wait_for_socket {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) = oneshot::channel();
             (Some(tx), Some(rx))
         } else {
             (None, None)
         };
-        let state = State::new(config_manager, wm, fcitx5_services, fcitx5_osk_services)?;
-        let mut init_task = Task::future(init(tx, socket_env_tx, shutdown_flag.clone()));
+        let fcitx5_osk_service_client =
+            start_dbus_services(tx.clone(), socket_env_tx, shutdown_flag.clone()).await?;
+        let mut display_socket = None;
+        if let Some(socket_env_rx) = socket_env_rx {
+            unsafe {
+                // Safety, there should be no other thread running yet
+                match socket_env_rx
+                    .await
+                    .context("failed to receive socket env")?
+                {
+                    SocketEnv::WaylandSocket(s) => {
+                        window::wayland::set_env(Some(&s.as_raw_fd().to_string()), None);
+                        display_socket = Some(s);
+                    }
+                    SocketEnv::WaylandDisplay(s) => window::wayland::set_env(None, Some(&s)),
+                    SocketEnv::X11Display(s) => window::x11::set_env(Some(&s)),
+                }
+            }
+        }
+        let fcitx5_services = Fcitx5Services::new(
+            modifier_workaround,
+            config.modifier_workaround_keycodes().clone(),
+        )
+        .await?;
+        let detect_theme_enabled = Arc::new(AtomicBool::new(false));
+        tokio::spawn(detect_theme(
+            tx,
+            shutdown_flag,
+            detect_theme_enabled.clone(),
+        ));
+        Ok(Self {
+            fcitx5_services,
+            fcitx5_osk_service_client,
+            rx: RefCell::new(Some(rx)),
+            display_socket,
+            detect_theme_enabled,
+        })
+    }
+}
+
+pub struct Keyboard<WM> {
+    state: State<WM>,
+    error: Option<KeyboardError>,
+    shutdown_flag: ShutdownFlag,
+    shutdown_sent: bool,
+    fcitx5_osk_service_client: Fcitx5OskServiceClient,
+    rx: RefCell<Option<UnboundedReceiver<Message>>>,
+    // Hold the socket so that it won't be closed
+    #[allow(unused)]
+    display_socket: Option<OwnedFd>,
+}
+
+impl<WM> Keyboard<WM> {
+    pub fn new(
+        async_state: AsyncAppState,
+        config_manager: ConfigManager,
+        wm: WM,
+        wait_for_socket: bool,
+        shutdown_flag: ShutdownFlag,
+    ) -> (Self, Task<Message>) {
+        let AsyncAppState {
+            fcitx5_services,
+            fcitx5_osk_service_client,
+            rx,
+            display_socket,
+            detect_theme_enabled,
+        } = async_state;
+
+        fcitx5_osk_service_client.set_manual_mode(config_manager.as_ref().manual_mode());
+        let state = State::new(config_manager, wm, fcitx5_services, detect_theme_enabled);
+        let mut init_task = Task::done(StoreEvent::Load.into());
         if !wait_for_socket {
             // open indicator if it is not waiting for a socket.
-            init_task =
-                init_task.chain(Task::done(Message::from(WindowManagerEvent::OpenIndicator)));
+            init_task = Task::done(WindowManagerEvent::OpenIndicator.into());
         }
-        Ok((
+        (
             Self {
                 state,
-                visible: true,
-                rx: RefCell::new(Some(rx)),
-                socket_env_context: RefCell::new((socket_env_rx, None)),
                 error: None,
                 shutdown_flag,
                 shutdown_sent: false,
+                fcitx5_osk_service_client,
+                rx,
+                display_socket,
             },
             init_task,
-        ))
+        )
     }
 
     pub fn handle_error_message(&mut self, e: KeyboardError) {
@@ -233,7 +302,8 @@ where
     }
 
     pub fn view(&self, id: Id) -> Element<WM::Message> {
-        if self.visible && self.state.window_manager().is_keyboard(id) {
+        let visible = self.fcitx5_osk_service_client.visible().unwrap_or(true);
+        if visible && self.state.window_manager().is_keyboard(id) {
             let base = self.state.to_element(id);
             let res = if let Some(e) = &self.error {
                 modal(base, self.error_dialog(e), Message::AfterError)
@@ -241,7 +311,7 @@ where
                 base
             };
             res.map(|m| m.into())
-        } else if self.visible && self.state.window_manager().is_indicator(id) {
+        } else if visible && self.state.window_manager().is_indicator(id) {
             self.state.to_element(id).map(|m| m.into())
         } else {
             Column::new().into()
@@ -251,28 +321,6 @@ where
     /// subscription will be called after each batch updates, iced will check if streams in it has
     /// been changed.
     pub fn subscription(&self) -> Subscription<WM::Message> {
-        // subscription will be called before creating a wayland connection, so we wait socket
-        // here.
-        let mut socket_env_context = self.socket_env_context.borrow_mut();
-        if let Some(socket_env_rx) = socket_env_context.0.take() {
-            unsafe {
-                // No Safety Guarantee, multi_thread runtime has been started.
-                // It is high probability that data race of env won't be happened.
-                match socket_env_rx.recv() {
-                    Ok(SocketEnv::WaylandSocket(s)) => {
-                        window::wayland::set_env(Some(&s.as_raw_fd().to_string()), None);
-                        socket_env_context.1 = Some(s);
-                    }
-                    Ok(SocketEnv::WaylandDisplay(s)) => window::wayland::set_env(None, Some(&s)),
-                    Ok(SocketEnv::X11Display(s)) => window::x11::set_env(Some(&s)),
-                    Err(_) => {
-                        tracing::error!("failed to receive socket env");
-                        self.shutdown_flag.shutdown();
-                    }
-                }
-            }
-        }
-
         let mut subscriptions = vec![event::listen_with(|event, status, id| {
             tracing::trace!("event: {}, {:?}, {:?}", id, status, event);
             match event {
@@ -347,10 +395,18 @@ where
                 task = task.chain(self.state.window_manager_mut().on_window_event(event));
             }
             Message::WindowManagerEvent(event) => {
+                let is_update_mode = matches!(event, WindowManagerEvent::UpdateMode(_));
                 task = task.chain(self.state.window_manager_mut().on_event(event));
+                if is_update_mode {
+                    let mode = self.state.window_manager().mode();
+                    self.fcitx5_osk_service_client.set_mode(mode);
+                }
+            }
+            Message::StoreEvent(event) => {
+                task = task.chain(self.state.on_store_event(event));
             }
             Message::ThemeEvent(event) => {
-                task = task.chain(self.state.on_theme_event(event).map_task());
+                self.state.on_theme_event(event);
             }
             Message::UpdateConfigEvent(event) => {
                 task = task.chain(self.state.on_update_config_event(event));
@@ -358,19 +414,22 @@ where
             Message::Fcitx5VirtualkeyboardImPanelEvent(event) => {
                 match event {
                     Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
-                        self.visible = true;
-                        task = task.chain(self.state.window_manager_mut().open_keyboard());
+                        if !self.state.config().manual_mode() {
+                            task = task.chain(self.state.window_manager_mut().open_keyboard());
+                        }
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard => {
                         // Always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated
                         self.state.keyboard_mut().set_fcitx5_hidden();
-                        // Close keyboard only when setting isn't shown
-                        if !self.state.window_manager().is_setting_shown() {
-                            task = task.chain(
-                                self.state
-                                    .window_manager_mut()
-                                    .close_keyboard(CloseOpSource::Fcitx5),
-                            );
+                        if !self.state.config().manual_mode() {
+                            // Close keyboard only when setting isn't shown
+                            if !self.state.window_manager().is_setting_shown() {
+                                task = task.chain(
+                                    self.state
+                                        .window_manager_mut()
+                                        .close_keyboard(CloseOpSource::Fcitx5),
+                                );
+                            }
                         }
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(state) => {
@@ -381,21 +440,29 @@ where
             }
             Message::ImPanelEvent(event) => {
                 match event {
-                    ImPanelEvent::Show => {
-                        self.visible = true;
-                        task = task.chain(self.state.window_manager_mut().open_keyboard());
+                    ImPanelEvent::Show(force) => {
+                        if force || !self.state.config().manual_mode() {
+                            task = task.chain(self.state.window_manager_mut().open_keyboard());
+                        }
                     }
-                    ImPanelEvent::Hide => {
+                    ImPanelEvent::Hide(force) => {
                         // always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated.
                         self.state.keyboard_mut().set_fcitx5_hidden();
-                        // Unlike hiding request from Fcitx5, we always think that request from DbusController should be followed.
-                        task = task.chain(
-                            self.state
-                                .window_manager_mut()
-                                .close_keyboard(CloseOpSource::DbusController),
-                        );
+                        if force || !self.state.config().manual_mode() {
+                            // Unlike hiding request from Fcitx5, we always think that request from DbusController should be followed.
+                            task = task.chain(
+                                self.state
+                                    .window_manager_mut()
+                                    .close_keyboard(CloseOpSource::DbusController),
+                            );
+                        }
                     }
-                    ImPanelEvent::UpdateVisible(visible) => self.visible = visible,
+                    ImPanelEvent::NewVisibleRequest(visible) => {
+                        self.fcitx5_osk_service_client.new_visible_request(visible)
+                    }
+                    ImPanelEvent::UpdateManualMode(manual_mode) => {
+                        self.fcitx5_osk_service_client.set_manual_mode(manual_mode)
+                    }
                     ImPanelEvent::ReopenIfOpened => {
                         if let Some(next_task) =
                             self.state.window_manager_mut().reopen_keyboard_if_opened()
@@ -422,14 +489,19 @@ where
     }
 
     pub fn appearance(&self, theme: &Theme, id: Id) -> WM::Appearance {
-        self.state.window_manager().appearance(theme, id)
+        let mut appearance = self.state.window_manager().appearance(theme, id);
+        if !self.fcitx5_osk_service_client.visible().unwrap_or(true) {
+            appearance.set_background_color(Color::TRANSPARENT);
+        }
+        appearance
     }
 
     pub fn theme(&self, id: Id) -> Theme {
+        let visible = self.fcitx5_osk_service_client.visible().unwrap_or(true);
         // in iced, style doesn't accept id, we should return a theme with transparent background.
         let theme = self.state.theme().clone();
         let appearance = self.state.window_manager().appearance(&theme, id);
-        if !self.visible || appearance.background_color() == Color::TRANSPARENT {
+        if !visible || appearance.background_color() == Color::TRANSPARENT {
             let mut palette = theme.palette();
             palette.background = Color::TRANSPARENT;
             Theme::custom(String::new(), palette)
@@ -465,41 +537,62 @@ fn modal<'a>(
     .into()
 }
 
-async fn init(
+async fn detect_theme(
     tx: UnboundedSender<Message>,
-    socket_env_tx: Option<std::sync::mpsc::Sender<SocketEnv>>,
     shutdown_flag: ShutdownFlag,
-) -> Message {
-    tokio::spawn({
-        let tx = tx.clone();
-        let shutdown_flag = shutdown_flag.clone();
-        async move {
-            if let Err(e) =
-                start_dbus_services(tx.clone(), socket_env_tx, shutdown_flag.clone()).await
-            {
-                tracing::error!("failed to start dbus services: {:?}, exit", e);
-                if tx
-                    .unbounded_send(KeyboardError::Fatal(Arc::new(e)).into())
-                    .is_err()
-                {
-                    tracing::error!("failed to send fatal message");
-                    shutdown_flag.shutdown();
-                }
+    detect_theme_enabled: Arc<AtomicBool>,
+) {
+    async fn service() -> Result<(Connection, FdoPortalSettingsServiceProxy<'static>)> {
+        let connection = Connection::session().await?;
+        let fdo_portal_settings_service = FdoPortalSettingsServiceProxy::new(&connection).await?;
+        Ok((connection, fdo_portal_settings_service))
+    }
+
+    let mut ctx = None;
+
+    'outer: while !shutdown_flag.get() {
+        'inner: {
+            if !detect_theme_enabled.load(Ordering::SeqCst) {
+                break 'inner;
             }
-        }
-    });
+            if ctx.is_none() {
+                match service().await {
+                    Ok(c) => ctx = Some(c),
+                    Err(e) => tracing::error!("Failed to get FdoPortalSettingsService: {e:#?}"),
+                };
+            }
 
-    tokio::spawn(start_detect_theme(tx, shutdown_flag.clone()));
+            let Some(ctx) = &ctx else {
+                break 'inner;
+            };
 
-    // trigger to set mode property
-    Message::from(WindowManagerEvent::UpdateMode(WindowManagerMode::Normal))
-}
+            let color_scheme = match ctx
+                .1
+                .read_one("org.freedesktop.appearance", "color-scheme")
+                .await
+            {
+                Ok(color_scheme) => color_scheme,
+                Err(e) => {
+                    tracing::warn!("Failed to get color theme: {e:#?}");
+                    break 'inner;
+                }
+            };
 
-async fn start_detect_theme(tx: UnboundedSender<Message>, shutdown_flag: ShutdownFlag) {
-    while !shutdown_flag.get() {
-        if tx.unbounded_send(ThemeEvent::Detect.into()).is_err() {
-            tracing::warn!("failed to send ThemeEvent::Check message, close the task");
-            break;
+            let color_scheme = match u32::try_from(color_scheme) {
+                Ok(color_scheme) => color_scheme,
+                Err(e) => {
+                    tracing::warn!("Unknown type of color theme: {e:#?}");
+                    break 'inner;
+                }
+            };
+
+            if tx
+                .unbounded_send(ThemeEvent::Detected(color_scheme).into())
+                .is_err()
+            {
+                tracing::warn!("failed to send ThemeEvent::Check message, close the task");
+                break 'outer;
+            }
         }
         time::sleep(Duration::from_millis(500)).await;
     }
@@ -507,9 +600,9 @@ async fn start_detect_theme(tx: UnboundedSender<Message>, shutdown_flag: Shutdow
 
 async fn start_dbus_services(
     tx: UnboundedSender<Message>,
-    socket_env_tx: Option<std::sync::mpsc::Sender<SocketEnv>>,
+    socket_env_tx: Option<Sender<SocketEnv>>,
     mut shutdown_flag: ShutdownFlag,
-) -> Result<()> {
+) -> Result<Fcitx5OskServiceClient> {
     let conn = Connection::session().await?;
     let fcitx5_service = Fcitx5VirtualkeyboardImPanelService::new(tx.clone());
     fcitx5_service
@@ -518,37 +611,40 @@ async fn start_dbus_services(
         .context("failed to start fcitx5 dbus service")?;
     let fcitx5_osk_service =
         Fcitx5OskService::new(tx.clone(), socket_env_tx, shutdown_flag.clone());
-    fcitx5_osk_service
+    let fcitx5_osk_service_client = fcitx5_osk_service
         .start(&conn)
         .await
         .context("failed to start fcitx5 osk dbus service")?;
-    shutdown_flag.wait_for_shutdown().await;
-    tracing::info!("shutting down");
-    // trigger shutdown check
-    if tx.unbounded_send(Message::Nothing).is_err() {
-        tracing::error!("failed to send message, shutdown may be stopped");
-    }
-    let mut count = 0;
-    loop {
-        let _ = future::poll_fn(|cx| tx.poll_ready(cx)).await;
-        if tx.is_closed() {
-            tracing::info!("the mainloop of keyboard has exited.");
-            break;
+
+    tokio::spawn(async move {
+        shutdown_flag.wait_for_shutdown().await;
+        tracing::info!("shutting down");
+        // trigger shutdown check
+        if tx.unbounded_send(Message::Nothing).is_err() {
+            tracing::error!("failed to send message, shutdown may be stopped");
         }
-        count += 1;
-        if count > 4 {
-            break;
+        let mut count = 0;
+        loop {
+            let _ = future::poll_fn(|cx| tx.poll_ready(cx)).await;
+            if tx.is_closed() {
+                tracing::info!("the mainloop of keyboard has exited.");
+                break;
+            }
+            count += 1;
+            if count > 4 {
+                break;
+            }
+            let _ = time::sleep(Duration::from_millis(500)).await;
         }
-        let _ = tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-    // there is no way to have a graceful shutdown if the wayland socket is from kwin, kwin is
-    // running in a signal thread, when input method is shutting down, kwin can't handle other
-    // requests.
-    tracing::info!("close the connection of dbus services");
-    if let Err(e) = conn.close().await {
-        tracing::warn!("failed to close the connection of dbus services: {:?}", e);
-    }
-    Ok(())
+        // there is no way to have a graceful shutdown if the wayland socket is from kwin, kwin is
+        // running in a signal thread, when input method is shutting down, kwin can't handle other
+        // requests.
+        tracing::info!("close the connection of dbus services");
+        if let Err(e) = conn.close().await {
+            tracing::warn!("failed to close the connection of dbus services: {:?}", e);
+        }
+    });
+    Ok(fcitx5_osk_service_client)
 }
 
 /// this function should be run in multi_thread runtime, otherwise, it will be deadlocked.

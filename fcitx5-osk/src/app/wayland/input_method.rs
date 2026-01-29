@@ -322,9 +322,9 @@ mod v1 {
                     if let Some(old) = old {
                         old.destroy();
                     }
-                    state
-                        .tx
-                        .unbounded_send(WaylandMessage::from(Message::from(ImPanelEvent::Show)))
+                    state.tx.unbounded_send(WaylandMessage::from(Message::from(
+                        ImPanelEvent::Show(true),
+                    )))
                 }
                 ZwpInputMethodV1Event::Deactivate { context } => {
                     tracing::debug!("wayland input method v1 deactivate");
@@ -333,11 +333,11 @@ mod v1 {
                         guard.take();
                     }
                     context.destroy();
-                    //state.tx.unbounded_send(
-                    //    Message::from(ImPanelEvent::Hide)
-                    //        .into(),
-                    //)
-                    Ok(())
+                    // Hide the window. In Kwin, if the virtual keyboard button is clicked in
+                    // kscreenlock, a activate signal will be sent, the window will show again.
+                    state
+                        .tx
+                        .unbounded_send(Message::from(ImPanelEvent::Hide(true)).into())
                 }
                 _ => Ok(()),
             };

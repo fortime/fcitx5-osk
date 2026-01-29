@@ -1,13 +1,17 @@
-use std::future::Future;
+use std::{
+    future::Future,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 use anyhow::Result;
-use dark_light::Mode;
-use fcitx5_osk_common::dbus::client::Fcitx5OskServices;
 use getset::{Getters, MutGetters};
 use iced::{window::Id, Element, Task, Theme, Vector};
 
 use crate::{
-    app::{self, MapTask, Message},
+    app::{self, error_with_context, MapTask, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
     dbus::client::Fcitx5Services,
     layout::ToElementCommonParams,
@@ -22,8 +26,8 @@ mod layout;
 mod window;
 
 pub use config::{
-    ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc, TextDesc,
-    UpdateConfigEvent,
+    BoolDesc, ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc,
+    TextDesc, UpdateConfigEvent,
 };
 pub use im::{ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
@@ -41,8 +45,9 @@ pub struct State<WM> {
     im: ImState,
     #[getset(get = "pub", get_mut = "pub")]
     window_manager: WindowManagerState<WM>,
+    detect_theme_enabled: Arc<AtomicBool>,
     theme: Theme,
-    theme_detecting: bool,
+    color_theme: u32,
 }
 
 impl<WM> State<WM> {
@@ -50,10 +55,10 @@ impl<WM> State<WM> {
         config_manager: ConfigManager,
         wm: WM,
         fcitx5_services: Fcitx5Services,
-        fcitx5_osk_services: Fcitx5OskServices,
-    ) -> Result<Self> {
+        detect_theme_enabled: Arc<AtomicBool>,
+    ) -> Self {
         let config = config_manager.as_ref();
-        let store = Store::new(config)?;
+        let store = Store::new();
         let portrait = false;
         // key_area_layout will be updated when cur_im is updated.
         let key_area_layout = store.key_area_layout_by_im("", portrait);
@@ -71,71 +76,57 @@ impl<WM> State<WM> {
                 portrait,
                 key_area_layout,
                 fcitx5_services,
-                fcitx5_osk_services,
-            )?,
+            ),
+            detect_theme_enabled,
             theme: Default::default(),
-            theme_detecting: false,
+            color_theme: 0,
             config: ConfigState::new(config_manager),
             store,
         };
+        state
+            .detect_theme_enabled
+            .store(state.is_auto_theme(), Ordering::SeqCst);
         state.sync_theme(None);
-        Ok(state)
+        state
     }
 
     fn is_auto_theme(&self) -> bool {
         self.config.config().theme().eq_ignore_ascii_case("auto")
     }
 
-    pub fn on_theme_event(&mut self, event: ThemeEvent) -> Task<Message> {
-        let mut task = Message::nothing();
+    pub fn on_theme_event(&mut self, event: ThemeEvent) {
         match event {
-            ThemeEvent::Detect => {
-                if self.is_auto_theme() && !self.theme_detecting {
-                    self.theme_detecting = true;
-                    // detect may block the eventloop, run it in a task.
-                    task =
-                        Task::future(async { ThemeEvent::Detected(dark_light::detect()).into() });
-                }
-            }
-            ThemeEvent::Detected(mode) => {
+            ThemeEvent::Detected(color_theme) => {
                 if self.is_auto_theme() {
-                    self.sync_theme(Some(mode));
+                    self.sync_theme(Some(color_theme));
                 }
-                self.theme_detecting = false;
             }
             ThemeEvent::Updated => {
                 self.sync_theme(None);
             }
         }
-        task
     }
 
-    fn sync_theme(&mut self, mode: Option<Mode>) {
-        let mode = mode.unwrap_or_else(|| {
-            if self.is_auto_theme() {
-                // it may block the eventloop.
-                dark_light::detect()
-            } else {
-                Mode::Default
-            }
-        });
+    fn sync_theme(&mut self, color_theme: Option<u32>) {
+        let color_theme = color_theme.unwrap_or(self.color_theme);
         let config = self.config.config();
         let mut default_theme = Default::default();
         let theme = if !self.is_auto_theme() {
             self.store.theme(config.theme())
         } else {
-            match mode {
-                Mode::Dark => {
+            match color_theme {
+                1 => {
                     default_theme = Theme::Dark;
                     config.dark_theme().and_then(|t| self.store.theme(t))
                 }
-                Mode::Light | Mode::Default => {
+                _ => {
                     default_theme = Theme::Light;
                     config.light_theme().and_then(|t| self.store.theme(t))
                 }
             }
         };
         self.theme = theme.cloned().unwrap_or(default_theme);
+        self.color_theme = color_theme;
     }
 
     pub fn update_fcitx5_services(&mut self, fcitx5_services: Fcitx5Services) {
@@ -164,7 +155,13 @@ where
     WM::Message: From<Message> + 'static + Send + Sync,
 {
     pub fn on_update_config_event(&mut self, event: UpdateConfigEvent) -> Task<WM::Message> {
-        self.config.on_update_event(event).map_task()
+        let task = self.config.on_update_event(event).map_task();
+
+        // Maybe I should check if theme is changed
+        self.detect_theme_enabled
+            .store(self.is_auto_theme(), Ordering::SeqCst);
+
+        task
     }
 
     fn update_layout_by_im(&mut self, im_name: Option<&str>) -> Option<Task<WM::Message>> {
@@ -186,6 +183,8 @@ where
         if task.is_some() {
             self.keyboard
                 .update_key_area_layout(&key_area_layout, &self.store);
+            self.window_manager
+                .update_candidate_font(self.store.font_by_im(im_name));
         }
         task
     }
@@ -197,8 +196,6 @@ where
         }
         if let Some(task) = self.update_layout_by_im(Some(im_name)) {
             self.im.update_cur_im(im_name);
-            self.window_manager
-                .update_candidate_font(self.store.font_by_im(im_name));
             task
         } else {
             Message::from_nothing()
@@ -234,6 +231,24 @@ where
             Message::from_nothing()
         }
     }
+
+    pub fn on_store_event(&mut self, event: StoreEvent) -> Task<WM::Message> {
+        match event {
+            StoreEvent::Load => match Store::load(self.config.config()) {
+                Ok(s) => {
+                    self.store = s;
+                    // Update theme after store is changed
+                    self.sync_theme(None);
+                    // Update layout by cur im after store is changed
+                    self.update_layout_by_im(None)
+                        .unwrap_or_else(Message::from_nothing)
+                }
+                Err(e) => {
+                    Task::done(error_with_context(e, "Unable to load `Store` from config").into())
+                }
+            },
+        }
+    }
 }
 
 /// Use dyn for reducing the need for writing generic type.
@@ -245,6 +260,8 @@ pub trait StateExtractor {
     fn im(&self) -> &ImState;
 
     fn theme(&self) -> &Theme;
+
+    fn theme_names(&self) -> &[String];
 
     fn config(&self) -> &Config;
 
@@ -290,6 +307,10 @@ where
 
     fn theme(&self) -> &Theme {
         &self.theme
+    }
+
+    fn theme_names(&self) -> &[String] {
+        self.store.theme_names()
     }
 
     fn config(&self) -> &Config {
@@ -346,14 +367,24 @@ where
 
 #[derive(Clone, Debug)]
 pub enum ThemeEvent {
-    Detect,
-    Detected(Mode),
+    Detected(u32),
     Updated,
 }
 
 impl From<ThemeEvent> for Message {
     fn from(value: ThemeEvent) -> Self {
         Self::ThemeEvent(value)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum StoreEvent {
+    Load,
+}
+
+impl From<StoreEvent> for Message {
+    fn from(value: StoreEvent) -> Self {
+        Self::StoreEvent(value)
     }
 }
 

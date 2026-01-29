@@ -3,12 +3,13 @@ use std::{
     fmt::{Display, Formatter, Result as FmtResult},
 };
 
-use iced::{Task, Theme};
+use iced::Task;
 use strum::IntoEnumIterator;
 
 use crate::{
     app::Message,
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
+    dbus::server::ImPanelEvent,
     state::{ImEvent, StateExtractor, ThemeEvent, WindowManagerEvent},
     window::WindowManagerMode,
 };
@@ -252,6 +253,26 @@ impl TextDesc {
     }
 }
 
+pub struct BoolDesc {
+    cur_value: fn(&dyn StateExtractor) -> bool,
+    is_enabled: fn(&dyn StateExtractor) -> bool,
+    on_changed: fn(&dyn StateExtractor, bool) -> Message,
+}
+
+impl BoolDesc {
+    pub fn cur_value(&self, state: &dyn StateExtractor) -> bool {
+        (self.cur_value)(state)
+    }
+
+    pub fn is_enabled(&self, state: &dyn StateExtractor) -> bool {
+        (self.is_enabled)(state)
+    }
+
+    pub fn on_changed(&self, state: &dyn StateExtractor, value: bool) -> Message {
+        (self.on_changed)(state, value)
+    }
+}
+
 pub enum FieldType {
     StepU16(StepDesc<u16>),
     OwnedEnumPlacement(OwnedEnumDesc<Placement>),
@@ -259,6 +280,7 @@ pub enum FieldType {
     EnumString(EnumDesc<String>),
     DynamicEnumString(DynamicEnumDesc<String>),
     Text(TextDesc),
+    Bool(BoolDesc),
 }
 
 impl From<StepDesc<u16>> for FieldType {
@@ -297,6 +319,12 @@ impl From<TextDesc> for FieldType {
     }
 }
 
+impl From<BoolDesc> for FieldType {
+    fn from(value: BoolDesc) -> Self {
+        Self::Bool(value)
+    }
+}
+
 pub struct Field {
     name: &'static str,
     id: &'static str,
@@ -325,10 +353,6 @@ pub struct ConfigState {
 
 impl ConfigState {
     pub fn new(config_manager: ConfigManager) -> Self {
-        let themes = Theme::ALL
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
         Self {
             config_manager,
             updatable_fields: vec![
@@ -400,24 +424,71 @@ impl ConfigState {
                     .into(),
                 },
                 Field {
+                    name: "Manual Mode",
+                    id: "manual_mode",
+                    typ: BoolDesc {
+                        cur_value: |state| state.config().manual_mode(),
+                        is_enabled: |_state| true,
+                        on_changed: |_, v| Message::from(UpdateConfigEvent::ManualMode(v)),
+                    }
+                    .into(),
+                },
+                Field {
                     name: "Dark Theme",
                     id: "dark_theme",
-                    typ: EnumDesc::<String> {
-                        cur_value: |state| state.config().dark_theme(),
-                        variants: themes.clone(),
+                    typ: DynamicEnumDesc::<String> {
+                        variants_and_selected: |state| {
+                            let mut theme_names = vec![];
+                            for theme_name in state.theme_names() {
+                                if theme_name != "Auto" {
+                                    theme_names.push(ValueAndDescription {
+                                        value: theme_name.clone(),
+                                        desc: theme_name.clone(),
+                                    });
+                                }
+                            }
+                            (
+                                theme_names,
+                                state
+                                    .config()
+                                    .dark_theme()
+                                    .map(|theme_name| ValueAndDescription {
+                                        value: theme_name.clone(),
+                                        desc: theme_name.clone(),
+                                    }),
+                            )
+                        },
                         is_enabled: |_| true,
-                        on_selected: |_, d| Message::from(UpdateConfigEvent::DarkTheme(d)),
+                        on_selected: |_, d| Message::from(UpdateConfigEvent::DarkTheme(d.value)),
                     }
                     .into(),
                 },
                 Field {
                     name: "Light Theme",
                     id: "light_theme",
-                    typ: EnumDesc::<String> {
-                        cur_value: |state| state.config().light_theme(),
-                        variants: themes,
+                    typ: DynamicEnumDesc::<String> {
+                        variants_and_selected: |state| {
+                            let mut theme_names = vec![];
+                            for theme_name in state.theme_names() {
+                                if theme_name != "Auto" {
+                                    theme_names.push(ValueAndDescription {
+                                        value: theme_name.clone(),
+                                        desc: theme_name.clone(),
+                                    });
+                                }
+                            }
+                            (
+                                theme_names,
+                                state.config().light_theme().map(|theme_name| {
+                                    ValueAndDescription {
+                                        value: theme_name.clone(),
+                                        desc: theme_name.clone(),
+                                    }
+                                }),
+                            )
+                        },
                         is_enabled: |_| true,
-                        on_selected: |_, d| Message::from(UpdateConfigEvent::LightTheme(d)),
+                        on_selected: |_, d| Message::from(UpdateConfigEvent::LightTheme(d.value)),
                     }
                     .into(),
                 },
@@ -474,6 +545,11 @@ impl ConfigState {
                 option_config_eq!(preferred_output_name),
                 set_preferred_output_name,
                 |v| Message::from(WindowManagerEvent::UpdatePreferredOutputName(v))
+            },
+            @ManualMode => {
+                config_eq!(manual_mode),
+                set_manual_mode,
+                |v| Message::from(ImPanelEvent::UpdateManualMode(v))
             },
             UpdateConfigEvent::ChangeTempText {key, init_value, value} => {
                 tracing::error!("Update temp_text[{key}] to {value}, init value[{init_value}]");
@@ -580,6 +656,7 @@ pub enum UpdateConfigEvent {
         init_value: String,
         producer: fn(String) -> UpdateConfigEvent,
     },
+    ManualMode(bool),
 }
 
 impl From<UpdateConfigEvent> for Message {

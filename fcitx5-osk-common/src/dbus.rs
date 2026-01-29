@@ -34,32 +34,47 @@ pub mod client {
     )]
     pub trait Fcitx5OskControllerService {
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        fn force_show(&self) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn show(&self) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        fn force_hide(&self) -> ZbusResult<()>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn hide(&self) -> ZbusResult<()>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        #[zbus(property)]
+        fn manual_mode(&self) -> ZbusResult<bool>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        fn change_manual_mode(&self, manual_mode: bool) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn change_visible(&self, visible: bool) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        #[zbus(property)]
+        fn visible_request(&self) -> ZbusResult<(i64, bool)>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
         /// tell the server to change mode.
         fn change_mode(&self, mode: WindowManagerMode) -> ZbusResult<()>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
-        #[zbus(property(emits_changed_signal = "false"))]
-        fn mode(&self) -> ZbusResult<WindowManagerMode>;
-
-        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         #[zbus(property)]
-        /// the server sets the property on dbus after mode is changed.
-        fn set_mode(&self, mode: WindowManagerMode) -> ZbusResult<()>;
+        fn mode(&self) -> ZbusResult<WindowManagerMode>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn open_socket(&self, socket: Socket) -> ZbusResult<()>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn open_display(&self, d: Display) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        fn reopen_if_opened(&self) -> ZbusResult<()>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn shutdown(&self) -> ZbusResult<()>;

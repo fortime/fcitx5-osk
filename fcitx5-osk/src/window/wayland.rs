@@ -76,7 +76,7 @@ impl WaylandWindowManager {
     pub fn new(output_context: OutputContext, preferred_output_name: Option<String>) -> Self {
         Self {
             settings: Default::default(),
-            screen_size: Default::default(),
+            screen_size: Size::new(1024., 768.),
             exclusive_zone: Default::default(),
             mode: Default::default(),
             output_context,

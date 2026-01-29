@@ -8,7 +8,7 @@ use iced::{
     },
     overlay,
     touch::{Event as TouchEvent, Finger as TouchFinger},
-    Border, Element, Event, Length, Padding, Rectangle, Shadow, Size, Vector,
+    Border, Color, Element, Event, Length, Padding, Rectangle, Shadow, Size, Vector,
 };
 use iced_futures::core::{
     layout, renderer,
@@ -66,6 +66,7 @@ pub struct Key<'a, Message, PressCb, ReleaseCb, Theme = iced::Theme, Renderer = 
     padding: Padding,
     on_press_with: Option<PressCb>,
     on_release_with: Option<ReleaseCb>,
+    border_radius: f32,
 }
 
 impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
@@ -83,6 +84,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with: _on_press_with,
             on_release_with,
+            border_radius,
         } = self;
         Key {
             content,
@@ -91,6 +93,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with: cb,
             on_release_with,
+            border_radius,
         }
     }
 
@@ -106,6 +109,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with,
             on_release_with: _on_release_with,
+            border_radius,
         } = self;
         Key {
             content,
@@ -114,6 +118,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with,
             on_release_with: cb,
+            border_radius,
         }
     }
 
@@ -141,7 +146,10 @@ where
     Renderer: renderer::Renderer,
 {
     /// Creates a [`Key`] with the given content.
-    pub fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+    pub fn new(
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+        border_radius: f32,
+    ) -> Self {
         let content = content.into();
         let size = content.as_widget().size_hint();
         Self {
@@ -151,6 +159,7 @@ where
             padding: Default::default(),
             on_press_with: None,
             on_release_with: None,
+            border_radius,
         }
     }
 }
@@ -268,14 +277,14 @@ where
     ) {
         let state: &KeyState = tree.state.downcast_ref();
         let background = if state.has_finger_pressed() {
-            theme.as_ref().extended_palette().success.weak.color
+            theme.as_ref().extended_palette().primary.strong.color
         } else {
-            theme.as_ref().extended_palette().success.strong.color
+            theme.as_ref().extended_palette().background.base.color
         };
         renderer.fill_quad(
             renderer::Quad {
                 bounds: layout.bounds(),
-                border: Border::default(),
+                border: Border::default().rounded(self.border_radius),
                 shadow: Shadow::default(),
             },
             background,
@@ -430,6 +439,7 @@ pub struct PopupKey<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
     padding: Padding,
     on_enter: Option<Message>,
     on_exit: Option<Message>,
+    border_radius: f32,
 }
 
 impl<Message, Theme, Renderer> PopupKey<'_, Message, Theme, Renderer> {
@@ -471,6 +481,7 @@ where
     pub fn new(
         content: impl Into<Element<'a, Message, Theme, Renderer>>,
         finger: Option<TouchFinger>,
+        border_radius: f32,
     ) -> Self {
         let content = content.into();
         let size = content.as_widget().size_hint();
@@ -482,6 +493,7 @@ where
             padding: Default::default(),
             on_enter: None,
             on_exit: None,
+            border_radius,
         }
     }
 }
@@ -623,14 +635,16 @@ where
     ) {
         let state: &PopupKeyState = tree.state.downcast_ref();
         let background = if state.is_active {
-            theme.as_ref().extended_palette().danger.strong.color
+            theme.as_ref().extended_palette().primary.strong.color
         } else {
-            theme.as_ref().extended_palette().danger.weak.color
+            // use the background of outside container, theme.as_ref().extended_palette().primary.weak.color
+            Color::TRANSPARENT
         };
         renderer.fill_quad(
             renderer::Quad {
                 bounds: layout.bounds(),
-                border: Border::default(),
+                // It should be the same as the outside container
+                border: Border::default().rounded(self.border_radius),
                 shadow: Shadow::default(),
             },
             background,

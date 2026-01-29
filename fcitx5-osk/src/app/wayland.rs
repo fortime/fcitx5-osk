@@ -1,6 +1,6 @@
 use anyhow::Result;
 use connection::WaylandConnection;
-use fcitx5_osk_common::{dbus::client::Fcitx5OskServices, signal::ShutdownFlag};
+use fcitx5_osk_common::signal::ShutdownFlag;
 use iced::{futures::stream, window::Id, Element, Subscription, Task, Theme};
 use iced_layershell::{
     build_pattern::{self, MainSettings},
@@ -12,11 +12,12 @@ pub use crate::app::wayland::output::{OutputContext, OutputGeometry};
 use crate::{
     app::{self, wayland::input_method::InputMethodContext, Keyboard, MapTask, Message},
     config::ConfigManager,
-    dbus::client::Fcitx5Services,
     font,
     state::WindowManagerEvent,
     window::{wayland::WaylandWindowManager, WindowManagerMode},
 };
+
+use super::AsyncAppState;
 
 mod connection;
 mod input_method;
@@ -46,32 +47,50 @@ impl WaylandKeyboard {
         config_manager: ConfigManager,
         input_method_context: InputMethodContext,
         output_context: OutputContext,
-        fcitx5_services: Fcitx5Services,
-        fcitx5_osk_services: Fcitx5OskServices,
         wait_for_socket: bool,
+        modifier_workaround: bool,
         shutdown_flag: ShutdownFlag,
-    ) -> Result<(Self, Task<Message>)> {
+    ) -> (Self, Task<Message>) {
         let wayland_window_manager = WaylandWindowManager::new(
             output_context.clone(),
             config_manager.as_ref().preferred_output_name().cloned(),
         );
+        let (async_state, config_manager) = match super::run_async({
+            let shutdown_flag = shutdown_flag.clone();
+            async move {
+                let res = AsyncAppState::new(
+                    config_manager.as_ref(),
+                    wait_for_socket,
+                    modifier_workaround,
+                    shutdown_flag,
+                )
+                .await;
+                res.map(|r| (r, config_manager))
+            }
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Unable to create AsyncAppState: {e:#?}");
+                panic!("Unable to create AsyncAppState");
+            }
+        };
+
         let (inner, task) = Keyboard::new(
+            async_state,
             config_manager,
             wayland_window_manager,
-            fcitx5_services,
-            fcitx5_osk_services,
             wait_for_socket,
             shutdown_flag.clone(),
-        )?;
-        Ok((
+        );
+        (
             Self {
-                inner,
                 input_method_context,
                 output_context,
                 shutdown_flag,
+                inner,
             },
             task,
-        ))
+        )
     }
 }
 
@@ -166,11 +185,6 @@ pub fn start(
         Default::default()
     };
 
-    let modifier_workaround_keycodes = config_manager
-        .as_ref()
-        .modifier_workaround_keycodes()
-        .clone();
-
     let connection = WaylandConnection::new();
     let input_method_context = InputMethodContext::new(connection.clone());
     let output_context = OutputContext::new(connection.clone());
@@ -201,23 +215,14 @@ pub fn start(
         ..Default::default()
     })
     .run_with(move || {
-        let fcitx5_services = super::run_async(Fcitx5Services::new(
-            modifier_workaround,
-            modifier_workaround_keycodes,
-        ))
-        .expect("unable to create a fcitx5 service clients");
-        let fcitx5_osk_services = super::run_async(Fcitx5OskServices::new())
-            .expect("unable to create a fcitx5 osk service clients");
         let (keyboard, task) = WaylandKeyboard::new(
             config_manager,
             input_method_context,
             output_context,
-            fcitx5_services,
-            fcitx5_osk_services,
             wait_for_socket,
+            modifier_workaround,
             shutdown_flag,
-        )
-        .expect("unable to create a WaylandKeyboard");
+        );
         (keyboard, init_task.chain(task).map_task())
     })?;
     Ok(())

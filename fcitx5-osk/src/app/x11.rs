@@ -1,5 +1,5 @@
 use anyhow::Result;
-use fcitx5_osk_common::{dbus::client::Fcitx5OskServices, signal::ShutdownFlag};
+use fcitx5_osk_common::signal::ShutdownFlag;
 use iced::{futures::stream, window::Id, Element, Subscription, Task, Theme};
 use x11rb::rust_connection::RustConnection;
 
@@ -7,9 +7,10 @@ pub use crate::app::x11::output::{OutputContext, OutputGeometry};
 use crate::{
     app::{self, Keyboard, Message},
     config::ConfigManager,
-    dbus::client::Fcitx5Services,
     window::x11::X11WindowManager,
 };
+
+use super::AsyncAppState;
 
 mod output;
 
@@ -23,32 +24,49 @@ impl X11Keyboard {
     pub fn new(
         config_manager: ConfigManager,
         output_context: OutputContext,
-        fcitx5_services: Fcitx5Services,
-        fcitx5_osk_services: Fcitx5OskServices,
         wait_for_socket: bool,
+        modifier_workaround: bool,
         shutdown_flag: ShutdownFlag,
-    ) -> Result<(Self, Task<Message>)> {
-        let wm = X11WindowManager::new(
+    ) -> (Self, Task<Message>) {
+        let x11_window_manager = X11WindowManager::new(
             xcb_connection,
             output_context.clone(),
             config_manager.as_ref().preferred_output_name().cloned(),
         );
+        let (async_state, config_manager) = match super::run_async({
+            let shutdown_flag = shutdown_flag.clone();
+            async move {
+                let res = AsyncAppState::new(
+                    config_manager.as_ref(),
+                    wait_for_socket,
+                    modifier_workaround,
+                    shutdown_flag,
+                )
+                .await;
+                res.map(|r| (r, config_manager))
+            }
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Unable to create AsyncAppState: {e:#?}");
+                panic!("Unable to create AsyncAppState");
+            }
+        };
         let (inner, task) = Keyboard::new(
+            async_state,
             config_manager,
-            wm,
-            fcitx5_services,
-            fcitx5_osk_services,
+            x11_window_manager,
             wait_for_socket,
             shutdown_flag.clone(),
-        )?;
-        Ok((
+        );
+        (
             Self {
-                inner,
                 output_context,
                 shutdown_flag,
+                inner,
             },
             task,
-        ))
+        )
     }
 }
 
@@ -100,11 +118,6 @@ pub fn start(
     modifier_workaround: bool,
     shutdown_flag: ShutdownFlag,
 ) -> Result<()> {
-    let modifier_workaround_keycodes = config_manager
-        .as_ref()
-        .modifier_workaround_keycodes()
-        .clone();
-
     // each eventloop should has its own connection.
     let output_context = OutputContext::new(xcb_connection)?;
 
@@ -112,22 +125,13 @@ pub fn start(
         .theme(X11Keyboard::theme)
         .subscription(X11Keyboard::subscription)
         .run_with(move || {
-            let fcitx5_services = super::run_async(Fcitx5Services::new(
-                modifier_workaround,
-                modifier_workaround_keycodes,
-            ))
-            .expect("unable to create a fcitx5 service clients");
-            let fcitx5_osk_services = super::run_async(Fcitx5OskServices::new())
-                .expect("unable to create a fcitx5 osk service clients");
             let (keyboard, task) = X11Keyboard::new(
                 config_manager,
                 output_context,
-                fcitx5_services,
-                fcitx5_osk_services,
                 wait_for_socket,
+                modifier_workaround,
                 shutdown_flag,
-            )
-            .expect("unable to create a X11Keyboard");
+            );
             (keyboard, init_task.chain(task))
         })?;
     Ok(())

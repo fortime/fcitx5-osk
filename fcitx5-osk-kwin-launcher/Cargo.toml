@@ -19,5 +19,8 @@ tracing.workspace = true
 zbus.workspace = true
 zvariant.workspace = true
 futures-util.workspace = true
-cvt = "0.1.2"
-libc = "0.2.172"
+cvt.workspace = true
+libc.workspace = true
+
+[features]
+console-subscriber = ["fcitx5-osk-common/console-subscriber"]

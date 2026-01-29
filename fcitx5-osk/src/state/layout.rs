@@ -1,6 +1,5 @@
 use std::{mem, rc::Rc, result::Result as StdResult};
 
-use anyhow::Result;
 use iced::{
     alignment::Horizontal,
     widget::{self, Column, Container},
@@ -27,7 +26,7 @@ pub struct LayoutState {
 }
 
 impl LayoutState {
-    pub fn new(width: u16, key_area_layout: Rc<KeyAreaLayout>) -> Result<Self> {
+    pub fn new(width: u16, key_area_layout: Rc<KeyAreaLayout>) -> Self {
         let mut res = Self {
             size: (0, 0),
             scale_factor: 1.0,
@@ -40,8 +39,8 @@ impl LayoutState {
             setting_shown: false,
             max_width: width,
         };
-        res.calculate_size()?;
-        Ok(res)
+        res.calculate_size();
+        res
     }
 
     pub fn unit_within(&self, width: u16) -> u16 {
@@ -70,7 +69,7 @@ impl LayoutState {
         unit
     }
 
-    fn calculate_size(&mut self) -> Result<()> {
+    fn calculate_size(&mut self) {
         // because of scaling issue, the actual window size is different from the one calculated in
         // this method.
         let unit = self.unit_within(self.max_width);
@@ -89,7 +88,6 @@ impl LayoutState {
             key_area_size,
             self.padding
         );
-        Ok(())
     }
 
     pub fn available_candidate_width(&self) -> u16 {
@@ -116,53 +114,28 @@ impl LayoutState {
             return Err(unit);
         }
         mem::swap(&mut self.max_width, &mut width);
-        if let Err(e) = self.calculate_size() {
-            tracing::warn!("failed to update width: {e}, recovering.");
-            // recover
-            mem::swap(&mut self.max_width, &mut width);
-            Err(unit)
-        } else {
-            Ok(old_unit)
-        }
+        self.calculate_size();
+        Ok(old_unit)
     }
 
-    pub fn update_scale_factor(&mut self, mut scale_factor: f32) -> StdResult<f32, f32> {
+    pub fn update_scale_factor(&mut self, mut scale_factor: f32) -> f32 {
         mem::swap(&mut self.scale_factor, &mut scale_factor);
-        if let Err(e) = self.calculate_size() {
-            tracing::warn!("failed to update scale factor: {e}, recovering.");
-            // recover
-            mem::swap(&mut self.scale_factor, &mut scale_factor);
-            Err(scale_factor)
-        } else {
-            Ok(scale_factor)
-        }
+        self.calculate_size();
+        scale_factor
     }
 
     pub fn update_key_area_layout(
         &mut self,
         mut max_width: u16,
         mut key_area_layout: Rc<KeyAreaLayout>,
-    ) -> StdResult<Rc<KeyAreaLayout>, Rc<KeyAreaLayout>> {
-        let old_min_toolbar_height_u = self.key_area_layout.min_toolbar_height_u();
+    ) -> Rc<KeyAreaLayout> {
         let new_min_toolbar_height_u = key_area_layout.min_toolbar_height_u();
         mem::swap(&mut self.key_area_layout, &mut key_area_layout);
         mem::swap(&mut self.max_width, &mut max_width);
         self.toolbar_layout
             .update_height_u(new_min_toolbar_height_u);
-        if let Err(e) = self.calculate_size() {
-            tracing::warn!(
-                "failed to update key area layout[{}]: {e}, recovering.",
-                key_area_layout.name()
-            );
-            // recover
-            mem::swap(&mut self.key_area_layout, &mut key_area_layout);
-            mem::swap(&mut self.max_width, &mut max_width);
-            self.toolbar_layout
-                .update_height_u(old_min_toolbar_height_u);
-            Err(key_area_layout)
-        } else {
-            Ok(key_area_layout)
-        }
+        self.calculate_size();
+        key_area_layout
     }
 
     pub fn update_candidate_font(&mut self, font: Font) {

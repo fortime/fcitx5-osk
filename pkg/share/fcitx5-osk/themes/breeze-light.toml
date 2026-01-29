@@ -1,0 +1,8 @@
+name = "Breeze Light"
+
+[palette]
+background = "#ffffff"
+text = "#232629"
+primary = "#3daee9"
+success = "#27ae60"
+danger = "#da4453"

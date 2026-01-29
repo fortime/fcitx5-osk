@@ -1,7 +1,6 @@
 pub mod client {
     use anyhow::Result;
     use getset::Getters;
-    use tracing::instrument;
     use zbus::{zvariant::OwnedFd, Connection, Result as ZbusResult};
 
     #[zbus::proxy(
@@ -10,14 +9,14 @@ pub mod client {
         interface = "org.fcitx.Fcitx.Controller1"
     )]
     pub trait Fcitx5ControllerService {
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn reopen_wayland_connection_socket(
             &self,
             wayland_display: &str,
             wayland_socket: OwnedFd,
         ) -> ZbusResult<()>;
 
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn open_wayland_connection_socket(&self, wayland_socket: OwnedFd) -> ZbusResult<()>;
     }
 
@@ -27,12 +26,18 @@ pub mod client {
         interface = "org.kde.kwin.VirtualKeyboard"
     )]
     pub trait KwinVirtualKeyboardService {
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         #[zbus(property(emits_changed_signal = "false"), name = "active")]
         fn active(&self) -> ZbusResult<bool>;
 
         #[zbus(signal, name = "activeChanged")]
         fn active_changed(&self);
 
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        #[zbus(property, name = "active")]
+        fn set_active(&self, value: bool) -> ZbusResult<()>;
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         #[zbus(property(emits_changed_signal = "false"), name = "visible")]
         fn visible(&self) -> ZbusResult<bool>;
 
@@ -40,12 +45,12 @@ pub mod client {
         fn visible_changed(&self);
 
         /// don't wait for reply, so it won't freeze kwin.
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         #[zbus(property, name = "enabled")]
         fn set_enabled(&self, value: bool) -> ZbusResult<()>;
-
-        // Path=/org/kde/KWin  Interface=org.kde.KWin.TabletModeManager  Member=tabletModeChanged
     }
 
+    // Path=/org/kde/KWin  Interface=org.kde.KWin.TabletModeManager  Member=tabletModeChanged
     #[zbus::proxy(
         default_service = "org.kde.KWin",
         default_path = "/org/kde/KWin",
@@ -89,7 +94,7 @@ pub mod client {
         interface = "org.freedesktop.ScreenSaver"
     )]
     pub trait FdoScreenSaverService {
-        #[instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn get_active(&self) -> ZbusResult<bool>;
 
         #[zbus(signal)]

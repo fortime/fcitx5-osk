@@ -1,3 +1,0 @@
-[D-BUS Service]
-Name=fyi.fortime.Fcitx5Osk
-Exec=/usr/bin/fcitx5-osk --force-wayland --wait-for-socket --modifier-workaround

@@ -2,8 +2,8 @@
 Name=Fcitx 5 Osk Kwin Launcher
 GenericName=Input Method
 Comment=An Input Method to Start fcitx5 and fcitx5-osk in Kwin Wayland.
-Exec=/usr/bin/fcitx5-osk-kwin-launcher --fcitx5-reopen
-Icon=input-keyboard-virtual
+Exec=@INSTALL_BIN_DIR@/fcitx5-osk-kwin-launcher --fcitx5-reopen
+Icon=fyi.fortime.Fcitx5Osk
 Terminal=false
 Type=Application
 Categories=System;Utility;

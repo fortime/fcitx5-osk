@@ -510,3 +510,13 @@ impl Fcitx5Services {
         }
     }
 }
+
+#[zbus::proxy(
+    default_service = "org.freedesktop.portal.Desktop",
+    default_path = "/org/freedesktop/portal/desktop",
+    interface = "org.freedesktop.portal.Settings"
+)]
+pub trait FdoPortalSettingsService {
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
+    fn read_one(&self, namespace: &str, key: &str) -> ZbusResult<OwnedValue>;
+}
