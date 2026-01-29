@@ -229,7 +229,7 @@ async fn get_property(name: String) -> Result<()> {
     let value = match name.as_str() {
         "manual_mode" => controller.manual_mode().await?.to_string(),
         _ => {
-            anyhow::bail!(format!("Unknow property: {name}"));
+            anyhow::bail!(format!("Unknown property: {name}"));
         }
     };
     println!("{value}");
@@ -244,7 +244,7 @@ async fn set_property(name: String, value: String) -> Result<()> {
             controller.change_manual_mode(value.parse()?).await?;
         }
         _ => {
-            anyhow::bail!(format!("Unknow property: {name}"));
+            anyhow::bail!(format!("Unknown property: {name}"));
         }
     }
     Ok(())
