@@ -15,7 +15,7 @@ description = "An onscreen keyboard working with fcitx5"
 authors = [
     "palfortime@gmail.com"
 ]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license-file = "LICENSE"
 keywords = ["wayland", "kwin", "virtual keyboard", "onscreen keyboard"]
@@ -23,7 +23,7 @@ repository = "https://github.com/fortime/fcitx5-osk"
 readme = "README.md"
 
 [workspace.dependencies]
-fcitx5-osk-common = { version = "0.1", path = "./fcitx5-osk-common" }
+fcitx5-osk-common = { version = "0.2", path = "./fcitx5-osk-common" }
 
 anyhow = "1.0.94"
 clap = { version = "4.5.23", features = ["cargo", "derive"] }
