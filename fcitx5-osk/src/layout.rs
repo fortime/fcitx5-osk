@@ -786,7 +786,7 @@ impl ToElementFieldType for BoolDesc {
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(state);
         let mut toggler = Toggler::new(cur_value)
-            .text_size(text_size)
+            .size(text_size)
             .style(widget::toggler_style);
         if self.is_enabled(state) {
             toggler = toggler.on_toggle(|value| self.on_changed(state, value))
