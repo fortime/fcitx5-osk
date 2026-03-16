@@ -1,3 +1,4 @@
+mod debugger;
 mod key;
 mod movable;
 mod toggle;
@@ -131,6 +132,8 @@ mod toggler {
     }
 }
 
+#[allow(unused)]
+pub use debugger::LayoutDebugger;
 pub use key::{Key, KeyEvent, PopupKey};
 pub use movable::Movable;
 pub use scrollable::scrollable_style;
