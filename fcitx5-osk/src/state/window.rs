@@ -426,6 +426,10 @@ where
         self.layout.unit()
     }
 
+    pub fn font_size(&self) -> u16 {
+        self.layout.font_size()
+    }
+
     fn window_state(&self, id: Id) -> Option<&WindowState<WM>> {
         if self.is_keyboard(id) {
             Some(&self.keyboard_window_state)

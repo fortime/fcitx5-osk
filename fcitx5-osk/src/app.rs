@@ -286,12 +286,14 @@ where
     WM::Appearance: WindowAppearance + 'static + Send + Sync,
 {
     fn error_dialog<T: ErrorDialogContent>(&self, e: T) -> Element<Message> {
+        let font_size = self.state.window_manager().font_size();
         let err_msg = e.err_msg();
         let button_text = e.button_text();
         widget::container(
             widget::column![
-                widget::text(err_msg),
-                widget::button(widget::text(button_text)).on_press(Message::AfterError),
+                widget::text(err_msg).size(font_size),
+                widget::button(widget::text(button_text).size(font_size))
+                    .on_press(Message::AfterError),
             ]
             .spacing(10)
             .padding(10),

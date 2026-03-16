@@ -107,6 +107,10 @@ impl LayoutState {
         self.unit
     }
 
+    pub fn font_size(&self) -> u16 {
+        self.unit * self.key_area_layout.primary_text_size_u()
+    }
+
     pub fn update_unit(&mut self, unit: u16, max_width: u16) -> StdResult<u16, u16> {
         let old_unit = self.unit;
         let mut width = self.size.0 / self.unit * unit;
