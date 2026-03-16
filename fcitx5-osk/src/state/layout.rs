@@ -2,7 +2,7 @@ use std::{mem, rc::Rc, result::Result as StdResult};
 
 use iced::{
     alignment::Horizontal,
-    widget::{self, Column, Container},
+    widget::{Column, Container, Stack},
     Element, Font, Padding, Size,
 };
 
@@ -183,8 +183,9 @@ impl LayoutState {
         };
         // we let keyboard in a stack even there is no overlay, so the widget tree always has the
         // same level. Otherwise, the state will be clear if the level is changed.
-        let mut stack = widget::stack![keyboard];
-        stack = stack.push_maybe(state.keyboard().popup_overlay(self.unit, self.size));
+        let stack = Stack::new()
+            .push(keyboard)
+            .push_maybe(state.keyboard().popup_overlay(self.unit, self.size));
         stack.into()
     }
 

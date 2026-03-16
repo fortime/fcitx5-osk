@@ -19,9 +19,9 @@ use iced::{
         },
         stream,
     },
-    widget::{self, Column},
+    widget::{self, Column, Container, MouseArea, Space, Stack},
     window::{Event as IcedWindowEvent, Id},
-    Color, Element, Event as IcedEvent, Subscription, Task, Theme,
+    Color, Element, Event as IcedEvent, Length, Subscription, Task, Theme,
 };
 use iced_futures::event;
 use tokio::time;
@@ -516,27 +516,32 @@ where
 fn modal<'a>(
     base: Element<'a, Message>,
     content: Element<'a, Message>,
-    on_blur: Message,
+    on_blur_clicked: Message,
 ) -> Element<'a, Message> {
-    widget::stack![
-        base,
-        widget::opaque(
-            widget::mouse_area(widget::center(widget::opaque(content)).style(|_theme| {
-                widget::container::Style {
-                    background: Some(
-                        Color {
-                            a: 0.8,
-                            ..Color::BLACK
-                        }
-                        .into(),
-                    ),
-                    ..widget::container::Style::default()
-                }
-            }))
-            .on_press(on_blur)
+    // TODO stack will clip the viewport, this will lead to a pixel on the right or bottom not
+    // covered by the mask. In iced 0.14, there is a clip option to disable this behavior
+    let mut stack = Stack::new();
+    stack = stack
+        //.clip(false)
+        .push(base)
+        // Create a mask
+        .push(
+            Container::new(widget::opaque(
+                MouseArea::new(Space::new(Length::Fill, Length::Fill)).on_press(on_blur_clicked),
+            ))
+            .style(|_| widget::container::Style {
+                background: Some(
+                    Color {
+                        a: 0.8,
+                        ..Color::BLACK
+                    }
+                    .into(),
+                ),
+                ..widget::container::Style::default()
+            }),
         )
-    ]
-    .into()
+        .push(Container::new(content).center(Length::Fill));
+    stack.into()
 }
 
 async fn detect_theme(
