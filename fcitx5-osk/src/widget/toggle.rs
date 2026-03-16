@@ -4,19 +4,18 @@ use std::{
 };
 
 use iced::{
+    advanced::{
+        layout, overlay, renderer,
+        widget::{tree, Operation, Tree},
+        Clipboard, Layout, Shell, Widget,
+    },
     event::Status,
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
         Interaction as MouseInteraction,
     },
-    overlay,
     touch::{Event as TouchEvent, Finger as TouchFinger},
     Element, Event, Length, Rectangle, Size, Vector,
-};
-use iced_futures::core::{
-    layout, renderer,
-    widget::{tree, Operation, Tree},
-    Clipboard, Layout, Shell, Widget,
 };
 
 #[derive(Hash, PartialEq, Eq)]
@@ -299,7 +298,7 @@ where
     Theme: 'a,
     Renderer: 'a + renderer::Renderer,
 {
-    fn from(key: Toggle<'a, Message, Theme, Renderer>) -> Element<'a, Message, Theme, Renderer> {
-        Element::new(key)
+    fn from(widget: Toggle<'a, Message, Theme, Renderer>) -> Element<'a, Message, Theme, Renderer> {
+        Element::new(widget)
     }
 }

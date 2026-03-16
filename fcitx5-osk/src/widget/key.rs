@@ -1,19 +1,18 @@
 use std::collections::HashSet;
 
 use iced::{
+    advanced::{
+        layout, overlay, renderer,
+        widget::{tree, Operation, Tree},
+        Clipboard, Layout, Shell, Widget,
+    },
     event::Status,
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
         Interaction as MouseInteraction,
     },
-    overlay,
     touch::{Event as TouchEvent, Finger as TouchFinger},
     Border, Color, Element, Event, Length, Padding, Rectangle, Shadow, Size, Vector,
-};
-use iced_futures::core::{
-    layout, renderer,
-    widget::{tree, Operation, Tree},
-    Clipboard, Layout, Shell, Widget,
 };
 
 /// Local state of the [`Key`].
@@ -328,9 +327,9 @@ where
     Renderer: 'a + renderer::Renderer,
 {
     fn from(
-        key: Key<'a, Message, PressCb, ReleaseCb, Theme, Renderer>,
+        widget: Key<'a, Message, PressCb, ReleaseCb, Theme, Renderer>,
     ) -> Element<'a, Message, Theme, Renderer> {
-        Element::new(key)
+        Element::new(widget)
     }
 }
 
@@ -683,7 +682,9 @@ where
     Theme: 'a + AsThemeRef,
     Renderer: 'a + renderer::Renderer,
 {
-    fn from(key: PopupKey<'a, Message, Theme, Renderer>) -> Element<'a, Message, Theme, Renderer> {
-        Element::new(key)
+    fn from(
+        widget: PopupKey<'a, Message, Theme, Renderer>,
+    ) -> Element<'a, Message, Theme, Renderer> {
+        Element::new(widget)
     }
 }
