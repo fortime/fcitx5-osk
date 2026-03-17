@@ -47,13 +47,14 @@ impl LayoutState {
         // plus two units of padding
         let width_u = self.key_area_layout.width_u() + 2;
 
-        let mut step = 1;
-        loop {
-            if (self.scale_factor * step as f32).fract() == 0.0 {
-                break;
-            }
-            step += 1;
-        }
+        let step = 1;
+        //let mut step = 1;
+        //loop {
+        //    if (self.scale_factor * step as f32).fract() == 0.0 {
+        //        break;
+        //    }
+        //    step += 1;
+        //}
 
         let mut unit = step;
         while unit * width_u <= width {

@@ -361,16 +361,17 @@ impl ConfigState {
                     id: "size",
                     typ: StepDesc::<u16> {
                         cur_value: |state| state.unit(),
-                        step: |state| {
-                            let scale_factor = state.scale_factor();
-                            let mut step = 1;
-                            loop {
-                                if (scale_factor * step as f32).fract() == 0.0 {
-                                    break;
-                                }
-                                step += 1;
-                            }
-                            step
+                        step: |_state| {
+                            //let scale_factor = state.scale_factor();
+                            //let mut step = 1;
+                            //loop {
+                            //    if (scale_factor * step as f32).fract() == 0.0 {
+                            //        break;
+                            //    }
+                            //    step += 1;
+                            //}
+                            //step
+                            1
                         },
                         on_increased: |state, cur_value, delta| {
                             if state.window_manager_mode() == WindowManagerMode::Normal {
