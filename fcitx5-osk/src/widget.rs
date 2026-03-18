@@ -114,6 +114,47 @@ mod scrollable {
     }
 }
 
+mod slider {
+    use iced::{
+        widget::slider::{self, HandleShape, Status, Style},
+        Theme,
+    };
+
+    use crate::layout::KLength;
+
+    /// Edited version of `iced::widget::scrollable::default`
+    pub fn slider_style_cb(text_size: KLength) -> impl Fn(&Theme, Status) -> Style {
+        let text_size = text_size.val();
+
+        move |theme, status| {
+            let palette = theme.extended_palette();
+
+            let color = match status {
+                Status::Active => palette.primary.base.color,
+                Status::Hovered => palette.primary.base.color,
+                Status::Dragged => palette.primary.strong.color,
+            };
+
+            let mut style = slider::default(theme, status);
+
+            style.rail.backgrounds = (color.into(), palette.background.weak.color.into());
+            style.rail.width = text_size / 6.;
+            style.handle.background = color.into();
+            style.handle.shape = HandleShape::Circle {
+                radius: text_size / 3.,
+            };
+            if status != Status::Active {
+                if status == Status::Hovered {
+                    style.handle.background = palette.primary.weak.color.into();
+                }
+                style.handle.border_width = 1.;
+                style.handle.border_color = palette.primary.strong.color;
+            }
+            style
+        }
+    }
+}
+
 mod toggler {
     use iced::{
         widget::toggler::{self, Status, Style},
@@ -156,5 +197,6 @@ pub use debugger::LayoutDebugger;
 pub use key::{Key, KeyEvent, PopupKey};
 pub use movable::Movable;
 pub use scrollable::scrollable_style;
+pub use slider::slider_style_cb;
 pub use toggle::{Toggle, ToggleCondition};
 pub use toggler::toggler_style;

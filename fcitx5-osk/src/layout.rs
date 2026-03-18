@@ -6,37 +6,233 @@ use iced::{
     advanced::svg::Handle as SvgHandle,
     alignment::{Horizontal, Vertical},
     widget::{
-        button::Style as ButtonStyle,
+        button::{Style as ButtonStyle, DEFAULT_PADDING},
+        container::Style as ContainerStyle,
         scrollable::{Direction, Scrollbar},
         text::Shaping,
         text_input::TextInput,
-        Button, Column, Container, PickList, Row, Scrollable, Space, Svg, Text, Toggler,
+        Button, Column, Container, PickList, Row, Scrollable, Slider, Space, Svg, Text, Toggler,
     },
     window::Id,
-    Color, Element, Font, Length,
+    Color, Element, Font, Length, Pixels, Theme,
 };
+use num_traits::FromPrimitive;
 use serde::{
-    de::{Error, Unexpected},
-    Deserialize, Deserializer,
+    de::{self, Error, Unexpected, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
 };
 
 use std::{
-    collections::HashMap, path::PathBuf, result::Result as StdResult, sync::Arc, time::Duration,
+    collections::HashMap,
+    fmt::{Display, Formatter, Result as FmtResult},
+    ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
+    path::PathBuf,
+    result::Result as StdResult,
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
 };
 
 use crate::{
-    app::Message,
+    app::{KeyboardError, Message},
     config::IndicatorDisplay,
     dbus::server::ImPanelEvent,
     state::{
         BoolDesc, CloseOpSource, DynamicEnumDesc, EnumDesc, Field, FieldType, ImEvent, LayoutEvent,
-        OwnedEnumDesc, StateExtractor, StepDesc, TextDesc, UpdateConfigEvent, WindowEvent,
-        WindowManagerEvent,
+        OwnedEnumDesc, RangeDesc, StateExtractor, StepDesc, TextDesc, UpdateConfigEvent,
+        WindowEvent, WindowManagerEvent,
     },
     store::IdAndConfigPath,
     widget::{self, Movable, Toggle, ToggleCondition},
     window::WindowManagerMode,
 };
+
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+pub struct KLength(f32);
+
+impl KLength {
+    pub fn val(&self) -> f32 {
+        self.0
+    }
+}
+
+impl Default for KLength {
+    fn default() -> Self {
+        Self(0.)
+    }
+}
+
+impl Display for KLength {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str(&format!("k({})", self.0))
+    }
+}
+
+impl std::fmt::Debug for KLength {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        Display::fmt(&self, f)
+    }
+}
+
+impl Sub<u32> for KLength {
+    type Output = Self;
+
+    fn sub(self, rhs: u32) -> Self::Output {
+        Self(self.0 - rhs as f32)
+    }
+}
+
+impl Mul<u32> for KLength {
+    type Output = Self;
+
+    fn mul(self, rhs: u32) -> Self::Output {
+        Self(self.0 * rhs as f32)
+    }
+}
+
+impl Div<u32> for KLength {
+    type Output = Self;
+
+    fn div(self, rhs: u32) -> Self::Output {
+        Self(self.0 / rhs as f32)
+    }
+}
+
+impl Mul<KLength> for u32 {
+    type Output = KLength;
+
+    fn mul(self, rhs: KLength) -> Self::Output {
+        KLength(self as f32 * rhs.0)
+    }
+}
+
+impl Mul<&u32> for KLength {
+    type Output = Self;
+
+    fn mul(self, rhs: &u32) -> Self::Output {
+        Self(self.0 * (*rhs) as f32)
+    }
+}
+
+impl Mul<KLength> for &u32 {
+    type Output = KLength;
+
+    fn mul(self, rhs: KLength) -> Self::Output {
+        KLength((*self) as f32 * rhs.0)
+    }
+}
+
+impl Div<f32> for KLength {
+    type Output = Self;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        Self(self.0 / rhs)
+    }
+}
+
+impl Add for KLength {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        KLength(self.0 + rhs.0)
+    }
+}
+
+impl Sub for KLength {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        KLength(self.0 - rhs.0)
+    }
+}
+
+impl Mul for KLength {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        KLength(self.0 * rhs.0)
+    }
+}
+
+impl Div for KLength {
+    type Output = Self;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        KLength(self.0 / rhs.0)
+    }
+}
+
+impl AddAssign for KLength {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+impl SubAssign for KLength {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0;
+    }
+}
+
+impl<'de> Deserialize<'de> for KLength {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct KLengthVisitor;
+
+        impl<'de> Visitor<'de> for KLengthVisitor {
+            type Value = KLength;
+
+            fn expecting(&self, formatter: &mut Formatter) -> FmtResult {
+                formatter.write_str("a u32 or f32")
+            }
+
+            fn visit_i64<E>(self, v: i64) -> Result<KLength, E>
+            where
+                E: de::Error,
+            {
+                Ok(KLength(v as f32))
+            }
+
+            fn visit_f64<E>(self, v: f64) -> Result<KLength, E>
+            where
+                E: de::Error,
+            {
+                Ok(KLength(v as f32))
+            }
+        }
+
+        deserializer.deserialize_f32(KLengthVisitor)
+    }
+}
+
+impl Serialize for KLength {
+    fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_f32(self.0)
+    }
+}
+
+impl From<KLength> for Pixels {
+    fn from(value: KLength) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<KLength> for Length {
+    fn from(value: KLength) -> Self {
+        value.0.into()
+    }
+}
+
+impl From<f32> for KLength {
+    fn from(value: f32) -> Self {
+        KLength(value)
+    }
+}
 
 #[derive(Deserialize, CopyGetters, Getters)]
 pub struct KeyAreaLayout {
@@ -121,13 +317,13 @@ impl KeyAreaLayout {
         height_u
     }
 
-    pub fn size(&self, unit: u32) -> (u32, u32) {
+    pub fn size(&self, unit: KLength) -> (KLength, KLength) {
         (self.width_u() * unit, self.height_u() * unit)
     }
 
     pub fn to_element<'b>(
         &self,
-        unit: u32,
+        unit: KLength,
         state: &'b dyn StateExtractor,
     ) -> impl Into<Element<'b, Message>> {
         let mut col = Column::new()
@@ -221,7 +417,7 @@ impl KeyRow {
 
     fn to_element<'b>(
         &self,
-        unit: u32,
+        unit: KLength,
         state: &'b dyn StateExtractor,
     ) -> impl Into<Element<'b, Message>> {
         let mut row = Row::new()
@@ -259,7 +455,7 @@ impl KeyRowElement {
     fn to_element<'b>(
         &self,
         max_height_u: u32,
-        unit: u32,
+        unit: KLength,
         state: &'b dyn StateExtractor,
     ) -> Element<'b, Message> {
         match self {
@@ -366,7 +562,7 @@ impl ToolbarLayout {
     pub fn to_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
-        unit: u32,
+        unit: KLength,
         candidate_font: Font,
         font_size_u: u32,
     ) -> Element<'b, Message> {
@@ -380,7 +576,7 @@ impl ToolbarLayout {
     fn to_candidate_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
-        unit: u32,
+        unit: KLength,
         font: Font,
         font_size_u: u32,
     ) -> Element<'b, Message> {
@@ -498,7 +694,7 @@ impl ToolbarLayout {
     fn to_toolbar_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
-        unit: u32,
+        unit: KLength,
         font_size_u: u32,
     ) -> Element<'b, Message> {
         let state = params.state;
@@ -593,7 +789,7 @@ impl SettingLayout {
     pub fn to_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
-        unit: u32,
+        unit: KLength,
         font_size_u: u32,
     ) -> Element<'b, Message> {
         let state = params.state;
@@ -602,6 +798,7 @@ impl SettingLayout {
         let mut name_column = Column::new();
         let mut value_column = Column::new().width(Length::Fill);
         for field in state.updatable_fields() {
+            let row_num = field_row_num(state, field);
             name_column = name_column.push(
                 Container::new(
                     Text::new(field.name())
@@ -609,10 +806,11 @@ impl SettingLayout {
                         .shaping(Shaping::Advanced)
                         .align_x(Horizontal::Left),
                 )
-                .center_y(height),
+                .center_y(height * row_num),
             );
             value_column = value_column.push(
-                Container::new(field_value_element(state, field, text_size)).center_y(height),
+                Container::new(field_value_element(state, field, text_size))
+                    .center_y(height * row_num),
             );
         }
         Container::new(
@@ -642,8 +840,12 @@ trait ToElementFieldType {
         &'a self,
         field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u32,
+        text_size: KLength,
     ) -> Element<'a, Message>;
+
+    fn row_num(&self, _state: &dyn StateExtractor) -> u32 {
+        1
+    }
 }
 
 impl<T> ToElementFieldType for EnumDesc<T>
@@ -654,7 +856,7 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u32,
+        text_size: KLength,
     ) -> Element<'a, Message> {
         if self.is_enabled(state) {
             PickList::new(self.variants(), self.cur_value(state), |selected| {
@@ -683,7 +885,7 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u32,
+        text_size: KLength,
     ) -> Element<'a, Message> {
         if self.is_enabled(state) {
             PickList::new(self.variants(), self.cur_value(state), |selected| {
@@ -712,7 +914,7 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u32,
+        text_size: KLength,
     ) -> Element<'a, Message> {
         let (variants, selected) = self.variants_and_selected(state);
         if self.is_enabled(state) {
@@ -738,7 +940,7 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u32,
+        text_size: KLength,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(state);
         Row::new()
@@ -757,12 +959,97 @@ where
     }
 }
 
+impl<T> ToElementFieldType for RangeDesc<T>
+where
+    T: 'static + Copy + From<u8> + PartialOrd + Into<f64> + FromPrimitive + Display + FromStr,
+{
+    fn to_element<'a>(
+        &'a self,
+        field: &'a Field,
+        state: &'a dyn StateExtractor,
+        text_size: KLength,
+    ) -> Element<'a, Message> {
+        let cur_value = self.cur_value(field, state);
+        let padding = DEFAULT_PADDING;
+        let mut column = Column::new().push(
+            Container::new(
+                Text::new(self.format(state, cur_value))
+                    .size(text_size)
+                    .shaping(Shaping::Advanced),
+            )
+            .align_y(Vertical::Center)
+            .align_x(Horizontal::Center)
+            .padding(padding)
+            .style(|theme: &Theme| ContainerStyle {
+                background: Some(theme.extended_palette().background.weak.color.into()),
+                ..Default::default()
+            }),
+        );
+        if self.is_enabled(state) {
+            let init_value = self.init_value(state);
+            let min_value = self.min_value(state);
+            let max_value = self.max_value(state);
+            let key = field.id();
+            let slider = Slider::new(min_value..=max_value, cur_value, move |v| {
+                if self.check(state, v) {
+                    Message::from(UpdateConfigEvent::ChangeTempText {
+                        key: key.to_string(),
+                        init_value: init_value.to_string(),
+                        value: v.to_string(),
+                    })
+                } else {
+                    KeyboardError::Error(Arc::new(anyhow::anyhow!(
+                        r#"Invalid value for option["{}"]: {}"#,
+                        key,
+                        v
+                    )))
+                    .into()
+                }
+            })
+            .height(text_size)
+            .style(widget::slider_style_cb(text_size))
+            .on_release(Message::from(UpdateConfigEvent::SubmitTempText {
+                key: key.to_string(),
+                init_value: init_value.to_string(),
+                producer: self.on_changed_cb(),
+            }));
+            let mut slider_row = Row::new().spacing(text_size / 2).align_y(Vertical::Center);
+            slider_row = slider_row.push(
+                Text::new(self.format(state, min_value))
+                    .size(text_size / 2)
+                    .shaping(Shaping::Advanced),
+            );
+            slider_row = slider_row.push(slider);
+            slider_row = slider_row.push(
+                Text::new(self.format(state, max_value))
+                    .size(text_size / 2)
+                    .shaping(Shaping::Advanced),
+            );
+            column = column.push(
+                Container::new(slider_row)
+                    .align_y(Vertical::Center)
+                    .align_x(Horizontal::Center)
+                    .padding(padding),
+            );
+        }
+        column.into()
+    }
+
+    fn row_num(&self, state: &dyn StateExtractor) -> u32 {
+        if self.is_enabled(state) {
+            2
+        } else {
+            1
+        }
+    }
+}
+
 impl ToElementFieldType for TextDesc {
     fn to_element<'a>(
         &'a self,
         field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u32,
+        text_size: KLength,
     ) -> Element<'a, Message> {
         TextInput::new(
             &self.placeholder(field, state).unwrap_or_default(),
@@ -782,7 +1069,7 @@ impl ToElementFieldType for BoolDesc {
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u32,
+        text_size: KLength,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(state);
         let mut toggler = Toggler::new(cur_value)
@@ -795,7 +1082,7 @@ impl ToElementFieldType for BoolDesc {
     }
 }
 
-fn nerd_icon<'a, Message: 'a>(icon: char, size: u32, color: Color) -> Element<'a, Message> {
+fn nerd_icon<'a, Message: 'a>(icon: char, size: KLength, color: Color) -> Element<'a, Message> {
     Text::new(icon)
         .size(size)
         .font(Font::with_name("fcitx5 osk nerd"))
@@ -806,9 +1093,9 @@ fn nerd_icon<'a, Message: 'a>(icon: char, size: u32, color: Color) -> Element<'a
 
 fn nerd_btn<'a, Message: 'a>(
     icon: char,
-    font_size: u32,
+    font_size: KLength,
     color: Color,
-    unit: u32,
+    unit: KLength,
 ) -> Button<'a, Message> {
     Button::new(
         Container::new(nerd_icon(icon, font_size, color))
@@ -825,8 +1112,8 @@ fn nerd_btn<'a, Message: 'a>(
 fn candidate_btn<Message>(
     candidate: &str,
     font: Font,
-    font_size: u32,
-    width: u32,
+    font_size: KLength,
+    width: KLength,
 ) -> Button<'_, Message> {
     let text = Text::new(candidate)
         .font(font)
@@ -840,7 +1127,7 @@ fn candidate_btn<Message>(
         .padding(0)
 }
 
-pub fn indicator_btn<'a, Message>(width: u32) -> Button<'a, Message>
+pub fn indicator_btn<'a, Message>(width: KLength) -> Button<'a, Message>
 where
     Message: 'a,
 {
@@ -855,17 +1142,29 @@ where
 fn field_value_element<'a>(
     state: &'a dyn StateExtractor,
     field: &'a Field,
-    text_size: u32,
+    text_size: KLength,
 ) -> Element<'a, Message> {
     match field.typ() {
-        FieldType::StepU32(step_desc) => step_desc.to_element(field, state, text_size),
-        FieldType::OwnedEnumPlacement(enum_desc) => enum_desc.to_element(field, state, text_size),
-        FieldType::OwnedEnumIndicatorDisplay(enum_desc) => {
-            enum_desc.to_element(field, state, text_size)
-        }
-        FieldType::EnumString(enum_desc) => enum_desc.to_element(field, state, text_size),
-        FieldType::DynamicEnumString(enum_desc) => enum_desc.to_element(field, state, text_size),
-        FieldType::Text(text_desc) => text_desc.to_element(field, state, text_size),
-        FieldType::Bool(bool_desc) => bool_desc.to_element(field, state, text_size),
+        FieldType::StepU32(desc) => desc.to_element(field, state, text_size),
+        FieldType::RangeF32(desc) => desc.to_element(field, state, text_size),
+        FieldType::OwnedEnumPlacement(desc) => desc.to_element(field, state, text_size),
+        FieldType::OwnedEnumIndicatorDisplay(desc) => desc.to_element(field, state, text_size),
+        FieldType::EnumString(desc) => desc.to_element(field, state, text_size),
+        FieldType::DynamicEnumString(desc) => desc.to_element(field, state, text_size),
+        FieldType::Text(desc) => desc.to_element(field, state, text_size),
+        FieldType::Bool(desc) => desc.to_element(field, state, text_size),
+    }
+}
+
+fn field_row_num<'a>(state: &'a dyn StateExtractor, field: &'a Field) -> u32 {
+    match field.typ() {
+        FieldType::StepU32(desc) => desc.row_num(state),
+        FieldType::RangeF32(desc) => desc.row_num(state),
+        FieldType::OwnedEnumPlacement(desc) => desc.row_num(state),
+        FieldType::OwnedEnumIndicatorDisplay(desc) => desc.row_num(state),
+        FieldType::EnumString(desc) => desc.row_num(state),
+        FieldType::DynamicEnumString(desc) => desc.row_num(state),
+        FieldType::Text(desc) => desc.row_num(state),
+        FieldType::Bool(desc) => desc.row_num(state),
     }
 }

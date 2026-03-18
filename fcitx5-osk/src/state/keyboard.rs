@@ -22,7 +22,7 @@ use crate::{
     },
     font,
     key_set::{Key, KeyValue, ThinKeyValue},
-    layout::KeyAreaLayout,
+    layout::{KLength, KeyAreaLayout},
     store::Store,
     widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
 };
@@ -188,7 +188,7 @@ impl KeyboardState {
         &'a self,
         holding_key_state: &'a HoldingKeyState,
         key_value: &'a KeyValue,
-        unit: u32,
+        unit: KLength,
         border_radius: f32,
     ) -> PopupKey<'a, Message> {
         let common =
@@ -262,7 +262,12 @@ impl KeyboardState {
         }
     }
 
-    pub fn key(&self, key_name: Arc<str>, unit: u32, size: (u32, u32)) -> Element<'_, Message> {
+    pub fn key(
+        &self,
+        key_name: Arc<str>,
+        unit: KLength,
+        size: (KLength, KLength),
+    ) -> Element<'_, Message> {
         let (width, height) = size;
         let (inner_width, inner_height) = (
             width - TEXT_PADDING_LENGTH * 2,
@@ -276,8 +281,12 @@ impl KeyboardState {
             let primary_height = inner_height - secondary_height;
             // It's related to the conversion between float and int, if we don't minus 1, it may
             // be too large in float, and the text can't be shown
-            let secondary_text_size = (secondary_height - 1).min(self.secondary_text_size_u * unit);
-            let primary_text_size = (primary_height - 1).min(self.primary_text_size_u * unit);
+            let secondary_text_size = (secondary_height - 1)
+                .val()
+                .min((self.secondary_text_size_u * unit).val());
+            let primary_text_size = (primary_height - 1)
+                .val()
+                .min((self.primary_text_size_u * unit).val());
             let mut column: Column<Message> = Column::new();
             let primary_key_value = key.primary();
             let secondary_key_values = key.secondaries();
@@ -305,7 +314,7 @@ impl KeyboardState {
                     .shaping(Shaping::Advanced)
                     .width(inner_width)
                     .height(secondary_height)
-                    .size(secondary_text_size as f32)
+                    .size(secondary_text_size)
                     .align_y(Vertical::Center)
                     .align_x(Horizontal::Right);
                 top = top.push(padding).push(text);
@@ -316,7 +325,7 @@ impl KeyboardState {
                     middle
                         .width(inner_width)
                         .height(primary_height)
-                        .size(primary_text_size as f32)
+                        .size(primary_text_size)
                         .align_y(Vertical::Center)
                         .align_x(Horizontal::Center),
                 );
@@ -326,7 +335,7 @@ impl KeyboardState {
                     middle
                         .width(inner_width)
                         .height(inner_height)
-                        .size(primary_text_size as f32)
+                        .size(primary_text_size)
                         .align_y(Vertical::Center)
                         .align_x(Horizontal::Center),
                 );
@@ -364,7 +373,11 @@ impl KeyboardState {
             .into()
     }
 
-    pub fn popup_overlay(&self, unit: u32, size: (u32, u32)) -> Option<Element<'_, Message>> {
+    pub fn popup_overlay(
+        &self,
+        unit: KLength,
+        size: (KLength, KLength),
+    ) -> Option<Element<'_, Message>> {
         const MARGIN_U: u32 = 1;
         let (width, height) = size;
 
@@ -376,7 +389,7 @@ impl KeyboardState {
         let key = &holding_key_state.key;
         let mut row = Row::new();
         let mut skip = 0;
-        let mut popup_key_area_width = 0;
+        let mut popup_key_area_width = KLength::default();
         if Key::is_shifted(is_shift_set, is_caps_lock_set) {
             row =
                 row.push(self.new_popup_key(holding_key_state, key.primary(), unit, BORDER_RADIUS));
@@ -390,19 +403,22 @@ impl KeyboardState {
 
         // calculate position.
         let bounds = &holding_key_state.key_widget_event.bounds;
-        let mut left_x = bounds.x as u32;
-        if left_x + popup_key_area_width > width {
-            left_x = width.saturating_sub(popup_key_area_width);
+        let mut left_x = bounds.x;
+        if left_x + popup_key_area_width.val() > width.val() {
+            left_x = width.val() - popup_key_area_width.val();
+            if left_x < 0. {
+                left_x = 0.;
+            }
         }
-        let mut top_y = bounds.y as u32;
-        if top_y > self.popup_key_height_u * unit + MARGIN_U * unit {
-            top_y -= self.popup_key_height_u * unit + MARGIN_U * unit;
+        let mut top_y = bounds.y;
+        if top_y > (self.popup_key_height_u * unit + MARGIN_U * unit).val() {
+            top_y -= (self.popup_key_height_u * unit + MARGIN_U * unit).val();
         } else {
-            top_y += bounds.height as u32 + MARGIN_U * unit;
+            top_y += bounds.height + (MARGIN_U * unit).val();
         }
 
         // calculate padding.
-        let padding = Padding::default().left(left_x as f32).top(top_y as f32);
+        let padding = Padding::default().left(left_x).top(top_y);
         Some(
             Container::new(Container::new(row).style(|theme| {
                 let mut style = ContainerStyle::default();

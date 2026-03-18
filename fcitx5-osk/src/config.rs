@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use strum::EnumIter;
 use tokio::fs;
 
+use crate::layout::KLength;
+
 #[derive(Deserialize, Serialize, CopyGetters, Getters, Setters, Clone)]
 pub struct Config {
     #[getset(get_copy = "pub")]
@@ -40,11 +42,11 @@ pub struct Config {
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default = "default_landscape_width")]
-    landscape_width: u32,
+    landscape_width: KLength,
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default = "default_portrait_width")]
-    portrait_width: u32,
+    portrait_width: KLength,
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(with = "humantime_serde", default = "default_holding_timeout")]
@@ -84,7 +86,7 @@ pub struct Config {
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default = "default_indicator_width")]
-    indicator_width: u32,
+    indicator_width: KLength,
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default)]
@@ -146,16 +148,16 @@ impl Config {
     }
 }
 
-fn default_landscape_width() -> u32 {
-    1024
+fn default_landscape_width() -> KLength {
+    (1024.).into()
 }
 
-fn default_portrait_width() -> u32 {
-    768
+fn default_portrait_width() -> KLength {
+    (768.).into()
 }
 
-fn default_indicator_width() -> u32 {
-    80
+fn default_indicator_width() -> KLength {
+    (80.).into()
 }
 
 fn default_holding_timeout() -> Duration {

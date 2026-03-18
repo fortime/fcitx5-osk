@@ -1,6 +1,10 @@
 use std::{marker::PhantomData, rc::Rc, time::Duration};
 
-use iced::{window::Id, Element, Font, Point, Size, Task};
+use iced::{
+    widget::{Container, Stack},
+    window::Id,
+    Element, Font, Point, Size, Task,
+};
 use tokio::time;
 
 use crate::{
@@ -9,13 +13,11 @@ use crate::{
     dbus::client::{
         Fcitx5Services, Fcitx5VirtualKeyboardServiceExt, IFcitx5VirtualKeyboardService,
     },
-    layout::{self, KeyAreaLayout, ToElementCommonParams},
-    state::{LayoutEvent, LayoutState, UpdateConfigEvent},
+    layout::{self, KLength, KeyAreaLayout, ToElementCommonParams},
+    state::{ImEvent, LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
     window::{SyncOutputResponse, WindowManager, WindowManagerMode, WindowSettings},
 };
-
-use super::ImEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WindowStateSnapshot {
@@ -339,7 +341,7 @@ pub struct WindowManagerState<WM> {
     indicator_window_state: WindowState<WM>,
     /// a value sync with config file
     placement: Placement,
-    indicator_width: u32,
+    indicator_width: KLength,
     /// a value sync with config file
     indicator_display: IndicatorDisplay,
     to_be_opened_flag: u16,
@@ -408,7 +410,7 @@ where
         self.portrait
     }
 
-    pub fn available_candidate_width(&self) -> u32 {
+    pub fn available_candidate_width(&self) -> KLength {
         self.layout.available_candidate_width()
     }
 
@@ -416,15 +418,24 @@ where
         self.layout.is_setting_shown()
     }
 
-    pub fn size(&self) -> Size {
+    pub fn screen_size(&self) -> Size {
+        self.wm.screen_size()
+    }
+
+    pub fn window_size(&self) -> Size<KLength> {
         self.layout.size()
     }
 
-    pub fn unit(&self) -> u32 {
+    pub fn window_size_f32(&self) -> Size {
+        let size = self.window_size();
+        Size::new(size.width.val(), size.height.val())
+    }
+
+    pub fn unit(&self) -> KLength {
         self.layout.unit()
     }
 
-    pub fn font_size(&self) -> u32 {
+    pub fn font_size(&self) -> KLength {
         self.layout.font_size()
     }
 
@@ -480,7 +491,20 @@ where
     pub fn to_element<'b>(&self, params: ToElementCommonParams<'b>) -> Element<'b, Message> {
         let id = params.window_id;
         if self.is_keyboard(id) {
-            self.layout.to_element(&params)
+            let size = self.window_size();
+            // we let keyboard in a stack even there is no overlay, so the widget tree always has the
+            // same level. Otherwise, the state will be clear if the level is changed.
+            let mut stack = Stack::new()
+                .push(Container::new(self.layout.to_element(&params)).center_x(size.width));
+            // overlay should be caculated with the window size
+            if let Some(overlay) = params
+                .state
+                .keyboard()
+                .popup_overlay(self.unit(), (size.width, size.height))
+            {
+                stack = stack.push(overlay);
+            }
+            stack.into()
         } else {
             let state = params.state;
             let message = if self.keyboard_window_state.id().is_some() {
@@ -535,7 +559,7 @@ where
                 if self.indicator_window_state.id().is_none() {
                     let portrait = self.is_portrait();
                     let window_settings = WindowSettings::new(
-                        Size::new(self.indicator_width as f32, self.indicator_width as f32),
+                        Size::new(self.indicator_width.val(), self.indicator_width.val()),
                         Placement::Float,
                     );
                     let task =
@@ -569,19 +593,13 @@ where
             task = task.chain(Task::done(WM::Message::from(
                 ImEvent::ResetCandidateCursor.into(),
             )));
-            let mut size = self.size();
+            let mut size = self.window_size_f32();
             let screen_size = self.wm.screen_size();
             // update unit if width is too large
             if size.width > screen_size.width {
-                // update unit
-                let unit = self.layout.unit_within(screen_size.width as u32);
-                if self
-                    .layout
-                    .update_unit(unit, screen_size.width as u32)
-                    .is_ok()
-                {
-                    size = self.size();
-                }
+                // update width
+                self.layout.update_width(screen_size.width.into());
+                size = self.window_size_f32();
             }
             let mut window_settings = WindowSettings::new(size, self.placement());
             // set default float position.
@@ -727,16 +745,17 @@ where
         }
     }
 
-    fn update_unit(&mut self, unit: u32) -> Task<WM::Message> {
-        let max_width = self.wm.screen_size().width as u32;
+    fn update_width(&mut self, width: KLength) -> Task<WM::Message> {
+        let max_width = self.wm.screen_size().width.into();
         let portrait = self.is_portrait();
-        if self.layout.update_unit(unit, max_width).is_ok() {
-            let (max_width, size) = (self.layout.max_width(), self.layout.size());
+        if width <= max_width {
+            self.layout.update_width(width);
             let event = if portrait {
-                UpdateConfigEvent::PortraitWidth(max_width)
+                UpdateConfigEvent::PortraitWidth(width)
             } else {
-                UpdateConfigEvent::LandscapeWidth(max_width)
+                UpdateConfigEvent::LandscapeWidth(width)
             };
+            let size = self.window_size_f32();
             // resize and update config
             self.keyboard_window_state
                 .resize(&mut self.wm, size)
@@ -748,15 +767,16 @@ where
 
     pub fn update_key_area_layout(
         &mut self,
-        max_width: u32,
+        mut width: KLength,
         key_area_layout: Rc<KeyAreaLayout>,
     ) -> Option<Task<WM::Message>> {
-        let old_size = self.size();
-        let max_width = max_width.min(self.wm.screen_size().width as u32);
-        self.layout
-            .update_key_area_layout(max_width, key_area_layout);
+        let old_size = self.window_size_f32();
+        if width.val() > self.wm.screen_size().width {
+            width = self.wm.screen_size().width.into()
+        }
+        self.layout.update_key_area_layout(width, key_area_layout);
         // resize if the size is changed
-        let new_size = self.size();
+        let new_size = self.window_size_f32();
         if new_size != old_size {
             Some(self.keyboard_window_state.resize(&mut self.wm, new_size))
         } else {
@@ -803,7 +823,7 @@ where
 
         if res.contains(&SyncOutputResponse::SizeChanged) {
             let screen_size = self.wm.screen_size();
-            reopen = self.size().width > screen_size.width;
+            reopen = self.window_size().width.val() > screen_size.width;
         }
 
         reopen = reopen || res.contains(&SyncOutputResponse::RotationChanged);
@@ -1002,7 +1022,7 @@ where
             WindowManagerEvent::UpdateIndicatorDisplay(indicator_display) => {
                 self.update_indicator_display(indicator_display)
             }
-            WindowManagerEvent::UpdateUnit(unit) => self.update_unit(unit),
+            WindowManagerEvent::UpdateWidth(width) => self.update_width(width),
             WindowManagerEvent::UpdatePreferredOutputName(name) => {
                 tracing::debug!("Set preferred name: {name}");
                 self.wm.set_preferred_output_name(&name);
@@ -1060,7 +1080,7 @@ pub enum WindowManagerEvent {
     UpdateMode(WindowManagerMode),
     UpdatePlacement(Placement),
     UpdateIndicatorDisplay(IndicatorDisplay),
-    UpdateUnit(u32),
+    UpdateWidth(KLength),
     UpdatePreferredOutputName(String),
     OutputChanged,
 }

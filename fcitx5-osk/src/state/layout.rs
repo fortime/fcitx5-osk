@@ -1,20 +1,20 @@
-use std::{mem, rc::Rc, result::Result as StdResult};
+use std::{mem, rc::Rc};
 
 use iced::{
     alignment::Horizontal,
-    widget::{Column, Container, Stack},
+    widget::{Column, Container},
     Element, Font, Padding, Size,
 };
 
 use crate::{
     app::Message,
-    layout::{KeyAreaLayout, SettingLayout, ToElementCommonParams, ToolbarLayout},
+    layout::{KLength, KeyAreaLayout, SettingLayout, ToElementCommonParams, ToolbarLayout},
 };
 
 pub struct LayoutState {
-    size: (u32, u32),
+    size: (KLength, KLength),
     scale_factor: f32,
-    unit: u32,
+    unit: KLength,
     //fit: bool,
     padding: Padding,
     toolbar_layout: ToolbarLayout,
@@ -22,13 +22,13 @@ pub struct LayoutState {
     key_area_layout: Rc<KeyAreaLayout>,
     setting_layout: SettingLayout,
     setting_shown: bool,
-    max_width: u32,
+    width: KLength,
 }
 
 impl LayoutState {
-    pub fn new(width: u32, key_area_layout: Rc<KeyAreaLayout>) -> Self {
+    pub fn new(width: KLength, key_area_layout: Rc<KeyAreaLayout>) -> Self {
         let mut res = Self {
-            size: (0, 0),
+            size: Default::default(),
             scale_factor: 1.0,
             unit: Default::default(),
             padding: Default::default(),
@@ -37,43 +37,23 @@ impl LayoutState {
             key_area_layout,
             setting_layout: SettingLayout,
             setting_shown: false,
-            max_width: width,
+            width,
         };
         res.calculate_size();
         res
     }
 
-    pub fn unit_within(&self, width: u32) -> u32 {
+    fn unit_within(&self, width: KLength) -> KLength {
         // plus two units of padding
         let width_u = self.key_area_layout.width_u() + 2;
 
-        let step = 1;
-        //let mut step = 1;
-        //loop {
-        //    if (self.scale_factor * step as f32).fract() == 0.0 {
-        //        break;
-        //    }
-        //    step += 1;
-        //}
-
-        let mut unit = step;
-        while unit * width_u <= width {
-            unit += step;
-        }
-
-        // make sure unit has changed
-        if unit > step {
-            // the last valid unit
-            unit -= step;
-        }
-
-        unit
+        width / width_u
     }
 
     fn calculate_size(&mut self) {
         // because of scaling issue, the actual window size is different from the one calculated in
         // this method.
-        let unit = self.unit_within(self.max_width);
+        let unit = self.unit_within(self.width);
         let key_area_size = self.key_area_layout.size(unit);
 
         self.unit = unit;
@@ -81,9 +61,9 @@ impl LayoutState {
         // one padding is between toolbar and key_area, two paddings are of the keyboard.
         let height = key_area_size.1 + (self.toolbar_layout.height_u() + 3) * unit;
         self.size = (width, height);
-        self.padding = Padding::from([(2 * unit) as f32 / 2.0, (2 * unit) as f32 / 2.0]);
+        self.padding = Padding::from([unit.val(), unit.val()]);
         tracing::debug!(
-            "unit: {}, keyboard size: {:?}, key area size: {:?} padding: {:?}",
+            "unit: {}, keyboard size: {:?}, key area size: {:?}, padding: {:?}",
             self.unit,
             self.size,
             key_area_size,
@@ -91,36 +71,26 @@ impl LayoutState {
         );
     }
 
-    pub fn available_candidate_width(&self) -> u32 {
+    pub fn available_candidate_width(&self) -> KLength {
         // minus padding
         self.size.0 - 2 * self.unit
     }
 
-    pub fn size(&self) -> Size {
-        Size::from((self.size.0 as f32, self.size.1 as f32))
+    pub fn size(&self) -> Size<KLength> {
+        Size::from(self.size)
     }
 
-    pub fn max_width(&self) -> u32 {
-        self.max_width
-    }
-
-    pub fn unit(&self) -> u32 {
+    pub fn unit(&self) -> KLength {
         self.unit
     }
 
-    pub fn font_size(&self) -> u32 {
+    pub fn font_size(&self) -> KLength {
         self.unit * self.key_area_layout.primary_text_size_u()
     }
 
-    pub fn update_unit(&mut self, unit: u32, max_width: u32) -> StdResult<u32, u32> {
-        let old_unit = self.unit;
-        let mut width = self.size.0 / self.unit * unit;
-        if width > max_width {
-            return Err(unit);
-        }
-        mem::swap(&mut self.max_width, &mut width);
+    pub fn update_width(&mut self, width: KLength) {
+        self.width = width;
         self.calculate_size();
-        Ok(old_unit)
     }
 
     pub fn update_scale_factor(&mut self, mut scale_factor: f32) -> f32 {
@@ -131,12 +101,12 @@ impl LayoutState {
 
     pub fn update_key_area_layout(
         &mut self,
-        mut max_width: u32,
+        mut width: KLength,
         mut key_area_layout: Rc<KeyAreaLayout>,
     ) -> Rc<KeyAreaLayout> {
         let new_min_toolbar_height_u = key_area_layout.min_toolbar_height_u();
         mem::swap(&mut self.key_area_layout, &mut key_area_layout);
-        mem::swap(&mut self.max_width, &mut max_width);
+        mem::swap(&mut self.width, &mut width);
         self.toolbar_layout
             .update_height_u(new_min_toolbar_height_u);
         self.calculate_size();
@@ -155,7 +125,6 @@ impl LayoutState {
         &'a self,
         params: &'a ToElementCommonParams<'b>,
     ) -> Element<'b, Message> {
-        let state = params.state;
         let size = self.size();
         let mut keyboard = Column::new()
             .align_x(Horizontal::Center)
@@ -182,13 +151,7 @@ impl LayoutState {
         } else {
             keyboard.push(self.key_area_layout.to_element(self.unit, params.state))
         };
-        // we let keyboard in a stack even there is no overlay, so the widget tree always has the
-        // same level. Otherwise, the state will be clear if the level is changed.
-        let mut stack = Stack::new().push(keyboard);
-        if let Some(overlay) = state.keyboard().popup_overlay(self.unit, self.size) {
-            stack = stack.push(overlay);
-        }
-        stack.into()
+        keyboard.into()
     }
 
     pub fn on_event(&mut self, event: LayoutEvent) {

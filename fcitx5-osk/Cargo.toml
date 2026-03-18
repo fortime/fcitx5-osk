@@ -32,6 +32,7 @@ async-trait.workspace = true
 wayland-client.workspace = true
 wayland-protocols.workspace = true
 wayland-protocols-wlr.workspace = true
+num-traits.workspace = true
 
 [features]
 console-subscriber = ["fcitx5-osk-common/console-subscriber"]

@@ -8,13 +8,13 @@ use std::{
 
 use anyhow::Result;
 use getset::{Getters, MutGetters};
-use iced::{window::Id, Element, Task, Theme, Vector};
+use iced::{window::Id, Element, Size, Task, Theme, Vector};
 
 use crate::{
     app::{self, error_with_context, MapTask, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
     dbus::client::Fcitx5Services,
-    layout::ToElementCommonParams,
+    layout::{KLength, ToElementCommonParams},
     store::Store,
     window::{WindowManager, WindowManagerMode},
 };
@@ -26,8 +26,8 @@ mod layout;
 mod window;
 
 pub use config::{
-    BoolDesc, ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, OwnedEnumDesc, StepDesc,
-    TextDesc, UpdateConfigEvent,
+    BoolDesc, ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, OwnedEnumDesc, RangeDesc,
+    StepDesc, TextDesc, UpdateConfigEvent,
 };
 pub use im::{ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
@@ -172,14 +172,14 @@ where
         let key_area_layout = self
             .store
             .key_area_layout_by_im(im_name, self.window_manager.is_portrait());
-        let max_width = if portrait {
+        let width = if portrait {
             self.config().portrait_width()
         } else {
             self.config().landscape_width()
         };
         let task = self
             .window_manager
-            .update_key_area_layout(max_width, key_area_layout.clone());
+            .update_key_area_layout(width, key_area_layout.clone());
         if task.is_some() {
             self.keyboard
                 .update_key_area_layout(&key_area_layout, &self.store);
@@ -268,7 +268,11 @@ pub trait StateExtractor {
 
     fn updatable_fields(&self) -> &[Field];
 
-    fn available_candidate_width(&self) -> u32;
+    fn available_candidate_width(&self) -> KLength;
+
+    fn window_size(&self) -> Size<KLength>;
+
+    fn screen_size(&self) -> Size;
 
     fn movable(&self, window_id: Id) -> bool;
 
@@ -276,8 +280,6 @@ pub trait StateExtractor {
     /// physical size
     #[allow(unused)]
     fn scale_factor(&self) -> f32;
-
-    fn unit(&self) -> u32;
 
     fn new_position_message(&self, id: Id, delta: Vector) -> Option<Message>;
 
@@ -325,8 +327,16 @@ where
         self.config.updatable_fields()
     }
 
-    fn available_candidate_width(&self) -> u32 {
+    fn available_candidate_width(&self) -> KLength {
         self.window_manager.available_candidate_width()
+    }
+
+    fn screen_size(&self) -> Size {
+        self.window_manager.screen_size()
+    }
+
+    fn window_size(&self) -> Size<KLength> {
+        self.window_manager.window_size()
     }
 
     fn movable(&self, window_id: Id) -> bool {
@@ -335,10 +345,6 @@ where
 
     fn scale_factor(&self) -> f32 {
         self.window_manager.scale_factor()
-    }
-
-    fn unit(&self) -> u32 {
-        self.window_manager.unit()
     }
 
     fn new_position_message(&self, id: Id, delta: Vector) -> Option<Message> {

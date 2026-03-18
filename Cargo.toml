@@ -55,6 +55,7 @@ evdev = { version = "0.13.1", features = ["tokio"] }
 rand = "0.9.1"
 cvt = "0.1.2"
 libc = "0.2.172"
+num-traits = "0.2.19"
 
 #[patch.crates-io]
 #iced_layershell = { git = "https://github.com/waycrate/exwlshelleventloop.git", rev = "36e9c507b10cb89f31b08208f8856b6e01779832" }

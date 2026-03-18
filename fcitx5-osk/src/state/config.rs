@@ -1,15 +1,18 @@
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter, Result as FmtResult},
+    str::FromStr,
+    sync::Arc,
 };
 
 use iced::Task;
 use strum::IntoEnumIterator;
 
 use crate::{
-    app::Message,
+    app::{KeyboardError, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
     dbus::server::ImPanelEvent,
+    layout::KLength,
     state::{ImEvent, StateExtractor, ThemeEvent, WindowManagerEvent},
     window::WindowManagerMode,
 };
@@ -98,6 +101,64 @@ impl<T> StepDesc<T> {
     }
 }
 
+pub struct RangeDesc<T> {
+    init_value: fn(&dyn StateExtractor) -> T,
+    min_value: fn(&dyn StateExtractor) -> T,
+    max_value: fn(&dyn StateExtractor) -> T,
+    format: fn(&dyn StateExtractor, T) -> String,
+    is_enabled: fn(&dyn StateExtractor) -> bool,
+    check: fn(&dyn StateExtractor, value: T) -> bool,
+    on_changed: fn(String) -> Message,
+}
+
+impl<T> RangeDesc<T>
+where
+    T: FromStr + PartialEq + Copy,
+{
+    pub fn init_value(&self, state: &dyn StateExtractor) -> T {
+        (self.init_value)(state)
+    }
+
+    pub fn cur_value(&self, field: &Field, state: &dyn StateExtractor) -> T {
+        let init_value = (self.init_value)(state);
+        if let Some((last_init_value, value)) = state.config_temp_text(field.id()) {
+            if last_init_value
+                .parse::<T>()
+                .ok()
+                .filter(|l| *l == init_value)
+                .is_some()
+            {
+                return value.parse::<T>().unwrap_or(init_value);
+            }
+        }
+        init_value
+    }
+
+    pub fn min_value(&self, state: &dyn StateExtractor) -> T {
+        (self.min_value)(state)
+    }
+
+    pub fn max_value(&self, state: &dyn StateExtractor) -> T {
+        (self.max_value)(state)
+    }
+
+    pub fn format(&self, state: &dyn StateExtractor, t: T) -> String {
+        (self.format)(state, t)
+    }
+
+    pub fn is_enabled(&self, state: &dyn StateExtractor) -> bool {
+        (self.is_enabled)(state)
+    }
+
+    pub fn check(&self, state: &dyn StateExtractor, value: T) -> bool {
+        (self.check)(state, value)
+    }
+
+    pub fn on_changed_cb(&self) -> fn(String) -> Message {
+        self.on_changed
+    }
+}
+
 pub struct OwnedEnumDesc<T> {
     cur_value: fn(&dyn StateExtractor) -> Option<T>,
     variants: Vec<T>,
@@ -182,7 +243,7 @@ pub struct TextDesc {
     placeholder: fn(&Field, &dyn StateExtractor) -> Option<String>,
     init_value: fn(&dyn StateExtractor) -> Option<String>,
     is_enabled: fn(&dyn StateExtractor) -> bool,
-    submit_message: fn(String) -> UpdateConfigEvent,
+    submit_message: fn(String) -> Message,
 }
 
 impl TextDesc {
@@ -275,6 +336,7 @@ impl BoolDesc {
 
 pub enum FieldType {
     StepU32(StepDesc<u32>),
+    RangeF32(RangeDesc<f32>),
     OwnedEnumPlacement(OwnedEnumDesc<Placement>),
     OwnedEnumIndicatorDisplay(OwnedEnumDesc<IndicatorDisplay>),
     EnumString(EnumDesc<String>),
@@ -286,6 +348,12 @@ pub enum FieldType {
 impl From<StepDesc<u32>> for FieldType {
     fn from(value: StepDesc<u32>) -> Self {
         Self::StepU32(value)
+    }
+}
+
+impl From<RangeDesc<f32>> for FieldType {
+    fn from(value: RangeDesc<f32>) -> Self {
+        Self::RangeF32(value)
     }
 }
 
@@ -357,40 +425,23 @@ impl ConfigState {
             config_manager,
             updatable_fields: vec![
                 Field {
-                    name: "Size(unit)",
-                    id: "size",
-                    typ: StepDesc::<u32> {
-                        cur_value: |state| state.unit(),
-                        step: |_state| {
-                            //let scale_factor = state.scale_factor();
-                            //let mut step = 1;
-                            //loop {
-                            //    if (scale_factor * step as f32).fract() == 0.0 {
-                            //        break;
-                            //    }
-                            //    step += 1;
-                            //}
-                            //step
-                            1
-                        },
-                        on_increased: |state, cur_value, delta| {
-                            if state.window_manager_mode() == WindowManagerMode::Normal {
-                                Some(Message::from(WindowManagerEvent::UpdateUnit(
-                                    cur_value + delta,
-                                )))
+                    name: "Width",
+                    id: "width",
+                    typ: RangeDesc::<f32> {
+                        init_value: |state| state.window_size().width.val(),
+                        min_value: |_state| 360.,
+                        max_value: |state| state.screen_size().width,
+                        format: |_state, v| format!("{:.1}", v),
+                        is_enabled: |_state| true,
+                        check: |state, value| value >= 360. && value <= state.screen_size().width,
+                        on_changed: |value| {
+                            if let Ok(v) = value.parse::<f32>() {
+                                Message::from(WindowManagerEvent::UpdateWidth(v.into()))
                             } else {
-                                None
-                            }
-                        },
-                        on_decreased: |state, cur_value, delta| {
-                            if cur_value > delta
-                                && state.window_manager_mode() == WindowManagerMode::Normal
-                            {
-                                Some(Message::from(WindowManagerEvent::UpdateUnit(
-                                    cur_value - delta,
+                                KeyboardError::Error(Arc::new(anyhow::anyhow!(
+                                    "{value} is not a f32"
                                 )))
-                            } else {
-                                None
+                                .into()
                             }
                         },
                     }
@@ -562,7 +613,7 @@ impl ConfigState {
                 if let Some((last_init_value, value)) = self.temp_texts.remove(&key) {
                     // update only if init_value is the same
                     if last_init_value == init_value && value != init_value {
-                        message = Some(Message::from(producer(value)))
+                        message = Some(producer(value))
                     }
                 };
                 (false, message)
@@ -617,7 +668,7 @@ fn preferred_output_name_custom_field() -> Field {
             placeholder: |_, _| Some("The name of the preferred output, like: DP-1".to_string()),
             is_enabled: |_| true,
             init_value: |state| state.config().preferred_output_name().cloned(),
-            submit_message: |s| UpdateConfigEvent::PreferredOutputName(s),
+            submit_message: |s| UpdateConfigEvent::PreferredOutputName(s).into(),
         }
         .into(),
     }
@@ -639,8 +690,8 @@ fn output_name(name: String, description: String) -> ValueAndDescription<String>
 
 #[derive(Clone, Debug)]
 pub enum UpdateConfigEvent {
-    LandscapeWidth(u32),
-    PortraitWidth(u32),
+    LandscapeWidth(KLength),
+    PortraitWidth(KLength),
     Placement(Placement),
     IndicatorDisplay(IndicatorDisplay),
     Theme(String),
@@ -655,7 +706,7 @@ pub enum UpdateConfigEvent {
     SubmitTempText {
         key: String,
         init_value: String,
-        producer: fn(String) -> UpdateConfigEvent,
+        producer: fn(String) -> Message,
     },
     ManualMode(bool),
 }
