@@ -97,7 +97,7 @@ GreeterEnvironment=QT_WAYLAND_SHELL_INTEGRATION=layer-shell
 CompositorCommand=kwin_wayland --drm --no-lockscreen --no-global-shortcuts --locale1 --inputmethod "fcitx5-osk-kwin-launcher --sddm"
 ```
 
-* For a maunal build, `/usr/local/bin` might not be in `$PATH` of the process of `SDDM`, use the absolute path of `fcitx5-osk-kwin-launcher`:
+* For a manual build, `/usr/local/bin` might not be in `$PATH` of the process of `SDDM`, use the absolute path of `fcitx5-osk-kwin-launcher`:
 
 ```ini
 # /etc/sddm.conf.d/rootless.conf
