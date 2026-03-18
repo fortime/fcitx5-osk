@@ -410,6 +410,16 @@ impl ConfigState {
                     .into(),
                 },
                 Field {
+                    name: "Extended",
+                    id: "extended",
+                    typ: BoolDesc {
+                        cur_value: |state| state.config().extended(),
+                        is_enabled: |state| state.placement() == Placement::Dock,
+                        on_changed: |_, v| Message::from(WindowManagerEvent::UpdateExtended(v)),
+                    }
+                    .into(),
+                },
+                Field {
                     name: "Indicator Display",
                     id: "indicator_display",
                     typ: OwnedEnumDesc::<IndicatorDisplay> {
@@ -534,6 +544,7 @@ impl ConfigState {
                 |_| Message::from(ImEvent::ResetCandidateCursor)
             },
             @Placement => {config_eq!(placement), set_placement},
+            @Extended => {config_eq!(extended), set_extended},
             @IndicatorDisplay => {config_eq!(indicator_display), set_indicator_display},
             @Theme => {
                 config_eq!(theme),
@@ -642,6 +653,7 @@ pub enum UpdateConfigEvent {
     LandscapeWidth(u32),
     PortraitWidth(u32),
     Placement(Placement),
+    Extended(bool),
     IndicatorDisplay(IndicatorDisplay),
     Theme(String),
     DarkTheme(String),

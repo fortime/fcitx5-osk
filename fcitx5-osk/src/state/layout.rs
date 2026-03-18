@@ -2,7 +2,7 @@ use std::{mem, rc::Rc, result::Result as StdResult};
 
 use iced::{
     alignment::Horizontal,
-    widget::{Column, Container, Stack},
+    widget::{Column, Container},
     Element, Font, Padding, Size,
 };
 
@@ -155,7 +155,6 @@ impl LayoutState {
         &'a self,
         params: &'a ToElementCommonParams<'b>,
     ) -> Element<'b, Message> {
-        let state = params.state;
         let size = self.size();
         let mut keyboard = Column::new()
             .align_x(Horizontal::Center)
@@ -182,13 +181,7 @@ impl LayoutState {
         } else {
             keyboard.push(self.key_area_layout.to_element(self.unit, params.state))
         };
-        // we let keyboard in a stack even there is no overlay, so the widget tree always has the
-        // same level. Otherwise, the state will be clear if the level is changed.
-        let mut stack = Stack::new().push(keyboard);
-        if let Some(overlay) = state.keyboard().popup_overlay(self.unit, self.size) {
-            stack = stack.push(overlay);
-        }
-        stack.into()
+        keyboard.into()
     }
 
     pub fn on_event(&mut self, event: LayoutEvent) {

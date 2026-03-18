@@ -1,6 +1,10 @@
 use std::{marker::PhantomData, rc::Rc, time::Duration};
 
-use iced::{window::Id, Element, Font, Point, Size, Task};
+use iced::{
+    widget::{Container, Stack},
+    window::Id,
+    Element, Font, Point, Size, Task,
+};
 use tokio::time;
 
 use crate::{
@@ -335,6 +339,8 @@ pub struct WindowManagerState<WM> {
     scale_factor: f32,
     portrait: bool,
     layout: LayoutState,
+    // Extend the keyboard to max width with padding
+    extended: bool,
     keyboard_window_state: WindowState<WM>,
     indicator_window_state: WindowState<WM>,
     /// a value sync with config file
@@ -366,6 +372,7 @@ impl<WM> WindowManagerState<WM> {
             scale_factor: 1.,
             portrait,
             layout: LayoutState::new(max_width, key_area_layout),
+            extended: config.extended(),
             keyboard_window_state: WindowState::new("keyboard"),
             indicator_window_state: WindowState::new("indicator"),
             placement: config.placement(),
@@ -416,8 +423,20 @@ where
         self.layout.is_setting_shown()
     }
 
-    pub fn size(&self) -> Size {
+    /// The size of the keyboard
+    pub fn keyboard_size(&self) -> Size {
         self.layout.size()
+    }
+
+    /// The size of the window. It will be the same as the size of keyboard if it is not extended.
+    pub fn window_size(&self) -> Size {
+        if self.extended && self.placement() == Placement::Dock {
+            let max_width = self.wm.screen_size().width;
+            let height = self.layout.size().height;
+            (max_width, height).into()
+        } else {
+            self.layout.size()
+        }
     }
 
     pub fn unit(&self) -> u32 {
@@ -480,7 +499,20 @@ where
     pub fn to_element<'b>(&self, params: ToElementCommonParams<'b>) -> Element<'b, Message> {
         let id = params.window_id;
         if self.is_keyboard(id) {
-            self.layout.to_element(&params)
+            let size = self.window_size();
+            // we let keyboard in a stack even there is no overlay, so the widget tree always has the
+            // same level. Otherwise, the state will be clear if the level is changed.
+            let mut stack = Stack::new()
+                .push(Container::new(self.layout.to_element(&params)).center_x(size.width));
+            // overlay should be caculated with the window size
+            if let Some(overlay) = params
+                .state
+                .keyboard()
+                .popup_overlay(self.unit(), (size.width as u32, size.height as u32))
+            {
+                stack = stack.push(overlay);
+            }
+            stack.into()
         } else {
             let state = params.state;
             let message = if self.keyboard_window_state.id().is_some() {
@@ -569,7 +601,7 @@ where
             task = task.chain(Task::done(WM::Message::from(
                 ImEvent::ResetCandidateCursor.into(),
             )));
-            let mut size = self.size();
+            let mut size = self.window_size();
             let screen_size = self.wm.screen_size();
             // update unit if width is too large
             if size.width > screen_size.width {
@@ -580,7 +612,7 @@ where
                     .update_unit(unit, screen_size.width as u32)
                     .is_ok()
                 {
-                    size = self.size();
+                    size = self.window_size();
                 }
             }
             let mut window_settings = WindowSettings::new(size, self.placement());
@@ -670,6 +702,21 @@ where
         }
     }
 
+    fn update_extended(&mut self, extended: bool) -> Task<WM::Message> {
+        let old_size = self.window_size();
+        if self.extended != extended {
+            let mut task = Task::done(Message::from(UpdateConfigEvent::Extended(extended)).into());
+            self.extended = extended;
+            let new_size = self.window_size();
+            if new_size != old_size {
+                task = task.chain(self.keyboard_window_state.resize(&mut self.wm, new_size))
+            }
+            task
+        } else {
+            Message::from_nothing()
+        }
+    }
+
     fn update_indicator_display(
         &mut self,
         indicator_display: IndicatorDisplay,
@@ -731,7 +778,7 @@ where
         let max_width = self.wm.screen_size().width as u32;
         let portrait = self.is_portrait();
         if self.layout.update_unit(unit, max_width).is_ok() {
-            let (max_width, size) = (self.layout.max_width(), self.layout.size());
+            let (max_width, size) = (self.layout.max_width(), self.window_size());
             let event = if portrait {
                 UpdateConfigEvent::PortraitWidth(max_width)
             } else {
@@ -751,12 +798,12 @@ where
         max_width: u32,
         key_area_layout: Rc<KeyAreaLayout>,
     ) -> Option<Task<WM::Message>> {
-        let old_size = self.size();
+        let old_size = self.window_size();
         let max_width = max_width.min(self.wm.screen_size().width as u32);
         self.layout
             .update_key_area_layout(max_width, key_area_layout);
         // resize if the size is changed
-        let new_size = self.size();
+        let new_size = self.window_size();
         if new_size != old_size {
             Some(self.keyboard_window_state.resize(&mut self.wm, new_size))
         } else {
@@ -803,7 +850,7 @@ where
 
         if res.contains(&SyncOutputResponse::SizeChanged) {
             let screen_size = self.wm.screen_size();
-            reopen = self.size().width > screen_size.width;
+            reopen = self.keyboard_size().width > screen_size.width;
         }
 
         reopen = reopen || res.contains(&SyncOutputResponse::RotationChanged);
@@ -999,6 +1046,7 @@ where
             WindowManagerEvent::OpenIndicator => self.open_indicator(),
             WindowManagerEvent::UpdateMode(mode) => self.update_mode(mode),
             WindowManagerEvent::UpdatePlacement(placement) => self.update_placement(placement),
+            WindowManagerEvent::UpdateExtended(extended) => self.update_extended(extended),
             WindowManagerEvent::UpdateIndicatorDisplay(indicator_display) => {
                 self.update_indicator_display(indicator_display)
             }
@@ -1059,6 +1107,7 @@ pub enum WindowManagerEvent {
     OpenIndicator,
     UpdateMode(WindowManagerMode),
     UpdatePlacement(Placement),
+    UpdateExtended(bool),
     UpdateIndicatorDisplay(IndicatorDisplay),
     UpdateUnit(u32),
     UpdatePreferredOutputName(String),

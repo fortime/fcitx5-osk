@@ -64,6 +64,10 @@ pub struct Config {
     #[serde(default)]
     placement: Placement,
 
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    extended: bool,
+
     /// Default font to be used.
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]

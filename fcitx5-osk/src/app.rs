@@ -13,6 +13,7 @@ use std::{
 use anyhow::{Context, Error, Result};
 use fcitx5_osk_common::signal::ShutdownFlag;
 use iced::{
+    advanced::widget::Text,
     futures::{
         channel::{
             mpsc::{self, UnboundedReceiver, UnboundedSender},
@@ -21,7 +22,7 @@ use iced::{
         Stream,
     },
     theme::{self, Base as _, Style},
-    widget::{self, Column, Container, MouseArea, Space, Stack},
+    widget::{self, Button, Column, Container, MouseArea, Space, Stack},
     window::{Event as IcedWindowEvent, Id},
     Color, Element, Event as IcedEvent, Length, Subscription, Task, Theme,
 };
@@ -295,16 +296,14 @@ where
         let font_size = self.state.window_manager().font_size();
         let err_msg = e.err_msg();
         let button_text = e.button_text();
-        widget::container(
-            widget::column![
-                widget::text(err_msg).size(font_size),
-                widget::button(widget::text(button_text).size(font_size))
-                    .on_press(Message::AfterError),
-            ]
-            .spacing(10)
-            .padding(10),
+        Container::new(
+            Column::new()
+                .push(Text::new(err_msg).size(font_size))
+                .push(Button::new(Text::new(button_text).size(font_size)))
+                .spacing(10)
+                .padding(10),
         )
-        .max_width(self.state.window_manager().size().width)
+        .max_width(self.state.window_manager().window_size().width)
         .style(widget::container::rounded_box)
         .into()
     }
