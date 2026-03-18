@@ -78,7 +78,7 @@ impl<WM> State<WM> {
                 fcitx5_services,
             ),
             detect_theme_enabled,
-            theme: Default::default(),
+            theme: Theme::Light,
             color_theme: 0,
             config: ConfigState::new(config_manager),
             store,
@@ -110,7 +110,7 @@ impl<WM> State<WM> {
     fn sync_theme(&mut self, color_theme: Option<u32>) {
         let color_theme = color_theme.unwrap_or(self.color_theme);
         let config = self.config.config();
-        let mut default_theme = Default::default();
+        let mut default_theme = Theme::Light;
         let theme = if !self.is_auto_theme() {
             self.store.theme(config.theme())
         } else {
@@ -141,7 +141,7 @@ impl<WM> State<WM>
 where
     WM: WindowManager,
 {
-    pub fn to_element(&self, id: Id) -> Element<Message> {
+    pub fn to_element(&self, id: Id) -> Element<'_, Message> {
         self.window_manager.to_element(ToElementCommonParams {
             state: self,
             window_id: id,
@@ -244,7 +244,8 @@ where
                         .unwrap_or_else(Message::from_nothing)
                 }
                 Err(e) => {
-                    Task::done(error_with_context(e, "Unable to load `Store` from config").into())
+                    let msg = format!("Unable to load assests, caused by: {e:?}");
+                    Task::done(error_with_context(e, msg).into())
                 }
             },
         }
@@ -267,7 +268,7 @@ pub trait StateExtractor {
 
     fn updatable_fields(&self) -> &[Field];
 
-    fn available_candidate_width(&self) -> u16;
+    fn available_candidate_width(&self) -> u32;
 
     fn movable(&self, window_id: Id) -> bool;
 
@@ -276,7 +277,7 @@ pub trait StateExtractor {
     #[allow(unused)]
     fn scale_factor(&self) -> f32;
 
-    fn unit(&self) -> u16;
+    fn unit(&self) -> u32;
 
     fn new_position_message(&self, id: Id, delta: Vector) -> Option<Message>;
 
@@ -324,7 +325,7 @@ where
         self.config.updatable_fields()
     }
 
-    fn available_candidate_width(&self) -> u16 {
+    fn available_candidate_width(&self) -> u32 {
         self.window_manager.available_candidate_width()
     }
 
@@ -336,7 +337,7 @@ where
         self.window_manager.scale_factor()
     }
 
-    fn unit(&self) -> u16 {
+    fn unit(&self) -> u32 {
         self.window_manager.unit()
     }
 

@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, rc::Rc, time::Duration};
 
-use iced::{window::Id, Color, Element, Font, Point, Size, Task, Theme};
+use iced::{window::Id, Element, Font, Point, Size, Task};
 use tokio::time;
 
 use crate::{
@@ -12,9 +12,7 @@ use crate::{
     layout::{self, KeyAreaLayout, ToElementCommonParams},
     state::{LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
-    window::{
-        SyncOutputResponse, WindowAppearance, WindowManager, WindowManagerMode, WindowSettings,
-    },
+    window::{SyncOutputResponse, WindowManager, WindowManagerMode, WindowSettings},
 };
 
 use super::ImEvent;
@@ -341,7 +339,7 @@ pub struct WindowManagerState<WM> {
     indicator_window_state: WindowState<WM>,
     /// a value sync with config file
     placement: Placement,
-    indicator_width: u16,
+    indicator_width: u32,
     /// a value sync with config file
     indicator_display: IndicatorDisplay,
     to_be_opened_flag: u16,
@@ -410,7 +408,7 @@ where
         self.portrait
     }
 
-    pub fn available_candidate_width(&self) -> u16 {
+    pub fn available_candidate_width(&self) -> u32 {
         self.layout.available_candidate_width()
     }
 
@@ -422,11 +420,11 @@ where
         self.layout.size()
     }
 
-    pub fn unit(&self) -> u16 {
+    pub fn unit(&self) -> u32 {
         self.layout.unit()
     }
 
-    pub fn font_size(&self) -> u16 {
+    pub fn font_size(&self) -> u32 {
         self.layout.font_size()
     }
 
@@ -576,10 +574,10 @@ where
             // update unit if width is too large
             if size.width > screen_size.width {
                 // update unit
-                let unit = self.layout.unit_within(screen_size.width as u16);
+                let unit = self.layout.unit_within(screen_size.width as u32);
                 if self
                     .layout
-                    .update_unit(unit, screen_size.width as u16)
+                    .update_unit(unit, screen_size.width as u32)
                     .is_ok()
                 {
                     size = self.size();
@@ -729,8 +727,8 @@ where
         }
     }
 
-    fn update_unit(&mut self, unit: u16) -> Task<WM::Message> {
-        let max_width = self.wm.screen_size().width as u16;
+    fn update_unit(&mut self, unit: u32) -> Task<WM::Message> {
+        let max_width = self.wm.screen_size().width as u32;
         let portrait = self.is_portrait();
         if self.layout.update_unit(unit, max_width).is_ok() {
             let (max_width, size) = (self.layout.max_width(), self.layout.size());
@@ -750,11 +748,11 @@ where
 
     pub fn update_key_area_layout(
         &mut self,
-        max_width: u16,
+        max_width: u32,
         key_area_layout: Rc<KeyAreaLayout>,
     ) -> Option<Task<WM::Message>> {
         let old_size = self.size();
-        let max_width = max_width.min(self.wm.screen_size().width as u16);
+        let max_width = max_width.min(self.wm.screen_size().width as u32);
         self.layout
             .update_key_area_layout(max_width, key_area_layout);
         // resize if the size is changed
@@ -1018,21 +1016,7 @@ impl<WM> WindowManagerState<WM>
 where
     WM: WindowManager,
     WM::Message: From<Message> + 'static + Send + Sync,
-    WM::Appearance: WindowAppearance + 'static + Send + Sync,
 {
-    pub fn appearance(&self, theme: &Theme, id: Id) -> WM::Appearance {
-        if self.is_keyboard(id) {
-            let mut appearance = WM::Appearance::default(theme);
-            appearance.set_background_color(theme.extended_palette().background.strong.color);
-            appearance
-        } else if self.is_indicator(id) {
-            let mut appearance = WM::Appearance::default(theme);
-            appearance.set_background_color(Color::TRANSPARENT);
-            appearance
-        } else {
-            self.wm.appearance(theme, id)
-        }
-    }
 }
 
 // call fcitx5
@@ -1076,7 +1060,7 @@ pub enum WindowManagerEvent {
     UpdateMode(WindowManagerMode),
     UpdatePlacement(Placement),
     UpdateIndicatorDisplay(IndicatorDisplay),
-    UpdateUnit(u16),
+    UpdateUnit(u32),
     UpdatePreferredOutputName(String),
     OutputChanged,
 }

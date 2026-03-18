@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     future::{self, Future},
     os::fd::{AsRawFd, OwnedFd},
+    rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -17,8 +18,9 @@ use iced::{
             mpsc::{self, UnboundedReceiver, UnboundedSender},
             oneshot::{self, Sender},
         },
-        stream,
+        Stream,
     },
+    theme::{self, Base as _, Style},
     widget::{self, Column, Container, MouseArea, Space, Stack},
     window::{Event as IcedWindowEvent, Id},
     Color, Element, Event as IcedEvent, Length, Subscription, Task, Theme,
@@ -36,11 +38,12 @@ use crate::{
             Fcitx5VirtualkeyboardImPanelService, ImPanelEvent, SocketEnv,
         },
     },
+    misc::NamedSubscriptionData,
     state::{
         CloseOpSource, ImEvent, KeyEvent, KeyboardEvent, LayoutEvent, State, StateExtractor,
         StoreEvent, ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
-    window::{self, WindowAppearance, WindowManager},
+    window::{self, WindowManager},
 };
 
 pub mod wayland;
@@ -149,11 +152,13 @@ impl KeyboardError {
     }
 }
 
+type KeyboardMessageReceiver = RefCell<Option<UnboundedReceiver<Message>>>;
+
 /// State that should be initialized in a async runtime.
 pub struct AsyncAppState {
     fcitx5_services: Fcitx5Services,
     fcitx5_osk_service_client: Fcitx5OskServiceClient,
-    rx: RefCell<Option<UnboundedReceiver<Message>>>,
+    rx: KeyboardMessageReceiver,
     display_socket: Option<OwnedFd>,
     detect_theme_enabled: Arc<AtomicBool>,
 }
@@ -218,7 +223,7 @@ pub struct Keyboard<WM> {
     shutdown_flag: ShutdownFlag,
     shutdown_sent: bool,
     fcitx5_osk_service_client: Fcitx5OskServiceClient,
-    rx: RefCell<Option<UnboundedReceiver<Message>>>,
+    rx: Rc<KeyboardMessageReceiver>,
     // Hold the socket so that it won't be closed
     #[allow(unused)]
     display_socket: Option<OwnedFd>,
@@ -254,7 +259,7 @@ impl<WM> Keyboard<WM> {
                 shutdown_flag,
                 shutdown_sent: false,
                 fcitx5_osk_service_client,
-                rx,
+                rx: Rc::new(rx),
                 display_socket,
             },
             init_task,
@@ -283,9 +288,10 @@ impl<WM> Keyboard<WM>
 where
     WM: WindowManager,
     WM::Message: From<Message> + 'static + Send + Sync,
-    WM::Appearance: WindowAppearance + 'static + Send + Sync,
 {
-    fn error_dialog<T: ErrorDialogContent>(&self, e: T) -> Element<Message> {
+    const TRANSPARENT_THEME_NAME: &str = "_transparent";
+
+    fn error_dialog<T: ErrorDialogContent>(&self, e: T) -> Element<'_, Message> {
         let font_size = self.state.window_manager().font_size();
         let err_msg = e.err_msg();
         let button_text = e.button_text();
@@ -303,7 +309,7 @@ where
         .into()
     }
 
-    pub fn view(&self, id: Id) -> Element<WM::Message> {
+    pub fn view(&self, id: Id) -> Element<'_, WM::Message> {
         let visible = self.fcitx5_osk_service_client.visible().unwrap_or(true);
         if visible && self.state.window_manager().is_keyboard(id) {
             let base = self.state.to_element(id);
@@ -323,6 +329,17 @@ where
     /// subscription will be called after each batch updates, iced will check if streams in it has
     /// been changed.
     pub fn subscription(&self) -> Subscription<WM::Message> {
+        fn external_subscription(
+            data: &NamedSubscriptionData<Rc<KeyboardMessageReceiver>>,
+        ) -> impl Stream<Item = Message> {
+            if let Some(rx) = data.data().borrow_mut().take() {
+                rx
+            } else {
+                let (_, rx) = mpsc::unbounded();
+                rx
+            }
+        }
+
         let mut subscriptions = vec![event::listen_with(|event, status, id| {
             tracing::trace!("event: {}, {:?}, {:?}", id, status, event);
             match event {
@@ -345,17 +362,10 @@ where
             }
         })];
 
-        const EXTERNAL_SUBSCRIPTION_ID: &str = "external";
-        if let Some(rx) = self.rx.borrow_mut().take() {
-            subscriptions.push(Subscription::run_with_id(EXTERNAL_SUBSCRIPTION_ID, rx));
-        } else {
-            // should always return a subscription with the same id, otherwise, the first one will
-            // be dropped.
-            subscriptions.push(Subscription::run_with_id(
-                EXTERNAL_SUBSCRIPTION_ID,
-                stream::empty(),
-            ));
-        }
+        subscriptions.push(Subscription::run_with(
+            NamedSubscriptionData::new("external", self.rx.clone()),
+            external_subscription,
+        ));
 
         Subscription::batch(subscriptions).map(|m| m.into())
     }
@@ -490,25 +500,25 @@ where
         task
     }
 
-    pub fn appearance(&self, theme: &Theme, id: Id) -> WM::Appearance {
-        let mut appearance = self.state.window_manager().appearance(theme, id);
-        if !self.fcitx5_osk_service_client.visible().unwrap_or(true) {
-            appearance.set_background_color(Color::TRANSPARENT);
+    pub fn style(&self, theme: &Theme) -> Style {
+        let mut style = theme::default(theme);
+        // There is no window id here, so we use custom theme name for checking
+        if theme.name() == Self::TRANSPARENT_THEME_NAME {
+            style.background_color = Color::TRANSPARENT;
+        } else {
+            style.background_color = theme.extended_palette().background.strong.color;
         }
-        appearance
+        style
     }
 
     pub fn theme(&self, id: Id) -> Theme {
         let visible = self.fcitx5_osk_service_client.visible().unwrap_or(true);
         // in iced, style doesn't accept id, we should return a theme with transparent background.
-        let theme = self.state.theme().clone();
-        let appearance = self.state.window_manager().appearance(&theme, id);
-        if !visible || appearance.background_color() == Color::TRANSPARENT {
-            let mut palette = theme.palette();
-            palette.background = Color::TRANSPARENT;
-            Theme::custom(String::new(), palette)
+        let theme = self.state.theme();
+        if !visible || self.state.window_manager().is_indicator(id) {
+            Theme::custom(Self::TRANSPARENT_THEME_NAME, theme.palette())
         } else {
-            theme
+            theme.clone()
         }
     }
 }
@@ -522,12 +532,13 @@ fn modal<'a>(
     // covered by the mask. In iced 0.14, there is a clip option to disable this behavior
     let mut stack = Stack::new();
     stack = stack
-        //.clip(false)
+        .clip(false)
         .push(base)
         // Create a mask
         .push(
             Container::new(widget::opaque(
-                MouseArea::new(Space::new(Length::Fill, Length::Fill)).on_press(on_blur_clicked),
+                MouseArea::new(Space::new().width(Length::Fill).height(Length::Fill))
+                    .on_press(on_blur_clicked),
             ))
             .style(|_| widget::container::Style {
                 background: Some(

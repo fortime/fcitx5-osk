@@ -1,12 +1,20 @@
+use std::cell::RefCell;
+
 use anyhow::Result;
 use fcitx5_osk_common::signal::ShutdownFlag;
-use iced::{futures::stream, window::Id, Element, Subscription, Task, Theme};
+use iced::{
+    futures::{stream, Stream},
+    theme::Style,
+    window::Id,
+    Element, Subscription, Task, Theme,
+};
 use x11rb::rust_connection::RustConnection;
 
 pub use crate::app::x11::output::{OutputContext, OutputGeometry};
 use crate::{
     app::{self, Keyboard, Message},
     config::ConfigManager,
+    misc::NamedSubscriptionData,
     window::x11::X11WindowManager,
 };
 
@@ -71,28 +79,33 @@ impl X11Keyboard {
 }
 
 impl X11Keyboard {
-    pub fn view(&self, id: Id) -> Element<Message> {
+    pub fn view(&self, id: Id) -> Element<'_, Message> {
         self.inner.view(id)
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
+        fn output_context_listen(
+            data: &NamedSubscriptionData<OutputContext>,
+        ) -> impl Stream<Item = Message> {
+            // These messages only work in the first call
+            let mut once_messages = vec![];
+            // Wayland connection environment variables will be set in the call of `self.inner.subscription()`.
+            if let Err(e) = data.data().listen() {
+                once_messages.push(app::error_with_context(
+                    e,
+                    "Unable to listen to the changes of wayland output",
+                ));
+            }
+            stream::iter(once_messages)
+        }
+
         let mut subscriptions = vec![
             self.inner.subscription(),
             self.output_context.subscription(),
         ];
-
-        // These messages only work in the first call
-        let mut once_messages = vec![];
-        //  connection environment variables will be set in the call of `self.inner.subscription()`.
-        if let Err(e) = self.output_context.listen() {
-            once_messages.push(app::error_with_context(
-                e,
-                "Unable to listen to the changes of x11 output",
-            ));
-        }
-        subscriptions.push(Subscription::run_with_id(
-            "external::wayland_once",
-            stream::iter(once_messages),
+        subscriptions.push(Subscription::run_with(
+            NamedSubscriptionData::new("external::x11_once", self.output_context.clone()),
+            output_context_listen,
         ));
 
         Subscription::batch(subscriptions)
@@ -104,6 +117,10 @@ impl X11Keyboard {
         }
 
         self.inner.update(message)
+    }
+
+    pub fn style(&self, theme: &Theme) -> Style {
+        self.inner.style(theme)
     }
 
     pub fn theme(&self, id: Id) -> Theme {
@@ -121,19 +138,32 @@ pub fn start(
     // each eventloop should has its own connection.
     let output_context = OutputContext::new(xcb_connection)?;
 
-    iced::daemon(clap::crate_name!(), X11Keyboard::update, X11Keyboard::view)
-        .theme(X11Keyboard::theme)
-        .subscription(X11Keyboard::subscription)
-        .run_with(move || {
-            let (keyboard, task) = X11Keyboard::new(
-                config_manager,
-                output_context,
-                wait_for_socket,
-                modifier_workaround,
-                shutdown_flag,
-            );
-            (keyboard, init_task.chain(task))
-        })?;
+    let boot = RefCell::new(Some(move || {
+        let (keyboard, task) = X11Keyboard::new(
+            config_manager,
+            output_context,
+            wait_for_socket,
+            modifier_workaround,
+            shutdown_flag,
+        );
+        (keyboard, init_task.chain(task))
+    }));
+
+    iced::daemon(
+        move || {
+            (boot
+                .borrow_mut()
+                .take()
+                .expect("boot can't be called twice"))()
+        },
+        X11Keyboard::update,
+        X11Keyboard::view,
+    )
+    .title(clap::crate_name!())
+    .theme(X11Keyboard::theme)
+    .style(X11Keyboard::style)
+    .subscription(X11Keyboard::subscription)
+    .run()?;
     Ok(())
 }
 

@@ -274,7 +274,7 @@ impl BoolDesc {
 }
 
 pub enum FieldType {
-    StepU16(StepDesc<u16>),
+    StepU32(StepDesc<u32>),
     OwnedEnumPlacement(OwnedEnumDesc<Placement>),
     OwnedEnumIndicatorDisplay(OwnedEnumDesc<IndicatorDisplay>),
     EnumString(EnumDesc<String>),
@@ -283,9 +283,9 @@ pub enum FieldType {
     Bool(BoolDesc),
 }
 
-impl From<StepDesc<u16>> for FieldType {
-    fn from(value: StepDesc<u16>) -> Self {
-        Self::StepU16(value)
+impl From<StepDesc<u32>> for FieldType {
+    fn from(value: StepDesc<u32>) -> Self {
+        Self::StepU32(value)
     }
 }
 
@@ -359,7 +359,7 @@ impl ConfigState {
                 Field {
                     name: "Size(unit)",
                     id: "size",
-                    typ: StepDesc::<u16> {
+                    typ: StepDesc::<u32> {
                         cur_value: |state| state.unit(),
                         step: |_state| {
                             //let scale_factor = state.scale_factor();
@@ -639,8 +639,8 @@ fn output_name(name: String, description: String) -> ValueAndDescription<String>
 
 #[derive(Clone, Debug)]
 pub enum UpdateConfigEvent {
-    LandscapeWidth(u16),
-    PortraitWidth(u16),
+    LandscapeWidth(u32),
+    PortraitWidth(u32),
     Placement(Placement),
     IndicatorDisplay(IndicatorDisplay),
     Theme(String),

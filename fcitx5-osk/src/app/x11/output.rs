@@ -8,7 +8,7 @@ use anyhow::Result;
 use iced::{
     futures::{
         channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
-        stream,
+        Stream,
     },
     Size, Subscription, Vector,
 };
@@ -26,7 +26,7 @@ use x11rb::{
     rust_connection::RustConnection,
 };
 
-use crate::{app::Message, state::WindowManagerEvent};
+use crate::{app::Message, misc::NamedSubscriptionData, state::WindowManagerEvent};
 
 x11rb::atom_manager! {
     /// A collection of Atoms.
@@ -168,14 +168,22 @@ impl OutputContext {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        const EXTERNAL_SUBSCRIPTION_ID: &str = "external::x11_output";
-        if let Some(rx) = self.state().and_then(|mut s| s.rx.take()) {
-            Subscription::run_with_id(EXTERNAL_SUBSCRIPTION_ID, rx)
-        } else {
-            // should always return a subscription with the same id, otherwise, the first one will
-            // be dropped.
-            Subscription::run_with_id(EXTERNAL_SUBSCRIPTION_ID, stream::empty())
+        fn x11_output_subscription(
+            data: &NamedSubscriptionData<Arc<Mutex<State>>>,
+        ) -> impl Stream<Item = Message> {
+            if let Some(rx) = data.data().lock().ok().and_then(|mut s| s.rx.take()) {
+                rx
+            } else {
+                // should always return a subscription with the same id, otherwise, the first one will
+                // be dropped.
+                let (_, rx) = mpsc::unbounded();
+                rx
+            }
         }
+        Subscription::run_with(
+            NamedSubscriptionData::new("external::x11_output", self.state.clone()),
+            x11_output_subscription,
+        )
     }
 
     pub fn select_output(&self, preferred_output_name: Option<&str>) -> Option<OutputGeometry> {

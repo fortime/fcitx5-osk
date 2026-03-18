@@ -7,7 +7,7 @@ use figment::{
 };
 use getset::{CopyGetters, Getters, Setters};
 use iced::futures::{
-    channel::mpsc::{self, UnboundedSender},
+    channel::mpsc::{self, TryRecvError, UnboundedSender},
     StreamExt,
 };
 use serde::{Deserialize, Serialize};
@@ -40,11 +40,11 @@ pub struct Config {
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default = "default_landscape_width")]
-    landscape_width: u16,
+    landscape_width: u32,
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default = "default_portrait_width")]
-    portrait_width: u16,
+    portrait_width: u32,
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(with = "humantime_serde", default = "default_holding_timeout")]
@@ -84,7 +84,7 @@ pub struct Config {
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default = "default_indicator_width")]
-    indicator_width: u16,
+    indicator_width: u32,
 
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default)]
@@ -146,15 +146,15 @@ impl Config {
     }
 }
 
-fn default_landscape_width() -> u16 {
+fn default_landscape_width() -> u32 {
     1024
 }
 
-fn default_portrait_width() -> u16 {
+fn default_portrait_width() -> u32 {
     768
 }
 
-fn default_indicator_width() -> u16 {
+fn default_indicator_width() -> u32 {
     80
 }
 
@@ -205,12 +205,12 @@ impl ConfigManager {
         let bg = async move {
             while let Some(mut latest) = rx.next().await {
                 let closed = loop {
-                    match rx.try_next() {
-                        Ok(Some(c)) => latest = c,
+                    match rx.try_recv() {
+                        Ok(c) => latest = c,
                         // closed
-                        Ok(None) => break true,
+                        Err(TryRecvError::Closed) => break true,
                         // no message
-                        Err(_) => break false,
+                        Err(TryRecvError::Empty) => break false,
                     }
                 };
 

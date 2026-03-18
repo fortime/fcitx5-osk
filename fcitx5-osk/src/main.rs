@@ -20,6 +20,7 @@ mod dbus;
 mod font;
 mod key_set;
 mod layout;
+mod misc;
 mod state;
 mod store;
 mod theme;

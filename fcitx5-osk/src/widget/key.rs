@@ -196,55 +196,56 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         layout::padded(limits, self.width, self.height, self.padding, |limits| {
             self.content
-                .as_widget()
+                .as_widget_mut()
                 .layout(&mut tree.children[0], renderer, limits)
         })
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: MouseCursor,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> Status {
-        if let Status::Captured = self.content.as_widget_mut().on_event(
+    ) {
+        self.content.as_widget_mut().update(
             &mut tree.children[0],
-            event.clone(),
+            event,
             layout,
             cursor,
             renderer,
             clipboard,
             shell,
             viewport,
-        ) {
-            return Status::Captured;
+        );
+        if shell.event_status() == Status::Captured {
+            return;
         }
 
-        update(self, tree, event, layout, cursor, shell)
+        update(self, tree, event, layout, cursor, shell);
     }
 
     fn mouse_interaction(
@@ -285,6 +286,7 @@ where
                 bounds: layout.bounds(),
                 border: Border::default().rounded(self.border_radius),
                 shadow: Shadow::default(),
+                snap: false,
             },
             background,
         );
@@ -306,13 +308,18 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
+        viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content
-            .as_widget_mut()
-            .overlay(&mut tree.children[0], layout, renderer, translation)
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 
@@ -338,23 +345,22 @@ where
 fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
     widget: &mut Key<'_, Message, PressCb, ReleaseCb, Theme, Renderer>,
     tree: &mut Tree,
-    event: Event,
+    event: &Event,
     layout: Layout<'_>,
     cursor: MouseCursor,
     shell: &mut Shell<'_, Message>,
-) -> Status
-where
+) where
     Message: Clone,
     PressCb: 'static + Fn(KeyEvent) -> Message,
     ReleaseCb: 'static + Fn(KeyEvent) -> Message,
 {
     if widget.on_press_with.is_none() && widget.on_release_with.is_none() {
-        return Status::Ignored;
+        return;
     }
 
     let state: &mut KeyState = tree.state.downcast_mut();
 
-    let (pressed, cancelled, finger, position) = match event {
+    let (pressed, cancelled, finger, position) = match *event {
         Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
             (true, false, None, cursor.position())
         }
@@ -370,7 +376,7 @@ where
         Event::Touch(TouchEvent::FingerLost { id, position }) => {
             (false, true, Some(id), Some(position))
         }
-        _ => return Status::Ignored,
+        _ => return,
     };
 
     if pressed {
@@ -396,7 +402,7 @@ where
                     }));
                 }
                 state.finger_pressed(finger);
-                return Status::Captured;
+                shell.capture_event();
             }
         }
     } else if state.is_pressed(&finger) {
@@ -416,11 +422,9 @@ where
                     bounds: layout.bounds(),
                 }));
             }
-            return Status::Captured;
+            shell.capture_event();
         }
     }
-
-    Status::Ignored
 }
 
 /// Local state of the [`PopupKey`].
@@ -528,62 +532,63 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         layout::padded(limits, self.width, self.height, self.padding, |limits| {
             self.content
-                .as_widget()
+                .as_widget_mut()
                 .layout(&mut tree.children[0], renderer, limits)
         })
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: MouseCursor,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> Status {
-        if let Status::Captured = self.content.as_widget_mut().on_event(
+    ) {
+        self.content.as_widget_mut().update(
             &mut tree.children[0],
-            event.clone(),
+            event,
             layout,
             cursor,
             renderer,
             clipboard,
             shell,
             viewport,
-        ) {
-            return Status::Captured;
+        );
+        if shell.event_status() == Status::Captured {
+            return;
         }
 
         if self.on_enter.is_none() && self.on_exit.is_none() {
-            return Status::Ignored;
+            return;
         }
 
-        let (finger, position) = match event {
+        let (finger, position) = match *event {
             Event::Mouse(MouseEvent::CursorMoved { position }) => (None, position),
             Event::Touch(TouchEvent::FingerMoved { id, position }) => (Some(id), position),
-            _ => return Status::Ignored,
+            _ => return,
         };
 
         if finger == self.finger {
@@ -601,8 +606,6 @@ where
                 _ => {}
             }
         }
-
-        Status::Ignored
     }
 
     fn mouse_interaction(
@@ -645,6 +648,7 @@ where
                 // It should be the same as the outside container
                 border: Border::default().rounded(self.border_radius),
                 shadow: Shadow::default(),
+                snap: false,
             },
             background,
         );
@@ -665,13 +669,18 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
+        viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content
-            .as_widget_mut()
-            .overlay(&mut tree.children[0], layout, renderer, translation)
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 

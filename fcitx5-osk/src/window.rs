@@ -1,17 +1,9 @@
-use iced::{window::Id, Color, Point, Size, Task, Theme};
+use iced::{window::Id, Point, Size, Task};
 
 use crate::config::Placement;
 
 pub mod wayland;
 pub mod x11;
-
-pub trait WindowAppearance {
-    fn default(theme: &Theme) -> Self;
-
-    fn set_background_color(&mut self, background: Color);
-
-    fn background_color(&self) -> Color;
-}
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -24,8 +16,6 @@ pub enum SyncOutputResponse {
 
 pub trait WindowManager {
     type Message;
-
-    type Appearance;
 
     /// generate a do nothing task
     fn nothing() -> Task<Self::Message>;
@@ -45,8 +35,6 @@ pub trait WindowManager {
     fn position(&self, id: Id) -> Option<Point>;
 
     fn placement(&self, id: Id) -> Option<Placement>;
-
-    fn appearance(&self, theme: &Theme, id: Id) -> Self::Appearance;
 
     /// screen size with exclusive zone
     fn screen_size(&self) -> Size;

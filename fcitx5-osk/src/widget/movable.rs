@@ -6,7 +6,6 @@ use iced::{
         widget::{tree, Operation, Tree},
         Clipboard, Layout, Shell, Widget,
     },
-    event::Status,
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
         Interaction as MouseInteraction,
@@ -93,40 +92,40 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits)
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: MouseCursor,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> Status {
-        let params = match event {
+    ) {
+        let params = match *event {
             Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
                 Some((true, false, None, cursor.position()))
             }
@@ -164,7 +163,7 @@ where
                         .take_if(|(pointer, _)| *pointer == cur_pointer);
                 }
             }
-            if let Status::Captured = self.content.as_widget_mut().on_event(
+            self.content.as_widget_mut().update(
                 &mut tree.children[0],
                 event,
                 layout,
@@ -173,12 +172,10 @@ where
                 clipboard,
                 shell,
                 viewport,
-            ) {
-                return Status::Captured;
-            }
+            );
         } else {
             let Some((pressed, moved, cur_pointer, cur_position)) = params else {
-                return Status::Ignored;
+                return;
             };
             let state: &mut MovableState = tree.state.downcast_mut();
             if state.pointer.is_none() {
@@ -188,7 +185,7 @@ where
             }
             if pressed {
                 if state.pointer.is_some() {
-                    return Status::Ignored;
+                    return;
                 }
                 if let Some(cur_position) = cur_position.filter(|p| layout.bounds().contains(*p)) {
                     state.pointer = Some((cur_pointer, cur_position));
@@ -196,7 +193,7 @@ where
                         state.last = None;
                         shell.publish(on_move_start);
                     }
-                    return Status::Captured;
+                    shell.capture_event();
                 }
             } else if moved {
                 if let Some(position) = state.pointer.as_ref().and_then(|(pointer, position)| {
@@ -218,7 +215,7 @@ where
                             state.last = Some(now);
                         }
                     }
-                    return Status::Captured;
+                    shell.capture_event();
                 }
             } else if let Some((_, _)) = state
                 .pointer
@@ -228,11 +225,9 @@ where
                 if let Some(on_move_end) = self.on_move_end.clone() {
                     shell.publish(on_move_end);
                 }
-                return Status::Captured;
+                shell.capture_event();
             }
         }
-
-        Status::Ignored
     }
 
     fn mouse_interaction(
@@ -287,13 +282,18 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
+        viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content
-            .as_widget_mut()
-            .overlay(&mut tree.children[0], layout, renderer, translation)
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 

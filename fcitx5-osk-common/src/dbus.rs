@@ -45,7 +45,7 @@ pub mod client {
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn hide(&self) -> ZbusResult<()>;
 
-        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), ret)]
         #[zbus(property)]
         fn manual_mode(&self) -> ZbusResult<bool>;
 
@@ -55,15 +55,15 @@ pub mod client {
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn change_visible(&self, visible: bool) -> ZbusResult<()>;
 
-        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), ret)]
         #[zbus(property)]
         fn visible_request(&self) -> ZbusResult<(i64, bool)>;
 
-        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), ret)]
         /// tell the server to change mode.
         fn change_mode(&self, mode: WindowManagerMode) -> ZbusResult<()>;
 
-        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        #[tracing::instrument(level = "debug", skip(self), ret)]
         #[zbus(property)]
         fn mode(&self) -> ZbusResult<WindowManagerMode>;
 

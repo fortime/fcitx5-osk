@@ -12,9 +12,9 @@ use crate::{
 };
 
 pub struct LayoutState {
-    size: (u16, u16),
+    size: (u32, u32),
     scale_factor: f32,
-    unit: u16,
+    unit: u32,
     //fit: bool,
     padding: Padding,
     toolbar_layout: ToolbarLayout,
@@ -22,11 +22,11 @@ pub struct LayoutState {
     key_area_layout: Rc<KeyAreaLayout>,
     setting_layout: SettingLayout,
     setting_shown: bool,
-    max_width: u16,
+    max_width: u32,
 }
 
 impl LayoutState {
-    pub fn new(width: u16, key_area_layout: Rc<KeyAreaLayout>) -> Self {
+    pub fn new(width: u32, key_area_layout: Rc<KeyAreaLayout>) -> Self {
         let mut res = Self {
             size: (0, 0),
             scale_factor: 1.0,
@@ -43,7 +43,7 @@ impl LayoutState {
         res
     }
 
-    pub fn unit_within(&self, width: u16) -> u16 {
+    pub fn unit_within(&self, width: u32) -> u32 {
         // plus two units of padding
         let width_u = self.key_area_layout.width_u() + 2;
 
@@ -91,7 +91,7 @@ impl LayoutState {
         );
     }
 
-    pub fn available_candidate_width(&self) -> u16 {
+    pub fn available_candidate_width(&self) -> u32 {
         // minus padding
         self.size.0 - 2 * self.unit
     }
@@ -100,19 +100,19 @@ impl LayoutState {
         Size::from((self.size.0 as f32, self.size.1 as f32))
     }
 
-    pub fn max_width(&self) -> u16 {
+    pub fn max_width(&self) -> u32 {
         self.max_width
     }
 
-    pub fn unit(&self) -> u16 {
+    pub fn unit(&self) -> u32 {
         self.unit
     }
 
-    pub fn font_size(&self) -> u16 {
+    pub fn font_size(&self) -> u32 {
         self.unit * self.key_area_layout.primary_text_size_u()
     }
 
-    pub fn update_unit(&mut self, unit: u16, max_width: u16) -> StdResult<u16, u16> {
+    pub fn update_unit(&mut self, unit: u32, max_width: u32) -> StdResult<u32, u32> {
         let old_unit = self.unit;
         let mut width = self.size.0 / self.unit * unit;
         if width > max_width {
@@ -131,7 +131,7 @@ impl LayoutState {
 
     pub fn update_key_area_layout(
         &mut self,
-        mut max_width: u16,
+        mut max_width: u32,
         mut key_area_layout: Rc<KeyAreaLayout>,
     ) -> Rc<KeyAreaLayout> {
         let new_min_toolbar_height_u = key_area_layout.min_toolbar_height_u();
@@ -184,9 +184,10 @@ impl LayoutState {
         };
         // we let keyboard in a stack even there is no overlay, so the widget tree always has the
         // same level. Otherwise, the state will be clear if the level is changed.
-        let stack = Stack::new()
-            .push(keyboard)
-            .push_maybe(state.keyboard().popup_overlay(self.unit, self.size));
+        let mut stack = Stack::new().push(keyboard);
+        if let Some(overlay) = state.keyboard().popup_overlay(self.unit, self.size) {
+            stack = stack.push(overlay);
+        }
         stack.into()
     }
 

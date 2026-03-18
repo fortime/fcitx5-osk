@@ -27,7 +27,7 @@ use crate::{
     widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
 };
 
-const TEXT_PADDING_LENGTH: u16 = 3;
+const TEXT_PADDING_LENGTH: u32 = 3;
 
 /// #define KEY_LEFTSHIFT       42, val + 8
 const KEYCODE_LEFT_SHIFT: u32 = 50;
@@ -79,15 +79,15 @@ enum Fcitx5Hidden {
 pub struct KeyboardState {
     id: u8,
     modifiers: u32,
-    primary_text_size_u: u16,
-    secondary_text_size_u: u16,
+    primary_text_size_u: u32,
+    secondary_text_size_u: u32,
     font: Font,
     keys: HashMap<String, Key>,
     pressed_keys: HashMap<Arc<str>, KeyState>,
     holding_timeout: Duration,
     holding_key_state: Option<HoldingKeyState>,
-    popup_key_width_u: u16,
-    popup_key_height_u: u16,
+    popup_key_width_u: u32,
+    popup_key_height_u: u32,
     /// if there is no indicator and fcitx5 hides virtual keyboard, we won't hide the keyboard,
     /// instead we set this flag, and tell fcitx5 to show virtual keyboard when there is any key
     /// pressing event.
@@ -188,7 +188,7 @@ impl KeyboardState {
         &'a self,
         holding_key_state: &'a HoldingKeyState,
         key_value: &'a KeyValue,
-        unit: u16,
+        unit: u32,
         border_radius: f32,
     ) -> PopupKey<'a, Message> {
         let common =
@@ -262,7 +262,7 @@ impl KeyboardState {
         }
     }
 
-    pub fn key(&self, key_name: Arc<str>, unit: u16, size: (u16, u16)) -> Element<Message> {
+    pub fn key(&self, key_name: Arc<str>, unit: u32, size: (u32, u32)) -> Element<'_, Message> {
         let (width, height) = size;
         let (inner_width, inner_height) = (
             width - TEXT_PADDING_LENGTH * 2,
@@ -364,8 +364,8 @@ impl KeyboardState {
             .into()
     }
 
-    pub fn popup_overlay(&self, unit: u16, size: (u16, u16)) -> Option<Element<Message>> {
-        const MARGIN_U: u16 = 1;
+    pub fn popup_overlay(&self, unit: u32, size: (u32, u32)) -> Option<Element<'_, Message>> {
+        const MARGIN_U: u32 = 1;
         let (width, height) = size;
 
         let holding_key_state = self.holding_key_state.as_ref()?;
@@ -390,15 +390,15 @@ impl KeyboardState {
 
         // calculate position.
         let bounds = &holding_key_state.key_widget_event.bounds;
-        let mut left_x = bounds.x as u16;
+        let mut left_x = bounds.x as u32;
         if left_x + popup_key_area_width > width {
             left_x = width.saturating_sub(popup_key_area_width);
         }
-        let mut top_y = bounds.y as u16;
+        let mut top_y = bounds.y as u32;
         if top_y > self.popup_key_height_u * unit + MARGIN_U * unit {
             top_y -= self.popup_key_height_u * unit + MARGIN_U * unit;
         } else {
-            top_y += bounds.height as u16 + MARGIN_U * unit;
+            top_y += bounds.height as u32 + MARGIN_U * unit;
         }
 
         // calculate padding.

@@ -9,7 +9,6 @@ use iced::{
         widget::{tree, Operation, Tree},
         Clipboard, Layout, Shell, Widget,
     },
-    event::Status,
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
         Interaction as MouseInteraction,
@@ -111,40 +110,40 @@ where
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits)
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut Tree,
         layout: Layout<'_>,
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
         self.content
-            .as_widget()
+            .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: Event,
+        event: &Event,
         layout: Layout<'_>,
         cursor: MouseCursor,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
-    ) -> Status {
-        let mut status = Status::Ignored;
+    ) {
+        let mut used = false;
         'out: {
             let Some(on_toggle) = &self.on_toggle else {
                 break 'out;
@@ -152,7 +151,7 @@ where
 
             let state: &mut ToggleState = tree.state.downcast_mut();
 
-            let params = match event {
+            let params = match *event {
                 Event::Mouse(MouseEvent::ButtonPressed(btn)) => {
                     Some((true, Pointer::Mouse(btn), cursor.position()))
                 }
@@ -205,7 +204,7 @@ where
                 state.toggled = !state.pointers.is_empty();
                 if state.toggled {
                     // Don't sent release event to children.
-                    status = Status::Captured;
+                    used = true;
                 }
             }
             let expected_pointer_num = match state.condition {
@@ -225,10 +224,10 @@ where
             }
         }
 
-        if status == Status::Ignored {
-            return self.content.as_widget_mut().on_event(
+        if !used {
+            self.content.as_widget_mut().update(
                 &mut tree.children[0],
-                event.clone(),
+                event,
                 layout,
                 cursor,
                 renderer,
@@ -237,7 +236,6 @@ where
                 viewport,
             );
         }
-        Status::Ignored
     }
 
     fn mouse_interaction(
@@ -281,13 +279,18 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
+        viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        self.content
-            .as_widget_mut()
-            .overlay(&mut tree.children[0], layout, renderer, translation)
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 

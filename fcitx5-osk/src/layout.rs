@@ -45,7 +45,7 @@ pub struct KeyAreaLayout {
     name: String,
     /// vertical space between rows
     #[serde(alias = "spacing", default = "KeyAreaLayout::default_spacing_u")]
-    spacing_u: u16,
+    spacing_u: u32,
     elements: Vec<KeyRow>,
     #[getset(get = "pub")]
     key_mappings: HashMap<String, KeyId>,
@@ -54,80 +54,80 @@ pub struct KeyAreaLayout {
         default = "KeyAreaLayout::default_primary_text_size_u"
     )]
     #[getset(get_copy = "pub")]
-    primary_text_size_u: u16,
+    primary_text_size_u: u32,
     #[serde(
         alias = "secondary_text_size",
         default = "KeyAreaLayout::default_secondary_text_size_u"
     )]
     #[getset(get_copy = "pub")]
-    secondary_text_size_u: u16,
+    secondary_text_size_u: u32,
     #[serde(
         alias = "popup_key_width",
         default = "KeyAreaLayout::default_popup_key_width_u"
     )]
     #[getset(get_copy = "pub")]
-    popup_key_width_u: u16,
+    popup_key_width_u: u32,
     #[serde(
         alias = "popup_key_height",
         default = "KeyAreaLayout::default_popup_key_height_u"
     )]
     #[getset(get_copy = "pub")]
-    popup_key_height_u: u16,
+    popup_key_height_u: u32,
     #[serde(
         alias = "min_toolbar_height",
         default = "KeyAreaLayout::default_min_toolbar_height_u"
     )]
     #[getset(get_copy = "pub")]
-    min_toolbar_height_u: u16,
+    min_toolbar_height_u: u32,
     #[getset(get = "pub")]
     font: Option<String>,
 }
 
 impl KeyAreaLayout {
-    fn default_spacing_u() -> u16 {
+    fn default_spacing_u() -> u32 {
         1
     }
 
-    fn default_primary_text_size_u() -> u16 {
+    fn default_primary_text_size_u() -> u32 {
         3
     }
 
-    fn default_popup_key_width_u() -> u16 {
+    fn default_popup_key_width_u() -> u32 {
         8
     }
 
-    fn default_popup_key_height_u() -> u16 {
+    fn default_popup_key_height_u() -> u32 {
         6
     }
 
-    fn default_secondary_text_size_u() -> u16 {
+    fn default_secondary_text_size_u() -> u32 {
         2
     }
 
-    fn default_min_toolbar_height_u() -> u16 {
+    fn default_min_toolbar_height_u() -> u32 {
         6
     }
 
-    pub fn width_u(&self) -> u16 {
+    pub fn width_u(&self) -> u32 {
         self.elements.iter().map(KeyRow::width_u).max().unwrap_or(0)
     }
 
-    pub fn height_u(&self) -> u16 {
+    pub fn height_u(&self) -> u32 {
         if self.elements.is_empty() {
             return 0;
         }
-        let mut height_u = self.spacing_u * (self.elements.len() as u16 - 1);
-        height_u += self.elements.iter().map(KeyRow::height_u).sum::<u16>();
+        let mut height_u = self.spacing_u * (self.elements.len() as u32 - 1);
+        height_u += self.elements.iter().map(KeyRow::height_u).sum::<u32>();
         height_u
     }
 
-    pub fn size(&self, unit: u16) -> (u16, u16) {
+    pub fn size(&self, unit: u32) -> (u32, u32) {
         (self.width_u() * unit, self.height_u() * unit)
     }
 
     pub fn to_element<'b>(
         &self,
-        unit: u16,
+        unit: u32,
         state: &'b dyn StateExtractor,
     ) -> impl Into<Element<'b, Message>> {
         let mut col = Column::new()
@@ -194,34 +194,34 @@ impl<'de> Deserialize<'de> for KeyId {
 #[derive(Deserialize)]
 pub struct KeyRow {
     #[serde(alias = "height")]
-    height_u: u16,
+    height_u: u32,
     #[serde(alias = "spacing")]
     /// horizontal space between elements
-    spacing_u: u16,
+    spacing_u: u32,
     elements: Vec<KeyRowElement>,
 }
 
 impl KeyRow {
-    fn width_u(&self) -> u16 {
+    fn width_u(&self) -> u32 {
         if self.elements.is_empty() {
             return 0;
         }
-        let mut width_u = self.spacing_u * (self.elements.len() as u16 - 1);
+        let mut width_u = self.spacing_u * (self.elements.len() as u32 - 1);
         width_u += self
             .elements
             .iter()
             .map(KeyRowElement::width_u)
-            .sum::<u16>();
+            .sum::<u32>();
         width_u
     }
 
-    fn height_u(&self) -> u16 {
+    fn height_u(&self) -> u32 {
         self.height_u
     }
 
     fn to_element<'b>(
         &self,
-        unit: u16,
+        unit: u32,
         state: &'b dyn StateExtractor,
     ) -> impl Into<Element<'b, Message>> {
         let mut row = Row::new()
@@ -236,16 +236,16 @@ impl KeyRow {
 }
 
 pub enum KeyRowElement {
-    Padding(u16),
+    Padding(u32),
     Key {
-        width_u: u16,
-        height_u: Option<u16>,
+        width_u: u32,
+        height_u: Option<u32>,
         name: Arc<str>,
     },
 }
 
 impl KeyRowElement {
-    fn width_u(&self) -> u16 {
+    fn width_u(&self) -> u32 {
         match self {
             KeyRowElement::Padding(n) => *n,
             KeyRowElement::Key {
@@ -258,12 +258,12 @@ impl KeyRowElement {
 
     fn to_element<'b>(
         &self,
-        max_height_u: u16,
-        unit: u16,
+        max_height_u: u32,
+        unit: u32,
         state: &'b dyn StateExtractor,
     ) -> Element<'b, Message> {
         match self {
-            KeyRowElement::Padding(width_u) => Space::with_width(width_u * unit).into(),
+            KeyRowElement::Padding(width_u) => Space::new().width(width_u * unit).into(),
             KeyRowElement::Key {
                 width_u,
                 height_u,
@@ -305,7 +305,7 @@ impl<'de> Deserialize<'de> for KeyRowElement {
                 Ok(n) => Ok(KeyRowElement::Padding(n)),
                 Err(_) => Err(Error::invalid_value(
                     Unexpected::Str(width_u),
-                    &"it should end with an empty string or a u16 integer",
+                    &"it should end with an empty string or a u32 integer",
                 )),
             }
         } else if typ.starts_with("k") {
@@ -315,7 +315,7 @@ impl<'de> Deserialize<'de> for KeyRowElement {
                 Err(_) => {
                     return Err(Error::invalid_value(
                         Unexpected::Str(width_u),
-                        &"width should be empty or a u16 integer",
+                        &"width should be empty or a u32 integer",
                     ))
                 }
             };
@@ -325,7 +325,7 @@ impl<'de> Deserialize<'de> for KeyRowElement {
                     s.parse().map_err(|_| {
                         Error::invalid_value(
                             Unexpected::Str(s),
-                            &"height should be empty or a u16 integer",
+                            &"height should be empty or a u32 integer",
                         )
                     })
                 })
@@ -345,30 +345,30 @@ impl<'de> Deserialize<'de> for KeyRowElement {
 }
 
 pub struct ToolbarLayout {
-    height_u: u16,
+    height_u: u32,
 }
 
 impl ToolbarLayout {
-    pub fn new(min_toolbar_height_u: u16) -> Self {
+    pub fn new(min_toolbar_height_u: u32) -> Self {
         let mut res = Self { height_u: 6 };
         res.update_height_u(min_toolbar_height_u);
         res
     }
 
-    pub fn update_height_u(&mut self, min_toolbar_height_u: u16) {
+    pub fn update_height_u(&mut self, min_toolbar_height_u: u32) {
         self.height_u = 6.max(min_toolbar_height_u)
     }
 
-    pub fn height_u(&self) -> u16 {
+    pub fn height_u(&self) -> u32 {
         self.height_u
     }
 
     pub fn to_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
-        unit: u16,
+        unit: u32,
         candidate_font: Font,
-        font_size_u: u16,
+        font_size_u: u32,
     ) -> Element<'b, Message> {
         if params.state.im().candidate_area_state().has_candidate() {
             self.to_candidate_element(params, unit, candidate_font, font_size_u)
@@ -380,9 +380,9 @@ impl ToolbarLayout {
     fn to_candidate_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
-        unit: u16,
+        unit: u32,
         font: Font,
-        font_size_u: u16,
+        font_size_u: u32,
     ) -> Element<'b, Message> {
         let theme = params.state.theme();
         let state = params.state.im().candidate_area_state();
@@ -404,7 +404,7 @@ impl ToolbarLayout {
                     .iter()
                     .map(|c| c.chars().count())
                     .max()
-                    .unwrap_or(0) as u16
+                    .unwrap_or(0) as u32
                     * char_width,
             )
         } else {
@@ -413,7 +413,7 @@ impl ToolbarLayout {
             for candidate in candidate_list {
                 // TODO Simply assume one char consumes 1 * font_size. Calculate the width in the
                 // future.
-                let width = candidate.chars().count() as u16;
+                let width = candidate.chars().count() as u32;
                 if max_width.max(width) * (consumed + 1) * char_width + consumed * spacing
                     > available_candidate_width
                 {
@@ -498,8 +498,8 @@ impl ToolbarLayout {
     fn to_toolbar_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
-        unit: u16,
-        font_size_u: u16,
+        unit: u32,
+        font_size_u: u32,
     ) -> Element<'b, Message> {
         let state = params.state;
         let theme = state.theme();
@@ -593,8 +593,8 @@ impl SettingLayout {
     pub fn to_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
-        unit: u16,
-        font_size_u: u16,
+        unit: u32,
+        font_size_u: u32,
     ) -> Element<'b, Message> {
         let state = params.state;
         let text_size = font_size_u * unit;
@@ -642,7 +642,7 @@ trait ToElementFieldType {
         &'a self,
         field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u16,
+        text_size: u32,
     ) -> Element<'a, Message>;
 }
 
@@ -654,7 +654,7 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u16,
+        text_size: u32,
     ) -> Element<'a, Message> {
         if self.is_enabled(state) {
             PickList::new(self.variants(), self.cur_value(state), |selected| {
@@ -683,7 +683,7 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u16,
+        text_size: u32,
     ) -> Element<'a, Message> {
         if self.is_enabled(state) {
             PickList::new(self.variants(), self.cur_value(state), |selected| {
@@ -712,7 +712,7 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u16,
+        text_size: u32,
     ) -> Element<'a, Message> {
         let (variants, selected) = self.variants_and_selected(state);
         if self.is_enabled(state) {
@@ -738,7 +738,7 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u16,
+        text_size: u32,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(state);
         Row::new()
@@ -762,7 +762,7 @@ impl ToElementFieldType for TextDesc {
         &'a self,
         field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u16,
+        text_size: u32,
     ) -> Element<'a, Message> {
         TextInput::new(
             &self.placeholder(field, state).unwrap_or_default(),
@@ -782,7 +782,7 @@ impl ToElementFieldType for BoolDesc {
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: u16,
+        text_size: u32,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(state);
         let mut toggler = Toggler::new(cur_value)
@@ -795,7 +795,7 @@ impl ToElementFieldType for BoolDesc {
     }
 }
 
-fn nerd_icon<'a, Message: 'a>(icon: char, size: u16, color: Color) -> Element<'a, Message> {
+fn nerd_icon<'a, Message: 'a>(icon: char, size: u32, color: Color) -> Element<'a, Message> {
     Text::new(icon)
         .size(size)
         .font(Font::with_name("fcitx5 osk nerd"))
@@ -806,9 +806,9 @@ fn nerd_icon<'a, Message: 'a>(icon: char, size: u16, color: Color) -> Element<'a
 
 fn nerd_btn<'a, Message: 'a>(
     icon: char,
-    font_size: u16,
+    font_size: u32,
     color: Color,
-    unit: u16,
+    unit: u32,
 ) -> Button<'a, Message> {
     Button::new(
         Container::new(nerd_icon(icon, font_size, color))
@@ -825,9 +825,9 @@ fn nerd_btn<'a, Message: 'a>(
 fn candidate_btn<Message>(
     candidate: &str,
     font: Font,
-    font_size: u16,
-    width: u16,
-) -> Button<Message> {
+    font_size: u32,
+    width: u32,
+) -> Button<'_, Message> {
     let text = Text::new(candidate)
         .font(font)
         .shaping(Shaping::Advanced)
@@ -840,7 +840,7 @@ fn candidate_btn<Message>(
         .padding(0)
 }
 
-pub fn indicator_btn<'a, Message>(width: u16) -> Button<'a, Message>
+pub fn indicator_btn<'a, Message>(width: u32) -> Button<'a, Message>
 where
     Message: 'a,
 {
@@ -855,10 +855,10 @@ where
 fn field_value_element<'a>(
     state: &'a dyn StateExtractor,
     field: &'a Field,
-    text_size: u16,
+    text_size: u32,
 ) -> Element<'a, Message> {
     match field.typ() {
-        FieldType::StepU16(step_desc) => step_desc.to_element(field, state, text_size),
+        FieldType::StepU32(step_desc) => step_desc.to_element(field, state, text_size),
         FieldType::OwnedEnumPlacement(enum_desc) => enum_desc.to_element(field, state, text_size),
         FieldType::OwnedEnumIndicatorDisplay(enum_desc) => {
             enum_desc.to_element(field, state, text_size)

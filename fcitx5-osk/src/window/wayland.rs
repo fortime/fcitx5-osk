@@ -2,14 +2,11 @@ use std::{collections::HashMap, env, mem};
 
 use iced::{
     window::{self as iced_window, Id},
-    Color, Point, Size, Task, Theme,
+    Point, Size, Task,
 };
-use iced_layershell::{
-    reexport::{
-        Anchor, KeyboardInteractivity, Layer, NewInputPanelSettings, NewLayerShellSettings,
-        OutputOption,
-    },
-    Appearance, DefaultStyle,
+use iced_layershell::reexport::{
+    Anchor, KeyboardInteractivity, Layer, NewInputPanelSettings, NewLayerShellSettings,
+    OutputOption,
 };
 
 use crate::{
@@ -19,7 +16,7 @@ use crate::{
     },
     config::Placement,
     has_text_within_env,
-    window::{WindowAppearance, WindowManager, WindowManagerMode, WindowSettings},
+    window::{WindowManager, WindowManagerMode, WindowSettings},
 };
 
 use super::SyncOutputResponse;
@@ -44,20 +41,6 @@ pub unsafe fn set_env(socket: Option<&str>, display: Option<&str>) {
         env::var("WAYLAND_SOCKET"),
         env::var("WAYLAND_DISPLAY")
     );
-}
-
-impl WindowAppearance for Appearance {
-    fn default(theme: &Theme) -> Self {
-        theme.default_style()
-    }
-
-    fn set_background_color(&mut self, background_color: Color) {
-        self.background_color = background_color;
-    }
-
-    fn background_color(&self) -> Color {
-        self.background_color
-    }
 }
 
 pub struct WaylandWindowManager {
@@ -176,6 +159,8 @@ impl WaylandWindowManager {
                     keyboard_interactivity: KeyboardInteractivity::None,
                     output_option,
                     events_transparent: false,
+                    // TODO set namespace according to the window type
+                    namespace: Some("main".to_string()),
                 },
                 id,
             })
@@ -217,8 +202,6 @@ impl WaylandWindowManager {
 
 impl WindowManager for WaylandWindowManager {
     type Message = WaylandMessage;
-
-    type Appearance = Appearance;
 
     fn nothing() -> Task<Self::Message> {
         Message::from_nothing()
@@ -324,12 +307,6 @@ impl WindowManager for WaylandWindowManager {
 
     fn placement(&self, id: Id) -> Option<Placement> {
         self.settings.get(&id).map(WindowSettings::placement)
-    }
-
-    fn appearance(&self, theme: &Theme, _id: Id) -> Self::Appearance {
-        let mut appearance = Self::Appearance::default(theme);
-        appearance.set_background_color(Color::TRANSPARENT);
-        appearance
     }
 
     fn screen_size(&self) -> Size {

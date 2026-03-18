@@ -2,9 +2,8 @@ use std::{collections::HashMap, env, sync::Arc};
 
 use anyhow::Result;
 use iced::{
-    daemon::{Appearance, DefaultStyle},
     window::{self as iced_window, settings::PlatformSpecific, Id, Level, Position, Settings},
-    Color, Point, Size, Task, Theme,
+    Point, Size, Task,
 };
 use x11rb::{
     connection::Connection, properties::WmHints, protocol::xproto, rust_connection::RustConnection,
@@ -18,7 +17,7 @@ use crate::{
     },
     config::Placement,
     has_text_within_env,
-    window::{WindowAppearance, WindowManager, WindowManagerMode, WindowSettings},
+    window::{WindowManager, WindowManagerMode, WindowSettings},
 };
 
 use super::SyncOutputResponse;
@@ -36,20 +35,6 @@ x11rb::atom_manager! {
         _NET_WM_STATE_SKIP_PAGER,
         _NET_WM_STRUT,
         _NET_WM_STRUT_PARTIAL,
-    }
-}
-
-impl WindowAppearance for Appearance {
-    fn default(theme: &Theme) -> Self {
-        theme.default_style()
-    }
-
-    fn set_background_color(&mut self, background_color: Color) {
-        self.background_color = background_color;
-    }
-
-    fn background_color(&self) -> Color {
-        self.background_color
     }
 }
 
@@ -161,8 +146,6 @@ impl X11WindowManager {
 impl WindowManager for X11WindowManager {
     type Message = Message;
 
-    type Appearance = Appearance;
-
     fn nothing() -> Task<Self::Message> {
         Message::from_nothing()
     }
@@ -183,7 +166,7 @@ impl WindowManager for X11WindowManager {
         });
         let screen_size = self.screen_size();
         task = task.chain(
-            iced_window::get_raw_id::<Self::Message>(id)
+            iced_window::raw_id::<Self::Message>(id)
                 .map(move |raw_id| {
                     let x_window_id = raw_id as xproto::Window;
                     if let Err(err) = init_window(
@@ -196,11 +179,8 @@ impl WindowManager for X11WindowManager {
                         tracing::error!("failed to init a x11 window: {:?}", err);
                     }
                 })
-                .then(move |_| iced_window::change_mode(id, iced_window::Mode::Windowed))
-                .chain(iced_window::change_level(
-                    id,
-                    iced_window::Level::AlwaysOnTop,
-                )),
+                .then(move |_| iced_window::set_mode(id, iced_window::Mode::Windowed))
+                .chain(iced_window::set_level(id, iced_window::Level::AlwaysOnTop)),
         );
         task
     }
@@ -232,21 +212,19 @@ impl WindowManager for X11WindowManager {
                 new_position = settings.position;
                 let x11_state = self.x11_state().expect("Unable to to generate X11State");
                 let screen_size = self.screen_size();
-                task = task.chain(
-                    iced_window::get_raw_id::<Self::Message>(id).map(move |raw_id| {
-                        let x_window_id = raw_id as xproto::Window;
-                        if let Err(err) = set_exclusive_zone(
-                            &x11_state.conn,
-                            x_window_id,
-                            &x11_state.atoms,
-                            screen_size,
-                            size.height as u32,
-                        ) {
-                            tracing::error!("failed to set exclusive zone: {:?}", err);
-                        }
-                        Message::Nothing
-                    }),
-                )
+                task = task.chain(iced_window::raw_id::<Self::Message>(id).map(move |raw_id| {
+                    let x_window_id = raw_id as xproto::Window;
+                    if let Err(err) = set_exclusive_zone(
+                        &x11_state.conn,
+                        x_window_id,
+                        &x11_state.atoms,
+                        screen_size,
+                        size.height as u32,
+                    ) {
+                        tracing::error!("failed to set exclusive zone: {:?}", err);
+                    }
+                    Message::Nothing
+                }))
             }
             task = task.chain(self.mv(id, new_position));
         };
@@ -286,12 +264,6 @@ impl WindowManager for X11WindowManager {
 
     fn placement(&self, id: Id) -> Option<Placement> {
         self.settings.get(&id).map(WindowSettings::placement)
-    }
-
-    fn appearance(&self, theme: &Theme, _id: Id) -> Self::Appearance {
-        let mut appearance = Self::Appearance::default(theme);
-        appearance.set_background_color(Color::TRANSPARENT);
-        appearance
     }
 
     fn screen_size(&self) -> Size {

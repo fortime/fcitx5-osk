@@ -2,14 +2,18 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::Result;
 use iced::{
-    futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    futures::stream,
+    futures::{
+        channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
+        Stream,
+    },
     Subscription,
 };
 use tokio::task::JoinHandle;
 use v1::Fcitx5ControllerServiceStub;
 
-use crate::{app::wayland::WaylandMessage, dbus::client::Fcitx5Services};
+use crate::{
+    app::wayland::WaylandMessage, dbus::client::Fcitx5Services, misc::NamedSubscriptionData,
+};
 
 use super::connection::WaylandConnection;
 
@@ -55,14 +59,22 @@ impl InputMethodContext {
     }
 
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
-        const EXTERNAL_SUBSCRIPTION_ID: &str = "external::wayland_input_method";
-        if let Some(rx) = self.state.lock().ok().and_then(|mut s| s.rx.take()) {
-            Subscription::run_with_id(EXTERNAL_SUBSCRIPTION_ID, rx)
-        } else {
-            // should always return a subscription with the same id, otherwise, the first one will
-            // be dropped.
-            Subscription::run_with_id(EXTERNAL_SUBSCRIPTION_ID, stream::empty())
+        fn wayland_input_method_subscription(
+            data: &NamedSubscriptionData<Arc<Mutex<State>>>,
+        ) -> impl Stream<Item = WaylandMessage> {
+            if let Some(rx) = data.data().lock().ok().and_then(|mut s| s.rx.take()) {
+                rx
+            } else {
+                // should always return a subscription with the same id, otherwise, the first one will
+                // be dropped.
+                let (_, rx) = mpsc::unbounded();
+                rx
+            }
         }
+        Subscription::run_with(
+            NamedSubscriptionData::new("external::wayland_input_method", self.state.clone()),
+            wayland_input_method_subscription,
+        )
     }
 
     pub fn fcitx5_services(&self) -> Result<Fcitx5Services> {

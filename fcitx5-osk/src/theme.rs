@@ -3,7 +3,7 @@ use std::{path::PathBuf, result::Result as StdResult};
 use getset::Getters;
 use iced::{
     theme::{
-        palette::{Background, Danger, Extended, Pair, Primary, Secondary, Success},
+        palette::{Background, Danger, Extended, Pair, Primary, Secondary, Success, Warning},
         Palette, Theme as IcedTheme,
     },
     Color,
@@ -29,16 +29,18 @@ struct RawPalette {
     primary: String,
     success: String,
     danger: String,
+    warning: String,
 }
 
 #[derive(Deserialize)]
 struct RawExtendedPalette {
-    background: RawExtendedPaletteColorSet,
+    background: RawMoreExtendedPaletteColorSet,
     primary: RawExtendedPaletteColorSet,
     secondary: RawExtendedPaletteColorSet,
     success: RawExtendedPaletteColorSet,
     danger: RawExtendedPaletteColorSet,
     is_dark: bool,
+    warning: RawExtendedPaletteColorSet,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +48,18 @@ struct RawExtendedPaletteColorSet {
     base: RawColorPair,
     weak: RawColorPair,
     strong: RawColorPair,
+}
+
+#[derive(Deserialize)]
+struct RawMoreExtendedPaletteColorSet {
+    base: RawColorPair,
+    weak: RawColorPair,
+    strong: RawColorPair,
+    weakest: RawColorPair,
+    weaker: RawColorPair,
+    neutral: RawColorPair,
+    stronger: RawColorPair,
+    strongest: RawColorPair,
 }
 
 #[derive(Deserialize)]
@@ -96,6 +110,7 @@ impl<'de> Deserialize<'de> for Theme {
             primary: parse_color(&palette.primary)?,
             success: parse_color(&palette.success)?,
             danger: parse_color(&palette.danger)?,
+            warning: parse_color(&palette.warning)?,
         };
 
         let iced_theme = if let Some(extended) = extended_palette {
@@ -104,6 +119,11 @@ impl<'de> Deserialize<'de> for Theme {
                     base: parse_color_pair(&extended.background.base)?,
                     weak: parse_color_pair(&extended.background.weak)?,
                     strong: parse_color_pair(&extended.background.strong)?,
+                    weakest: parse_color_pair(&extended.background.weakest)?,
+                    weaker: parse_color_pair(&extended.background.weaker)?,
+                    neutral: parse_color_pair(&extended.background.neutral)?,
+                    stronger: parse_color_pair(&extended.background.stronger)?,
+                    strongest: parse_color_pair(&extended.background.strongest)?,
                 },
                 primary: Primary {
                     base: parse_color_pair(&extended.primary.base)?,
@@ -126,6 +146,11 @@ impl<'de> Deserialize<'de> for Theme {
                     strong: parse_color_pair(&extended.danger.strong)?,
                 },
                 is_dark: extended.is_dark,
+                warning: Warning {
+                    base: parse_color_pair(&extended.warning.base)?,
+                    weak: parse_color_pair(&extended.warning.weak)?,
+                    strong: parse_color_pair(&extended.warning.strong)?,
+                },
             };
 
             IcedTheme::custom_with_fn(name.clone(), palette, |_| extended)
@@ -145,7 +170,7 @@ fn parse_color<E>(color: &str) -> StdResult<Color, E>
 where
     E: Error,
 {
-    Color::parse(color).ok_or_else(|| {
+    color.parse().map_err(|_| {
         E::invalid_value(
             Unexpected::Str(color),
             &"`#rrggbb`, `#rrggbbaa`, `#rgb`, or `#rgba`",

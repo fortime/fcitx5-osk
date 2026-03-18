@@ -7,7 +7,7 @@ use anyhow::Result;
 use iced::{
     futures::{
         channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
-        stream,
+        Stream,
     },
     Subscription,
 };
@@ -37,6 +37,7 @@ use crate::{
         wayland::{connection::WaylandConnection, WaylandMessage},
         Message,
     },
+    misc::NamedSubscriptionData,
     state::WindowManagerEvent,
 };
 
@@ -135,14 +136,22 @@ impl OutputContext {
     }
 
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
-        const EXTERNAL_SUBSCRIPTION_ID: &str = "external::wayland_output";
-        if let Some(rx) = self.state().and_then(|mut s| s.rx.take()) {
-            Subscription::run_with_id(EXTERNAL_SUBSCRIPTION_ID, rx)
-        } else {
-            // should always return a subscription with the same id, otherwise, the first one will
-            // be dropped.
-            Subscription::run_with_id(EXTERNAL_SUBSCRIPTION_ID, stream::empty())
+        fn wayland_output_subscription(
+            data: &NamedSubscriptionData<Arc<Mutex<State>>>,
+        ) -> impl Stream<Item = WaylandMessage> {
+            if let Some(rx) = data.data().lock().ok().and_then(|mut s| s.rx.take()) {
+                rx
+            } else {
+                // should always return a subscription with the same id, otherwise, the first one will
+                // be dropped.
+                let (_, rx) = mpsc::unbounded();
+                rx
+            }
         }
+        Subscription::run_with(
+            NamedSubscriptionData::new("external::wayland_output", self.state.clone()),
+            wayland_output_subscription,
+        )
     }
 
     pub fn select_output(&self, preferred_output_name: Option<&str>) -> Option<OutputGeometry> {

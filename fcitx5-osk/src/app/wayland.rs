@@ -1,11 +1,18 @@
+use std::cell::RefCell;
+
 use anyhow::Result;
 use connection::WaylandConnection;
 use fcitx5_osk_common::signal::ShutdownFlag;
-use iced::{futures::stream, window::Id, Element, Subscription, Task, Theme};
+use iced::{
+    futures::{stream, Stream},
+    theme::Style,
+    window::Id,
+    Element, Subscription, Task, Theme,
+};
 use iced_layershell::{
-    build_pattern::{self, MainSettings},
+    build_pattern,
     settings::{LayerShellSettings, StartMode},
-    to_layer_message, Appearance,
+    to_layer_message, Settings,
 };
 
 pub use crate::app::wayland::output::{OutputContext, OutputGeometry};
@@ -13,6 +20,7 @@ use crate::{
     app::{self, wayland::input_method::InputMethodContext, Keyboard, MapTask, Message},
     config::ConfigManager,
     font,
+    misc::NamedSubscriptionData,
     state::WindowManagerEvent,
     window::{wayland::WaylandWindowManager, WindowManagerMode},
 };
@@ -95,29 +103,34 @@ impl WaylandKeyboard {
 }
 
 impl WaylandKeyboard {
-    pub fn view(&self, id: Id) -> Element<WaylandMessage> {
+    pub fn view(&self, id: Id) -> Element<'_, WaylandMessage> {
         self.inner.view(id)
     }
 
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
+        fn output_context_listen(
+            data: &NamedSubscriptionData<OutputContext>,
+        ) -> impl Stream<Item = WaylandMessage> {
+            // These messages only work in the first call
+            let mut once_messages = vec![];
+            // Wayland connection environment variables will be set in the call of `self.inner.subscription()`.
+            if let Err(e) = data.data().listen() {
+                once_messages.push(
+                    app::error_with_context(e, "Unable to listen to the changes of wayland output")
+                        .into(),
+                );
+            }
+            stream::iter(once_messages)
+        }
+
         let mut subscriptions = vec![
             self.inner.subscription(),
             self.input_method_context.subscription(),
             self.output_context.subscription(),
         ];
-
-        // These messages only work in the first call
-        let mut once_messages = vec![];
-        // Wayland connection environment variables will be set in the call of `self.inner.subscription()`.
-        if let Err(e) = self.output_context.listen() {
-            once_messages.push(
-                app::error_with_context(e, "Unable to listen to the changes of wayland output")
-                    .into(),
-            );
-        }
-        subscriptions.push(Subscription::run_with_id(
-            "external::wayland_once",
-            stream::iter(once_messages),
+        subscriptions.push(Subscription::run_with(
+            NamedSubscriptionData::new("external::wayland_once", self.output_context.clone()),
+            output_context_listen,
         ));
 
         Subscription::batch(subscriptions)
@@ -163,8 +176,8 @@ impl WaylandKeyboard {
         }
     }
 
-    pub fn appearance(&self, theme: &Theme, id: Id) -> Appearance {
-        self.inner.appearance(theme, id)
+    pub fn style(&self, theme: &Theme) -> Style {
+        self.inner.style(theme)
     }
 
     pub fn theme(&self, id: Id) -> Theme {
@@ -188,16 +201,36 @@ pub fn start(
     let connection = WaylandConnection::new();
     let input_method_context = InputMethodContext::new(connection.clone());
     let output_context = OutputContext::new(connection.clone());
+    let title = clap::crate_name!().to_string();
+
+    let boot = RefCell::new(Some(move || {
+        let (keyboard, task) = WaylandKeyboard::new(
+            config_manager,
+            input_method_context,
+            output_context,
+            wait_for_socket,
+            modifier_workaround,
+            shutdown_flag,
+        );
+        (keyboard, init_task.chain(task).map_task())
+    }));
 
     build_pattern::daemon(
-        clap::crate_name!(),
+        move || {
+            (boot
+                .borrow_mut()
+                .take()
+                .expect("boot can't be called twice"))()
+        },
+        "daemon",
         WaylandKeyboard::update,
         WaylandKeyboard::view,
     )
-    .style(WaylandKeyboard::appearance)
+    .title(move |_, _| Some(title.clone()))
     .theme(WaylandKeyboard::theme)
+    .style(WaylandKeyboard::style)
     .subscription(WaylandKeyboard::subscription)
-    .settings(MainSettings {
+    .settings(Settings {
         layer_settings: LayerShellSettings {
             start_mode: StartMode::Background,
             ..Default::default()
@@ -214,16 +247,6 @@ pub fn start(
         ),
         ..Default::default()
     })
-    .run_with(move || {
-        let (keyboard, task) = WaylandKeyboard::new(
-            config_manager,
-            input_method_context,
-            output_context,
-            wait_for_socket,
-            modifier_workaround,
-            shutdown_flag,
-        );
-        (keyboard, init_task.chain(task).map_task())
-    })?;
+    .run()?;
     Ok(())
 }
