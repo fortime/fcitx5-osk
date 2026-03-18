@@ -32,7 +32,7 @@ getset = "0.1.3"
 iced = { version = "0.13.1", features = ["tokio", "image", "svg", "advanced"] }
 serde = { version = "1.0.216", features = ["derive"] }
 tokio = { version = "1.49", features = ["fs", "macros", "rt-multi-thread", "signal"] }
-toml = "0.9.11"
+toml = "1.0.1"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 xkeysym = "0.2.1"
@@ -50,7 +50,7 @@ async-trait = "0.1.88"
 wayland-client = "0.31.8"
 wayland-protocols = "0.32.6"
 wayland-protocols-wlr = { version = "0.3.5", default-features = false, features = ["client"] }
-tempfile = "3.24.0"
+tempfile = "3.25.0"
 evdev = { version = "0.13.1", features = ["tokio"] }
 rand = "0.9.1"
 cvt = "0.1.2"
