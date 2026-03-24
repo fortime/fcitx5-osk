@@ -309,8 +309,9 @@ where
     }
 
     pub fn view(&self, id: Id) -> Element<'_, WM::Message> {
+        let window_type = self.state.window_manager().window_type(id);
         let visible = self.fcitx5_osk_service_client.visible().unwrap_or(true);
-        if visible && self.state.window_manager().is_keyboard(id) {
+        if visible && window_type.is_keyboard() {
             let base = self.state.to_element(id);
             let res = if let Some(e) = &self.error {
                 modal(base, self.error_dialog(e), Message::AfterError)
@@ -318,7 +319,7 @@ where
                 base
             };
             res.map(|m| m.into())
-        } else if visible && self.state.window_manager().is_indicator(id) {
+        } else if visible && window_type.is_indicator() {
             self.state.to_element(id).map(|m| m.into())
         } else {
             Column::new().into()
@@ -514,7 +515,7 @@ where
         let visible = self.fcitx5_osk_service_client.visible().unwrap_or(true);
         // in iced, style doesn't accept id, we should return a theme with transparent background.
         let theme = self.state.theme();
-        if !visible || self.state.window_manager().is_indicator(id) {
+        if !visible || self.state.window_manager().window_type(id).is_indicator() {
             Theme::custom(Self::TRANSPARENT_THEME_NAME, theme.palette())
         } else {
             theme.clone()

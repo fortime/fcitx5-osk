@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, rc::Rc, time::Duration};
 
 use iced::{
-    widget::{Container, Stack},
+    widget::{Container, Space, Stack},
     window::Id,
     Element, Font, Point, Size, Task,
 };
@@ -30,6 +30,23 @@ pub enum CloseOpSource {
     Fcitx5,
     UserAction,
     DbusController,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowType {
+    Keyboard,
+    Indicator,
+    Unknown,
+}
+
+impl WindowType {
+    pub fn is_keyboard(&self) -> bool {
+        matches!(self, WindowType::Keyboard)
+    }
+
+    pub fn is_indicator(&self) -> bool {
+        matches!(self, WindowType::Indicator)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -440,21 +457,21 @@ where
     }
 
     fn window_state(&self, id: Id) -> Option<&WindowState<WM>> {
-        if self.is_keyboard(id) {
-            Some(&self.keyboard_window_state)
-        } else if self.is_indicator(id) {
-            Some(&self.indicator_window_state)
-        } else {
-            None
+        match self.window_type(id) {
+            WindowType::Keyboard => Some(&self.keyboard_window_state),
+            WindowType::Indicator => Some(&self.indicator_window_state),
+            WindowType::Unknown => None,
         }
     }
 
-    pub fn is_keyboard(&self, id: Id) -> bool {
-        Some(id) == self.keyboard_window_state.id()
-    }
-
-    pub fn is_indicator(&self, id: Id) -> bool {
-        Some(id) == self.indicator_window_state.id()
+    pub fn window_type(&self, id: Id) -> WindowType {
+        if Some(id) == self.keyboard_window_state.id() {
+            WindowType::Keyboard
+        } else if Some(id) == self.indicator_window_state.id() {
+            WindowType::Indicator
+        } else {
+            WindowType::Unknown
+        }
     }
 
     pub fn position(&self, id: Id) -> Option<Point> {
@@ -490,44 +507,48 @@ where
 
     pub fn to_element<'b>(&self, params: ToElementCommonParams<'b>) -> Element<'b, Message> {
         let id = params.window_id;
-        if self.is_keyboard(id) {
-            let size = self.window_size();
-            // we let keyboard in a stack even there is no overlay, so the widget tree always has the
-            // same level. Otherwise, the state will be clear if the level is changed.
-            let mut stack = Stack::new()
-                .push(Container::new(self.layout.to_element(&params)).center_x(size.width));
-            // overlay should be caculated with the window size
-            if let Some(overlay) = params
-                .state
-                .keyboard()
-                .popup_overlay(self.unit(), (size.width, size.height))
-            {
-                stack = stack.push(overlay);
+        match self.window_type(id) {
+            WindowType::Keyboard => {
+                let size = self.window_size();
+                // we let keyboard in a stack even there is no overlay, so the widget tree always has the
+                // same level. Otherwise, the state will be clear if the level is changed.
+                let mut stack = Stack::new()
+                    .push(Container::new(self.layout.to_element(&params)).center_x(size.width));
+                // overlay should be caculated with the window size
+                if let Some(overlay) = params
+                    .state
+                    .keyboard()
+                    .popup_overlay(self.unit(), (size.width, size.height))
+                {
+                    stack = stack.push(overlay);
+                }
+                stack.into()
             }
-            stack.into()
-        } else {
-            let state = params.state;
-            let message = if self.keyboard_window_state.id().is_some() {
-                WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into()
-            } else {
-                WindowManagerEvent::OpenKeyboard.into()
-            };
-            let movable = self.movable(id);
-            Toggle::new(
-                Movable::new(
-                    layout::indicator_btn(self.indicator_width).on_press(message),
-                    move |delta| {
-                        state
-                            .new_position_message(id, delta)
-                            .unwrap_or(Message::Nothing)
-                    },
-                    movable,
+            WindowType::Indicator => {
+                let state = params.state;
+                let message = if self.keyboard_window_state.id().is_some() {
+                    WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into()
+                } else {
+                    WindowManagerEvent::OpenKeyboard.into()
+                };
+                let movable = self.movable(id);
+                Toggle::new(
+                    Movable::new(
+                        layout::indicator_btn(self.indicator_width).on_press(message),
+                        move |delta| {
+                            state
+                                .new_position_message(id, delta)
+                                .unwrap_or(Message::Nothing)
+                        },
+                        movable,
+                    )
+                    .on_move_end(WindowEvent::SetMovable(id, false).into()),
+                    ToggleCondition::LongPress(Duration::from_millis(1000)),
                 )
-                .on_move_end(WindowEvent::SetMovable(id, false).into()),
-                ToggleCondition::LongPress(Duration::from_millis(1000)),
-            )
-            .on_toggle(WindowEvent::SetMovable(id, !movable).into())
-            .into()
+                .on_toggle(WindowEvent::SetMovable(id, !movable).into())
+                .into()
+            }
+            WindowType::Unknown => Space::new().into(),
         }
     }
 }
@@ -899,54 +920,58 @@ where
         match event {
             WindowEvent::Opened(id, size) => {
                 let mut task = self.wm.opened(id, size);
-                if self.is_keyboard(id) {
-                    self.keyboard_window_state
-                        .set_opened(&mut self.wm, portrait);
-                    task = task.chain(self.fcitx5_show().map_task());
-                    match self.indicator_display() {
-                        IndicatorDisplay::Auto | IndicatorDisplay::AlwaysOff => {
-                            if self.indicator_window_state.id().is_some() {
-                                task = task.chain(self.close_indicator())
+                match self.window_type(id) {
+                    WindowType::Keyboard => {
+                        self.keyboard_window_state
+                            .set_opened(&mut self.wm, portrait);
+                        task = task.chain(self.fcitx5_show().map_task());
+                        match self.indicator_display() {
+                            IndicatorDisplay::Auto | IndicatorDisplay::AlwaysOff => {
+                                if self.indicator_window_state.id().is_some() {
+                                    task = task.chain(self.close_indicator())
+                                }
+                            }
+                            IndicatorDisplay::AlwaysOn => {
+                                if self.indicator_window_state.id().is_none() {
+                                    task = task.chain(self.open_indicator())
+                                }
                             }
                         }
-                        IndicatorDisplay::AlwaysOn => {
-                            if self.indicator_window_state.id().is_none() {
-                                task = task.chain(self.open_indicator())
-                            }
+                        // The indicator might need to move up after a docked keyboard is opened
+                        if let Some(t) = self
+                            .indicator_window_state
+                            .fix_position(&mut self.wm, portrait)
+                        {
+                            task = task.chain(t);
                         }
                     }
-                    // The indicator might need to move up after a docked keyboard is opened
-                    if let Some(t) = self
-                        .indicator_window_state
-                        .fix_position(&mut self.wm, portrait)
-                    {
-                        task = task.chain(t);
+                    WindowType::Indicator => {
+                        self.indicator_window_state
+                            .set_opened(&mut self.wm, portrait);
+                        if self.indicator_display() == IndicatorDisplay::Auto {
+                            task = task.chain(self.close_keyboard(CloseOpSource::UserAction));
+                        }
                     }
-                } else if self.is_indicator(id) {
-                    self.indicator_window_state
-                        .set_opened(&mut self.wm, portrait);
-                    if self.indicator_display() == IndicatorDisplay::Auto {
-                        task = task.chain(self.close_keyboard(CloseOpSource::UserAction));
-                    }
+                    WindowType::Unknown => {}
                 }
                 task
             }
             WindowEvent::ClosingWindow(id, snapshot, source) => {
                 tracing::debug!("Window is to be closed: {id}");
-                let window_state = if self.is_keyboard(id) {
-                    // If Keyboard is reopening, don't open indicator
-                    if ((self.indicator_display() == IndicatorDisplay::Auto
-                        && !self.need_opened(WindowMask::Keyboard))
-                        || self.indicator_display() == IndicatorDisplay::AlwaysOn)
-                        && self.indicator_window_state.id().is_none()
-                    {
-                        self.set_to_be_opened(WindowMask::Indicator, false);
+                let window_state = match self.window_type(id) {
+                    WindowType::Keyboard => {
+                        // If Keyboard is reopening, don't open indicator
+                        if ((self.indicator_display() == IndicatorDisplay::Auto
+                            && !self.need_opened(WindowMask::Keyboard))
+                            || self.indicator_display() == IndicatorDisplay::AlwaysOn)
+                            && self.indicator_window_state.id().is_none()
+                        {
+                            self.set_to_be_opened(WindowMask::Indicator, false);
+                        }
+                        Some(&mut self.keyboard_window_state)
                     }
-                    Some(&mut self.keyboard_window_state)
-                } else if self.is_indicator(id) {
-                    Some(&mut self.indicator_window_state)
-                } else {
-                    None
+                    WindowType::Indicator => Some(&mut self.indicator_window_state),
+                    WindowType::Unknown => None,
                 };
                 if let Some(window_state) = window_state {
                     if let Some(snapshot) = snapshot {
@@ -960,35 +985,39 @@ where
             }
             WindowEvent::Closed(id) => {
                 let mut task = self.wm.closed(id);
-                if self.is_keyboard(id) {
-                    if Some(CloseOpSource::UserAction) == self.keyboard_window_state.set_closed() {
-                        task = task.chain(self.fcitx5_hide().map_task());
+                match self.window_type(id) {
+                    WindowType::Keyboard => {
+                        if Some(CloseOpSource::UserAction)
+                            == self.keyboard_window_state.set_closed()
+                        {
+                            task = task.chain(self.fcitx5_hide().map_task());
+                        }
+                        // check if the keyboard needs to open again
+                        if let Some(t) = self.open_to_be_opened(WindowMask::Keyboard) {
+                            task = task.chain(t);
+                        }
+                        // check if the indicator needs to open again
+                        if let Some(t) = self.open_to_be_opened(WindowMask::Indicator) {
+                            task = task.chain(t);
+                        }
                     }
-                    // check if the keyboard needs to open again
-                    if let Some(t) = self.open_to_be_opened(WindowMask::Keyboard) {
-                        task = task.chain(t);
+                    WindowType::Indicator => {
+                        self.indicator_window_state.set_closed();
+                        // check if the indicator needs to open again
+                        if let Some(t) = self.open_to_be_opened(WindowMask::Indicator) {
+                            task = task.chain(t);
+                        }
                     }
-                    // check if the indicator needs to open again
-                    if let Some(t) = self.open_to_be_opened(WindowMask::Indicator) {
-                        task = task.chain(t);
-                    }
-                } else if self.is_indicator(id) {
-                    self.indicator_window_state.set_closed();
-                    // check if the indicator needs to open again
-                    if let Some(t) = self.open_to_be_opened(WindowMask::Indicator) {
-                        task = task.chain(t);
-                    }
+                    WindowType::Unknown => {}
                 }
                 task
             }
             WindowEvent::Move(id, position) => {
                 let mut task = Message::from_nothing();
-                let window_state = if self.is_keyboard(id) {
-                    Some(&mut self.keyboard_window_state)
-                } else if self.is_indicator(id) {
-                    Some(&mut self.indicator_window_state)
-                } else {
-                    None
+                let window_state = match self.window_type(id) {
+                    WindowType::Keyboard => Some(&mut self.keyboard_window_state),
+                    WindowType::Indicator => Some(&mut self.indicator_window_state),
+                    WindowType::Unknown => None,
                 };
                 if let Some(window_state) = window_state {
                     task = task.chain(window_state.mv(&mut self.wm, position, portrait));
@@ -996,12 +1025,10 @@ where
                 task
             }
             WindowEvent::SetMovable(id, movable) => {
-                let window_state = if self.is_keyboard(id) {
-                    Some(&mut self.keyboard_window_state)
-                } else if self.is_indicator(id) {
-                    Some(&mut self.indicator_window_state)
-                } else {
-                    None
+                let window_state = match self.window_type(id) {
+                    WindowType::Keyboard => Some(&mut self.keyboard_window_state),
+                    WindowType::Indicator => Some(&mut self.indicator_window_state),
+                    WindowType::Unknown => None,
                 };
                 if let Some(window_state) = window_state {
                     window_state.set_movable(&self.wm, movable);
