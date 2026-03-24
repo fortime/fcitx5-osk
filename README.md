@@ -275,13 +275,13 @@ With `QT_IM_MODULE` set, the virtual keyboard won't be shown in the SDDM login s
 ## Issues
 
 * [PR fcitx/fcitx5#1292](https://github.com/fcitx/fcitx5/pull/1292) is needed to input correctly in latin mode of Fcitx 5.
-* [iced\_layershell](https://github.com/waycrate/exwlshelleventloop) is patched. All patches has been upstreamed. But it is waiting for the release of iced 14.
 
 ## TODO
 
 * [ ] integrated with xcbcommon.
-* [ ] iced 14 and add `RefreshRequest` for our widgets.
+* [x] iced 14.
+* [ ] add `RefreshRequest` for our widgets.
 * [ ] use `RefreshRequest` to implement long press event?
-* [ ] support custom theme
+* [x] support custom theme
 * [ ] support custom shape of key
 * [ ] support repeat key mode?
