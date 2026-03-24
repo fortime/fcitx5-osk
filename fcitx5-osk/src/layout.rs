@@ -546,13 +546,14 @@ pub struct ToolbarLayout {
 
 impl ToolbarLayout {
     pub fn new(min_toolbar_height_u: u32) -> Self {
-        let mut res = Self { height_u: 6 };
+        let mut res = Self { height_u: 1 };
+        // make sure height_u is valid
         res.update_height_u(min_toolbar_height_u);
         res
     }
 
     pub fn update_height_u(&mut self, min_toolbar_height_u: u32) {
-        self.height_u = 6.max(min_toolbar_height_u)
+        self.height_u = 1.max(min_toolbar_height_u)
     }
 
     pub fn height_u(&self) -> u32 {
