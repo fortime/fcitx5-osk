@@ -204,14 +204,17 @@ Here is an example.
 ```toml
 name = "Breeze Light"
 
+# all fields of `palette` must be provided
 [palette]
 background = "#ffffff"
 text = "#232629"
 primary = "#3daee9"
 success = "#27ae60"
 danger = "#da4453"
+waring = "#f67400"
 
 # This is the extended palette for advanced settings
+# all fields of `extended_palette` must be provided if you add the `extended_palette` section
 [extended_palette]
 is_dark = false
 
@@ -222,6 +225,21 @@ text = "#232629"
 color = "#ffffff"
 text = "#232629"
 [extended_palette.background.strong]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.background.weakest]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.background.weaker]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.background.neutral]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.background.stronger]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.background.strongest]
 color = "#ffffff"
 text = "#232629"
 
@@ -264,6 +282,17 @@ text = "#232629"
 [extended_palette.danger.strong]
 color = "#ffffff"
 text = "#232629"
+
+[extended_palette.warning.base]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.warning.weak]
+color = "#ffffff"
+text = "#232629"
+[extended_palette.warning.strong]
+color = "#ffffff"
+text = "#232629"
+```
 ```
 
 ## Troubleshoot
