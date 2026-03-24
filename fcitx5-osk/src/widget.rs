@@ -3,6 +3,37 @@ mod key;
 mod movable;
 mod toggle;
 
+mod pick_list {
+    use std::borrow::Borrow;
+
+    use iced::{
+        advanced::text,
+        widget::{pick_list::Catalog, PickList},
+        Pixels,
+    };
+
+    pub trait ExtPickList {
+        fn all_size(self, size: impl Into<Pixels>) -> Self;
+    }
+
+    impl<'a, T, L, V, Message, Theme, Renderer> ExtPickList
+        for PickList<'a, T, L, V, Message, Theme, Renderer>
+    where
+        T: ToString + PartialEq + Clone,
+        L: Borrow<[T]> + 'a,
+        V: Borrow<T> + 'a,
+        Message: Clone,
+        Theme: Catalog,
+        Renderer: text::Renderer,
+    {
+        fn all_size(self, size: impl Into<Pixels>) -> Self {
+            let size = size.into();
+            self.text_size(size)
+                .handle(iced::widget::pick_list::Handle::Arrow { size: Some(size) })
+        }
+    }
+}
+
 mod scrollable {
     use iced::{
         border,
@@ -122,7 +153,7 @@ mod slider {
 
     use crate::layout::KLength;
 
-    /// Edited version of `iced::widget::scrollable::default`
+    /// Edited version of `iced::widget::slider::default`
     pub fn slider_style_cb(text_size: KLength) -> impl Fn(&Theme, Status) -> Style {
         let text_size = text_size.val();
 
@@ -196,6 +227,7 @@ mod toggler {
 pub use debugger::LayoutDebugger;
 pub use key::{Key, KeyEvent, PopupKey};
 pub use movable::Movable;
+pub use pick_list::ExtPickList;
 pub use scrollable::scrollable_style;
 pub use slider::slider_style_cb;
 pub use toggle::{Toggle, ToggleCondition};

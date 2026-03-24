@@ -43,7 +43,7 @@ use crate::{
         WindowEvent, WindowManagerEvent,
     },
     store::IdAndConfigPath,
-    widget::{self, Movable, Toggle, ToggleCondition},
+    widget::{self, ExtPickList as _, Movable, Toggle, ToggleCondition},
     window::WindowManagerMode,
 };
 
@@ -755,7 +755,7 @@ impl ToolbarLayout {
                     PickList::new(state.im().im_names(), state.im().im_name(), |im| {
                         ImEvent::SelectIm(im).into()
                     })
-                    .text_size(font_size),
+                    .all_size(font_size),
                 ),
         );
         row = row.push(
@@ -769,7 +769,7 @@ impl ToolbarLayout {
                         Some(state.config().theme()),
                         |theme| UpdateConfigEvent::Theme(theme).into(),
                     )
-                    .text_size(font_size),
+                    .all_size(font_size),
                 ),
         );
         row = row.push(
@@ -862,7 +862,7 @@ where
             PickList::new(self.variants(), self.cur_value(state), |selected| {
                 self.on_selected(state, selected)
             })
-            .text_size(text_size)
+            .all_size(text_size)
             .into()
         } else {
             Text::new(
@@ -891,7 +891,7 @@ where
             PickList::new(self.variants(), self.cur_value(state), |selected| {
                 self.on_selected(state, selected)
             })
-            .text_size(text_size)
+            .all_size(text_size)
             .into()
         } else {
             Text::new(
@@ -921,7 +921,7 @@ where
             PickList::new(variants, selected, |selected| {
                 self.on_selected(state, selected)
             })
-            .text_size(text_size)
+            .all_size(text_size)
             .into()
         } else {
             Text::new(selected.map(|s| s.to_string()).unwrap_or_default())
