@@ -5,6 +5,7 @@ use getset::{CopyGetters, Getters};
 use iced::{
     advanced::svg::Handle as SvgHandle,
     alignment::{Horizontal, Vertical},
+    padding,
     widget::{
         button::{Style as ButtonStyle, DEFAULT_PADDING},
         container::Style as ContainerStyle,
@@ -14,7 +15,7 @@ use iced::{
         Button, Column, Container, PickList, Row, Scrollable, Slider, Space, Svg, Text, Toggler,
     },
     window::Id,
-    Color, Element, Font, Length, Pixels, Theme,
+    Color, Element, Font, Length, Padding, Pixels, Size, Theme,
 };
 use num_traits::FromPrimitive;
 use serde::{
@@ -35,12 +36,13 @@ use std::{
 
 use crate::{
     app::{KeyboardError, Message},
-    config::IndicatorDisplay,
+    config::{IndicatorDisplay, QuickActionBarState},
     dbus::server::ImPanelEvent,
+    font,
     state::{
         BoolDesc, CloseOpSource, DynamicEnumDesc, EnumDesc, Field, FieldType, ImEvent, LayoutEvent,
-        OwnedEnumDesc, RangeDesc, StateExtractor, StepDesc, TextDesc, UpdateConfigEvent,
-        WindowEvent, WindowManagerEvent,
+        OwnedEnumDesc, RangeDesc, StateExtractor, StepDesc, StoreEvent, TextDesc,
+        UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     store::IdAndConfigPath,
     widget::{self, ExtPickList as _, Movable, Toggle, ToggleCondition},
@@ -231,6 +233,16 @@ impl From<KLength> for Length {
 impl From<f32> for KLength {
     fn from(value: f32) -> Self {
         KLength(value)
+    }
+}
+
+pub trait FromKLengthSize {
+    fn to_iced_size(self) -> Size;
+}
+
+impl FromKLengthSize for Size<KLength> {
+    fn to_iced_size(self) -> Size {
+        Size::new(self.width.0, self.height.0)
     }
 }
 
@@ -542,13 +554,20 @@ impl<'de> Deserialize<'de> for KeyRowElement {
 
 pub struct ToolbarLayout {
     height_u: u32,
+    quick_action_bar_state: QuickActionBarState,
+    quick_action_bar_shown: bool,
 }
 
 impl ToolbarLayout {
-    pub fn new(min_toolbar_height_u: u32) -> Self {
-        let mut res = Self { height_u: 1 };
+    pub fn new(min_toolbar_height_u: u32, quick_action_bar_state: QuickActionBarState) -> Self {
+        let mut res = Self {
+            height_u: 1,
+            quick_action_bar_state,
+            quick_action_bar_shown: false,
+        };
         // make sure height_u is valid
         res.update_height_u(min_toolbar_height_u);
+        res.update_quick_action_bar_state(quick_action_bar_state);
         res
     }
 
@@ -556,8 +575,32 @@ impl ToolbarLayout {
         self.height_u = 1.max(min_toolbar_height_u)
     }
 
+    pub fn update_quick_action_bar_state(
+        &mut self,
+        quick_action_bar_state: QuickActionBarState,
+    ) -> bool {
+        let shown = self.quick_action_bar_shown;
+        self.quick_action_bar_state = quick_action_bar_state;
+        self.quick_action_bar_shown = quick_action_bar_state == QuickActionBarState::On;
+        self.quick_action_bar_shown != shown
+    }
+
+    pub fn toggle_quick_action_bar(&mut self) -> bool {
+        if self.quick_action_bar_state == QuickActionBarState::Toggle {
+            self.quick_action_bar_shown = !self.quick_action_bar_shown;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn height_u(&self) -> u32 {
-        self.height_u
+        if self.quick_action_bar_shown {
+            // toolbar(height_u) + quick action bar(height_u + 2)
+            self.height_u * 2 + 2
+        } else {
+            self.height_u
+        }
     }
 
     pub fn to_element<'a, 'b>(
@@ -567,24 +610,43 @@ impl ToolbarLayout {
         candidate_font: Font,
         font_size_u: u32,
     ) -> Element<'b, Message> {
-        if params.state.im().candidate_area_state().has_candidate() {
-            self.to_candidate_element(params, unit, candidate_font, font_size_u)
+        let height = self.height_u * unit;
+        let font_size = font_size_u * unit;
+        let mut column = Column::new();
+        let base = if params.state.im().candidate_area_state().has_candidate() {
+            self.candidate_element(params, unit, candidate_font, font_size)
         } else {
-            self.to_toolbar_element(params, unit, font_size_u)
+            self.toolbar_element(params, unit, font_size)
+        };
+        column = column.push(
+            Container::new(base)
+                .height(height)
+                // Add the padding of the keyboard
+                .padding(padding::horizontal(unit)),
+        );
+        if self.quick_action_bar_shown {
+            column = column.push(
+                Container::new(self.quick_action_bar_element(params, unit, font_size))
+                    .height(height + 2 * unit)
+                    .style(|theme: &Theme| ContainerStyle {
+                        background: Some(theme.extended_palette().background.weak.color.into()),
+                        ..Default::default()
+                    }),
+            );
         }
+        column.into()
     }
 
-    fn to_candidate_element<'a, 'b>(
+    fn candidate_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
         unit: KLength,
         font: Font,
-        font_size_u: u32,
+        font_size: KLength,
     ) -> Element<'b, Message> {
         let theme = params.state.theme();
         let state = params.state.im().candidate_area_state();
         let spacing = 2 * unit;
-        let font_size = font_size_u * unit;
         let color = theme.extended_palette().background.weak.text;
         let disabled_color = theme.extended_palette().background.weak.color;
 
@@ -692,16 +754,15 @@ impl ToolbarLayout {
             .into()
     }
 
-    fn to_toolbar_element<'a, 'b>(
+    fn toolbar_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
         unit: KLength,
-        font_size_u: u32,
+        font_size: KLength,
     ) -> Element<'b, Message> {
         let state = params.state;
         let theme = state.theme();
         let color = theme.extended_palette().background.weak.text;
-        let font_size = font_size_u * unit;
         let mut row = Row::new()
             .height(Length::Fill)
             .align_y(Vertical::Center)
@@ -773,14 +834,63 @@ impl ToolbarLayout {
                     .all_size(font_size),
                 ),
         );
-        row = row.push(
+
+        let mut tray = Row::new();
+        if self.quick_action_bar_state == QuickActionBarState::Toggle {
+            let shown = self.quick_action_bar_shown;
+            tray = tray.push(
+                Container::new(
+                    nerd_btn('', font_size, color, unit)
+                        .on_press(LayoutEvent::ToggleQuickActionBar.into()),
+                )
+                .align_x(Horizontal::Center)
+                .style(move |theme: &Theme| {
+                    let mut style = ContainerStyle::default();
+                    if shown {
+                        style.background =
+                            Some(theme.extended_palette().background.weak.color.into());
+                    }
+                    style
+                }),
+            );
+        }
+        tray = tray.push(
             nerd_btn('󰘮', font_size, color, unit).on_press(LayoutEvent::ToggleSetting.into()),
         );
+        row = row.push(tray);
         Container::new(row)
             .width(Length::Fill)
             .height(Length::Fill)
             .align_x(Horizontal::Right)
             .into()
+    }
+
+    fn quick_action_bar_element<'a, 'b>(
+        &'a self,
+        params: &'a ToElementCommonParams<'b>,
+        unit: KLength,
+        font_size: KLength,
+    ) -> Element<'b, Message> {
+        let mut row = Row::new()
+            .height(Length::Fill)
+            .spacing(unit)
+            .padding(Padding::new(unit.val()))
+            .align_y(Vertical::Center);
+        row = row.push(
+            Button::new(Text::new("Reload").size(font_size))
+                .on_press(StoreEvent::Load.into())
+                .style(widget::button_style),
+        );
+        Container::new(
+            Scrollable::with_direction(
+                row,
+                Direction::Horizontal(Scrollbar::new().width(1).spacing(unit)),
+            )
+            .style(widget::scrollable_style),
+        )
+        .height(Length::Fill)
+        .width(Length::Fill)
+        .into()
     }
 }
 
@@ -1086,7 +1196,8 @@ impl ToElementFieldType for BoolDesc {
 fn nerd_icon<'a, Message: 'a>(icon: char, size: KLength, color: Color) -> Element<'a, Message> {
     Text::new(icon)
         .size(size)
-        .font(Font::with_name("fcitx5 osk nerd"))
+        .center()
+        .font(font::load("fcitx5 osk nerd"))
         .shaping(Shaping::Advanced)
         .color(color)
         .into()
@@ -1101,10 +1212,10 @@ fn nerd_btn<'a, Message: 'a>(
     Button::new(
         Container::new(nerd_icon(icon, font_size, color))
             .height(Length::Fill)
-            .width(font_size + 2 * unit)
-            .align_x(Horizontal::Center)
+            .center_x(font_size + 2 * unit)
             .align_y(Vertical::Center),
     )
+    .width(font_size + 2 * unit)
     .height(Length::Fill)
     .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
     .padding(0)
@@ -1150,6 +1261,7 @@ fn field_value_element<'a>(
         FieldType::RangeF32(desc) => desc.to_element(field, state, text_size),
         FieldType::OwnedEnumPlacement(desc) => desc.to_element(field, state, text_size),
         FieldType::OwnedEnumIndicatorDisplay(desc) => desc.to_element(field, state, text_size),
+        FieldType::OwnedEnumQuickActionBarState(desc) => desc.to_element(field, state, text_size),
         FieldType::EnumString(desc) => desc.to_element(field, state, text_size),
         FieldType::DynamicEnumString(desc) => desc.to_element(field, state, text_size),
         FieldType::Text(desc) => desc.to_element(field, state, text_size),
@@ -1163,6 +1275,7 @@ fn field_row_num<'a>(state: &'a dyn StateExtractor, field: &'a Field) -> u32 {
         FieldType::RangeF32(desc) => desc.row_num(state),
         FieldType::OwnedEnumPlacement(desc) => desc.row_num(state),
         FieldType::OwnedEnumIndicatorDisplay(desc) => desc.row_num(state),
+        FieldType::OwnedEnumQuickActionBarState(desc) => desc.row_num(state),
         FieldType::EnumString(desc) => desc.row_num(state),
         FieldType::DynamicEnumString(desc) => desc.row_num(state),
         FieldType::Text(desc) => desc.row_num(state),

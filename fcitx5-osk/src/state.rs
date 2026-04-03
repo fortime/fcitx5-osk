@@ -219,11 +219,11 @@ where
         let task = if let LayoutEvent::SyncLayout = event {
             self.update_layout_by_im(None)
         } else {
-            self.window_manager.on_layout_event(event);
+            let task = self.window_manager.on_layout_event(event);
             if self.window_manager.is_setting_shown() {
                 self.config.refresh();
             }
-            None
+            task
         };
         if let Some(task) = task {
             task
@@ -270,7 +270,7 @@ pub trait StateExtractor {
 
     fn available_candidate_width(&self) -> KLength;
 
-    fn window_size(&self) -> Size<KLength>;
+    fn keyboard_window_size(&self) -> Size<KLength>;
 
     fn screen_size(&self) -> Size;
 
@@ -335,8 +335,8 @@ where
         self.window_manager.screen_size()
     }
 
-    fn window_size(&self) -> Size<KLength> {
-        self.window_manager.window_size()
+    fn keyboard_window_size(&self) -> Size<KLength> {
+        self.window_manager.keyboard_window_size()
     }
 
     fn movable(&self, window_id: Id) -> bool {

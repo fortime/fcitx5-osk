@@ -13,7 +13,7 @@ use crate::{
     dbus::client::{
         Fcitx5Services, Fcitx5VirtualKeyboardServiceExt, IFcitx5VirtualKeyboardService,
     },
-    layout::{self, KLength, KeyAreaLayout, ToElementCommonParams},
+    layout::{self, FromKLengthSize as _, KLength, KeyAreaLayout, ToElementCommonParams},
     state::{ImEvent, LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
     window::{SyncOutputResponse, WindowManager, WindowManagerMode, WindowSettings},
@@ -384,7 +384,7 @@ impl<WM> WindowManagerState<WM> {
             _screen_size: Default::default(),
             scale_factor: 1.,
             portrait,
-            layout: LayoutState::new(max_width, key_area_layout),
+            layout: LayoutState::new(max_width, key_area_layout, config.quick_action_bar_state()),
             keyboard_window_state: WindowState::new("keyboard"),
             indicator_window_state: WindowState::new("indicator"),
             placement: config.placement(),
@@ -395,10 +395,6 @@ impl<WM> WindowManagerState<WM> {
             wm,
             hide_delay: *config.hide_delay(),
         }
-    }
-
-    pub fn on_layout_event(&mut self, event: LayoutEvent) {
-        self.layout.on_event(event);
     }
 
     pub fn scale_factor(&self) -> f32 {
@@ -439,13 +435,8 @@ where
         self.wm.screen_size()
     }
 
-    pub fn window_size(&self) -> Size<KLength> {
+    pub fn keyboard_window_size(&self) -> Size<KLength> {
         self.layout.size()
-    }
-
-    pub fn window_size_f32(&self) -> Size {
-        let size = self.window_size();
-        Size::new(size.width.val(), size.height.val())
     }
 
     pub fn unit(&self) -> KLength {
@@ -509,7 +500,7 @@ where
         let id = params.window_id;
         match self.window_type(id) {
             WindowType::Keyboard => {
-                let size = self.window_size();
+                let size = self.keyboard_window_size();
                 // we let keyboard in a stack even there is no overlay, so the widget tree always has the
                 // same level. Otherwise, the state will be clear if the level is changed.
                 let mut stack = Stack::new()
@@ -614,13 +605,13 @@ where
             task = task.chain(Task::done(WM::Message::from(
                 ImEvent::ResetCandidateCursor.into(),
             )));
-            let mut size = self.window_size_f32();
+            let mut size = self.keyboard_window_size().to_iced_size();
             let screen_size = self.wm.screen_size();
             // update unit if width is too large
             if size.width > screen_size.width {
                 // update width
                 self.layout.update_width(screen_size.width.into());
-                size = self.window_size_f32();
+                size = self.keyboard_window_size().to_iced_size();
             }
             let mut window_settings = WindowSettings::new(size, self.placement());
             // set default float position.
@@ -776,7 +767,7 @@ where
             } else {
                 UpdateConfigEvent::LandscapeWidth(width)
             };
-            let size = self.window_size_f32();
+            let size = self.keyboard_window_size().to_iced_size();
             // resize and update config
             self.keyboard_window_state
                 .resize(&mut self.wm, size)
@@ -791,13 +782,13 @@ where
         mut width: KLength,
         key_area_layout: Rc<KeyAreaLayout>,
     ) -> Option<Task<WM::Message>> {
-        let old_size = self.window_size_f32();
+        let old_size = self.keyboard_window_size().to_iced_size();
         if width.val() > self.wm.screen_size().width {
             width = self.wm.screen_size().width.into()
         }
         self.layout.update_key_area_layout(width, key_area_layout);
         // resize if the size is changed
-        let new_size = self.window_size_f32();
+        let new_size = self.keyboard_window_size().to_iced_size();
         if new_size != old_size {
             Some(self.keyboard_window_state.resize(&mut self.wm, new_size))
         } else {
@@ -844,7 +835,7 @@ where
 
         if res.contains(&SyncOutputResponse::SizeChanged) {
             let screen_size = self.wm.screen_size();
-            reopen = self.window_size().width.val() > screen_size.width;
+            reopen = self.keyboard_window_size().width.val() > screen_size.width;
         }
 
         reopen = reopen || res.contains(&SyncOutputResponse::RotationChanged);
@@ -1035,6 +1026,15 @@ where
                 }
                 Message::from_nothing()
             }
+        }
+    }
+
+    pub fn on_layout_event(&mut self, event: LayoutEvent) -> Option<Task<WM::Message>> {
+        if self.layout.on_event(event) {
+            let size = self.keyboard_window_size().to_iced_size();
+            Some(self.keyboard_window_state.resize(&mut self.wm, size))
+        } else {
+            None
         }
     }
 

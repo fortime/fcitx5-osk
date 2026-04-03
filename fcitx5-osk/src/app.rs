@@ -303,7 +303,7 @@ where
                 .spacing(10)
                 .padding(10),
         )
-        .max_width(self.state.window_manager().window_size().width)
+        .max_width(self.state.window_manager().keyboard_window_size().width)
         .style(widget::container::rounded_box)
         .into()
     }

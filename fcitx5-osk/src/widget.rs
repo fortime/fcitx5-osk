@@ -3,6 +3,63 @@ mod key;
 mod movable;
 mod toggle;
 
+mod button {
+    use iced::{
+        border,
+        widget::{
+            button::{Status, Style, DEFAULT_PADDING},
+            container::Style as ContainerStyle,
+            Container,
+        },
+        Element, Length, Renderer, Theme,
+    };
+
+    pub const BORDER_RADIUS: f32 = 5.;
+
+    pub fn button_style(theme: &Theme, status: Status) -> Style {
+        let palette = theme.extended_palette();
+        let base = Style {
+            background: Some(palette.background.base.color.into()),
+            text_color: palette.background.base.text,
+            border: border::rounded(BORDER_RADIUS),
+            ..Default::default()
+        };
+
+        match status {
+            Status::Active => base,
+            Status::Pressed => Style {
+                background: Some(palette.primary.strong.color.into()),
+                ..base
+            },
+            Status::Hovered => Style {
+                background: Some(palette.primary.weak.color.into()),
+                ..base
+            },
+            Status::Disabled => Style {
+                background: base
+                    .background
+                    .map(|background| background.scale_alpha(0.5)),
+                text_color: base.text_color.scale_alpha(0.5),
+                ..base
+            },
+        }
+    }
+
+    pub fn button_container<'a, Message>(
+        content: impl Into<Element<'a, Message, Theme, Renderer>>,
+    ) -> Container<'a, Message, Theme, Renderer> {
+        Container::new(content)
+            .center_y(Length::Shrink)
+            .center_x(Length::Shrink)
+            .style(|theme: &Theme| ContainerStyle {
+                background: Some(theme.extended_palette().background.base.color.into()),
+                border: border::rounded(BORDER_RADIUS),
+                ..Default::default()
+            })
+            .padding(DEFAULT_PADDING)
+    }
+}
+
 mod pick_list {
     use std::borrow::Borrow;
 
@@ -223,6 +280,7 @@ mod toggler {
     }
 }
 
+pub use button::{button_container, button_style, BORDER_RADIUS};
 #[allow(unused)]
 pub use debugger::LayoutDebugger;
 pub use key::{Key, KeyEvent, PopupKey};

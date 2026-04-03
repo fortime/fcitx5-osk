@@ -12,16 +12,21 @@ use iced::{
         Interaction as MouseInteraction,
     },
     touch::{Event as TouchEvent, Finger as TouchFinger},
-    Border, Color, Element, Event, Length, Padding, Rectangle, Shadow, Size, Vector,
+    Border, Color, Element, Event, Length, Padding, Rectangle, Size, Vector,
 };
 
 /// Local state of the [`Key`].
 #[derive(Default)]
 struct KeyState {
     fingers: HashSet<Option<TouchFinger>>,
+    hovered: bool,
 }
 
 impl KeyState {
+    fn is_hovered(&self) -> bool {
+        self.hovered
+    }
+
     fn has_finger_pressed(&self) -> bool {
         !self.fingers.is_empty()
     }
@@ -278,6 +283,8 @@ where
         let state: &KeyState = tree.state.downcast_ref();
         let background = if state.has_finger_pressed() {
             theme.as_ref().extended_palette().primary.strong.color
+        } else if state.is_hovered() {
+            theme.as_ref().extended_palette().primary.weak.color
         } else {
             theme.as_ref().extended_palette().background.base.color
         };
@@ -285,8 +292,7 @@ where
             renderer::Quad {
                 bounds: layout.bounds(),
                 border: Border::default().rounded(self.border_radius),
-                shadow: Shadow::default(),
-                snap: false,
+                ..Default::default()
             },
             background,
         );
@@ -360,6 +366,12 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
 
     let state: &mut KeyState = tree.state.downcast_mut();
 
+    let bounds = layout.bounds();
+    if state.hovered != cursor.is_over(bounds) {
+        state.hovered = !state.hovered;
+        shell.request_redraw();
+    }
+
     let (pressed, cancelled, finger, position) = match *event {
         Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
             (true, false, None, cursor.position())
@@ -385,7 +397,6 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             widget.on_press_with.as_ref(),
             position,
         ) {
-            let bounds = layout.bounds();
             if bounds.contains(position) {
                 tracing::trace!(
                     "key[{:?}] is pressed at {:?} by finger {:?}",
@@ -410,16 +421,20 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             state.finger_released(&finger);
             tracing::trace!(
                 "key[{:?}] is released by finger {:?}, pressed: {}",
-                layout.bounds(),
+                bounds,
                 finger,
                 state.fingers.len(),
             );
             if !state.has_finger_pressed() {
+                // there is no finger is pressed, set hovered to false
+                if finger.is_some() {
+                    state.hovered = false;
+                }
                 shell.publish(cb(KeyEvent {
                     pressed,
                     cancelled,
                     finger,
-                    bounds: layout.bounds(),
+                    bounds,
                 }));
             }
             shell.capture_event();
@@ -647,8 +662,7 @@ where
                 bounds: layout.bounds(),
                 // It should be the same as the outside container
                 border: Border::default().rounded(self.border_radius),
-                shadow: Shadow::default(),
-                snap: false,
+                ..Default::default()
             },
             background,
         );

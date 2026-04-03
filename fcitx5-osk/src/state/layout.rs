@@ -2,12 +2,14 @@ use std::{mem, rc::Rc};
 
 use iced::{
     alignment::Horizontal,
+    padding,
     widget::{Column, Container},
     Element, Font, Padding, Size,
 };
 
 use crate::{
     app::Message,
+    config::QuickActionBarState,
     layout::{KLength, KeyAreaLayout, SettingLayout, ToElementCommonParams, ToolbarLayout},
 };
 
@@ -26,13 +28,20 @@ pub struct LayoutState {
 }
 
 impl LayoutState {
-    pub fn new(width: KLength, key_area_layout: Rc<KeyAreaLayout>) -> Self {
+    pub fn new(
+        width: KLength,
+        key_area_layout: Rc<KeyAreaLayout>,
+        quick_action_bar_state: QuickActionBarState,
+    ) -> Self {
         let mut res = Self {
             size: Default::default(),
             scale_factor: 1.0,
             unit: Default::default(),
             padding: Default::default(),
-            toolbar_layout: ToolbarLayout::new(key_area_layout.min_toolbar_height_u()),
+            toolbar_layout: ToolbarLayout::new(
+                key_area_layout.min_toolbar_height_u(),
+                quick_action_bar_state,
+            ),
             candidate_font: Default::default(),
             key_area_layout,
             setting_layout: SettingLayout,
@@ -121,6 +130,18 @@ impl LayoutState {
         self.setting_shown
     }
 
+    pub fn update_quick_action_bar_state(
+        &mut self,
+        quick_action_bar_state: QuickActionBarState,
+    ) -> bool {
+        self.toolbar_layout
+            .update_quick_action_bar_state(quick_action_bar_state)
+    }
+
+    pub fn toggle_quick_action_bar(&mut self) -> bool {
+        self.toolbar_layout.toggle_quick_action_bar()
+    }
+
     pub fn to_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
@@ -130,7 +151,7 @@ impl LayoutState {
             .align_x(Horizontal::Center)
             .width(size.width)
             .height(size.height)
-            .padding(self.padding)
+            .padding(padding::vertical(self.padding.top))
             .spacing(self.unit)
             .push(self.toolbar_layout.to_element(
                 params,
@@ -146,6 +167,7 @@ impl LayoutState {
                     self.unit,
                     self.key_area_layout.primary_text_size_u(),
                 ))
+                .padding(padding::horizontal(self.padding.left))
                 .height(self.key_area_layout.height_u() * self.unit),
             )
         } else {
@@ -154,10 +176,26 @@ impl LayoutState {
         keyboard.into()
     }
 
-    pub fn on_event(&mut self, event: LayoutEvent) {
+    /// Return if layout is changed
+    pub fn on_event(&mut self, event: LayoutEvent) -> bool {
+        let mut changed = false;
         match event {
             LayoutEvent::ToggleSetting => self.setting_shown = !self.setting_shown,
             LayoutEvent::SyncLayout => {}
+            LayoutEvent::UpdateQuickActionBarState(quick_action_bar_state) => {
+                changed = self.update_quick_action_bar_state(quick_action_bar_state);
+            }
+            LayoutEvent::ToggleQuickActionBar => {
+                changed = self.toggle_quick_action_bar();
+            }
+        }
+        if changed {
+            let old_size = self.size();
+            self.calculate_size();
+            let new_size = self.size();
+            old_size != new_size
+        } else {
+            false
         }
     }
 }
@@ -166,6 +204,8 @@ impl LayoutState {
 pub enum LayoutEvent {
     SyncLayout,
     ToggleSetting,
+    UpdateQuickActionBarState(QuickActionBarState),
+    ToggleQuickActionBar,
 }
 
 impl From<LayoutEvent> for Message {

@@ -10,10 +10,10 @@ use strum::IntoEnumIterator;
 
 use crate::{
     app::{KeyboardError, Message},
-    config::{Config, ConfigManager, IndicatorDisplay, Placement},
+    config::{Config, ConfigManager, IndicatorDisplay, Placement, QuickActionBarState},
     dbus::server::ImPanelEvent,
     layout::KLength,
-    state::{ImEvent, StateExtractor, ThemeEvent, WindowManagerEvent},
+    state::{ImEvent, LayoutEvent, StateExtractor, ThemeEvent, WindowManagerEvent},
     window::WindowManagerMode,
 };
 
@@ -339,6 +339,7 @@ pub enum FieldType {
     RangeF32(RangeDesc<f32>),
     OwnedEnumPlacement(OwnedEnumDesc<Placement>),
     OwnedEnumIndicatorDisplay(OwnedEnumDesc<IndicatorDisplay>),
+    OwnedEnumQuickActionBarState(OwnedEnumDesc<QuickActionBarState>),
     EnumString(EnumDesc<String>),
     DynamicEnumString(DynamicEnumDesc<String>),
     Text(TextDesc),
@@ -366,6 +367,12 @@ impl From<OwnedEnumDesc<Placement>> for FieldType {
 impl From<OwnedEnumDesc<IndicatorDisplay>> for FieldType {
     fn from(value: OwnedEnumDesc<IndicatorDisplay>) -> Self {
         Self::OwnedEnumIndicatorDisplay(value)
+    }
+}
+
+impl From<OwnedEnumDesc<QuickActionBarState>> for FieldType {
+    fn from(value: OwnedEnumDesc<QuickActionBarState>) -> Self {
+        Self::OwnedEnumQuickActionBarState(value)
     }
 }
 
@@ -428,7 +435,7 @@ impl ConfigState {
                     name: "Width",
                     id: "width",
                     typ: RangeDesc::<f32> {
-                        init_value: |state| state.window_size().width.val(),
+                        init_value: |state| state.keyboard_window_size().width.val(),
                         min_value: |_state| 360.,
                         max_value: |state| state.screen_size().width,
                         format: |_state, v| format!("{:.1}", v),
@@ -482,6 +489,19 @@ impl ConfigState {
                         cur_value: |state| state.config().manual_mode(),
                         is_enabled: |_state| true,
                         on_changed: |_, v| Message::from(UpdateConfigEvent::ManualMode(v)),
+                    }
+                    .into(),
+                },
+                Field {
+                    name: "Quick Action Bar",
+                    id: "quick_action_bar_state",
+                    typ: OwnedEnumDesc::<QuickActionBarState> {
+                        cur_value: |state| Some(state.config().quick_action_bar_state()),
+                        variants: QuickActionBarState::iter().collect(),
+                        is_enabled: |_state| true,
+                        on_selected: |_, s| {
+                            Message::from(UpdateConfigEvent::QuickActionBarState(s))
+                        },
                     }
                     .into(),
                 },
@@ -561,6 +581,7 @@ impl ConfigState {
 
     pub fn refresh(&mut self) {
         // clear temp values if needed
+        self.temp_texts.clear();
     }
 
     pub fn temp_text(&self, key: &str) -> Option<(&str, &str)> {
@@ -602,6 +623,11 @@ impl ConfigState {
                 config_eq!(manual_mode),
                 set_manual_mode,
                 |v| Message::from(ImPanelEvent::UpdateManualMode(v))
+            },
+            @QuickActionBarState => {
+                config_eq!(quick_action_bar_state),
+                set_quick_action_bar_state,
+                |v| Message::from(LayoutEvent::UpdateQuickActionBarState(v))
             },
             UpdateConfigEvent::ChangeTempText {key, init_value, value} => {
                 tracing::error!("Update temp_text[{key}] to {value}, init value[{init_value}]");
@@ -709,6 +735,7 @@ pub enum UpdateConfigEvent {
         producer: fn(String) -> Message,
     },
     ManualMode(bool),
+    QuickActionBarState(QuickActionBarState),
 }
 
 impl From<UpdateConfigEvent> for Message {

@@ -71,6 +71,11 @@ pub struct Config {
     #[serde(default)]
     default_font: Option<String>,
 
+    /// Default nerd font to be used.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_nerd_font: Option<String>,
+
     /// Load fonts by path.
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
@@ -120,6 +125,11 @@ pub struct Config {
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
     default_portrait_layout: String,
+
+    /// Quick action bar state
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    quick_action_bar_state: QuickActionBarState,
 }
 
 impl Config {
@@ -285,4 +295,14 @@ pub enum IndicatorDisplay {
     Auto,
     AlwaysOn,
     AlwaysOff,
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, EnumIter, strum::Display,
+)]
+pub enum QuickActionBarState {
+    #[default]
+    Off,
+    On,
+    Toggle,
 }

@@ -24,15 +24,13 @@ use crate::{
     key_set::{Key, KeyValue, ThinKeyValue},
     layout::{KLength, KeyAreaLayout},
     store::Store,
-    widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
+    widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey, BORDER_RADIUS},
 };
 
 const TEXT_PADDING_LENGTH: u32 = 3;
 
 /// #define KEY_LEFTSHIFT       42, val + 8
 const KEYCODE_LEFT_SHIFT: u32 = 50;
-
-const BORDER_RADIUS: f32 = 5.;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]

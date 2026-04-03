@@ -139,6 +139,10 @@ fn run(args: Args) -> Result<()> {
         config_manager.as_ref().log_timestamp().unwrap_or(false),
     )?;
 
+    if let Some(name) = config_manager.as_ref().default_nerd_font() {
+        font::set_default_nerd_font(name);
+    }
+
     let keyboard_args = match args.command {
         Command::Keyboard(keyboard_args) => keyboard_args,
         Command::ForceShow => {
