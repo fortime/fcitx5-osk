@@ -33,7 +33,7 @@ use zbus::Connection;
 use crate::{
     config::{Config, ConfigManager},
     dbus::{
-        client::{Fcitx5Services, FdoPortalSettingsServiceProxy},
+        client::FdoPortalSettingsServiceProxy,
         server::{
             Fcitx5OskService, Fcitx5OskServiceClient, Fcitx5VirtualkeyboardImPanelEvent,
             Fcitx5VirtualkeyboardImPanelService, ImPanelEvent, SocketEnv,
@@ -41,8 +41,8 @@ use crate::{
     },
     misc::NamedSubscriptionData,
     state::{
-        CloseOpSource, ImEvent, KeyEvent, KeyboardEvent, LayoutEvent, State, StateExtractor,
-        StoreEvent, ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
+        CloseOpSource, ImEvent, KeyEvent, KeyboardBackend, KeyboardEvent, LayoutEvent, State,
+        StateExtractor, StoreEvent, ThemeEvent, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     window::{self, WindowManager},
 };
@@ -64,7 +64,7 @@ pub enum Message {
     StoreEvent(StoreEvent),
     ThemeEvent(ThemeEvent),
     UpdateConfigEvent(UpdateConfigEvent),
-    UpdateFcitx5Services(Fcitx5Services),
+    UpdateKeyboardBackend(KeyboardBackend),
     WindowEvent(WindowEvent),
     WindowManagerEvent(WindowManagerEvent),
 }
@@ -157,7 +157,7 @@ type KeyboardMessageReceiver = RefCell<Option<UnboundedReceiver<Message>>>;
 
 /// State that should be initialized in a async runtime.
 pub struct AsyncAppState {
-    fcitx5_services: Fcitx5Services,
+    keyboard_backend: KeyboardBackend,
     fcitx5_osk_service_client: Fcitx5OskServiceClient,
     rx: KeyboardMessageReceiver,
     display_socket: Option<OwnedFd>,
@@ -197,7 +197,7 @@ impl AsyncAppState {
                 }
             }
         }
-        let fcitx5_services = Fcitx5Services::new(
+        let keyboard_backend = KeyboardBackend::new(
             modifier_workaround,
             config.modifier_workaround_keycodes().clone(),
         )
@@ -209,7 +209,7 @@ impl AsyncAppState {
             detect_theme_enabled.clone(),
         ));
         Ok(Self {
-            fcitx5_services,
+            keyboard_backend,
             fcitx5_osk_service_client,
             rx: RefCell::new(Some(rx)),
             display_socket,
@@ -239,7 +239,7 @@ impl<WM> Keyboard<WM> {
         shutdown_flag: ShutdownFlag,
     ) -> (Self, Task<Message>) {
         let AsyncAppState {
-            fcitx5_services,
+            keyboard_backend,
             fcitx5_osk_service_client,
             rx,
             display_socket,
@@ -247,7 +247,7 @@ impl<WM> Keyboard<WM> {
         } = async_state;
 
         fcitx5_osk_service_client.set_manual_mode(config_manager.as_ref().manual_mode());
-        let state = State::new(config_manager, wm, fcitx5_services, detect_theme_enabled);
+        let state = State::new(config_manager, wm, keyboard_backend, detect_theme_enabled);
         let mut init_task = Task::done(StoreEvent::Load.into());
         if !wait_for_socket {
             // open indicator if it is not waiting for a socket.
@@ -492,9 +492,9 @@ where
             Message::ImEvent(event) => {
                 task = task.chain(self.state.on_im_event(event));
             }
-            Message::UpdateFcitx5Services(fcitx5_services) => {
-                tracing::debug!("update fcitx5_services");
-                self.state.update_fcitx5_services(fcitx5_services);
+            Message::UpdateKeyboardBackend(keyboard_backend) => {
+                tracing::debug!("update keyboard_backend");
+                self.state.update_keyboard_backend(keyboard_backend);
             }
         };
         task

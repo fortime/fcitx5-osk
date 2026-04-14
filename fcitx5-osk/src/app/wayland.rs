@@ -151,19 +151,19 @@ impl WaylandKeyboard {
             );
             let mut task = self.inner.update(message);
             if input_panel {
-                match self.input_method_context.fcitx5_services() {
-                    Ok(fcitx5_services) => {
+                match self.input_method_context.keyboard_backend() {
+                    Ok(keyboard_backend) => {
                         // switch to our input-method-v1 implementation.
                         task = task.chain(
                             self.inner
-                                .update(Message::UpdateFcitx5Services(fcitx5_services)),
+                                .update(Message::UpdateKeyboardBackend(keyboard_backend)),
                         );
                     }
                     Err(e) => {
                         task = Task::done(
                             app::fatal_with_context(
                                 e,
-                                "failed to create Fcitx5Services for input_method_v1",
+                                "failed to create KeyboardBackend for input_method_v1",
                             )
                             .into(),
                         );

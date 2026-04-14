@@ -138,10 +138,6 @@ impl LayoutState {
             .update_quick_action_bar_state(quick_action_bar_state)
     }
 
-    pub fn toggle_quick_action_bar(&mut self) -> bool {
-        self.toolbar_layout.toggle_quick_action_bar()
-    }
-
     pub fn to_element<'a, 'b>(
         &'a self,
         params: &'a ToElementCommonParams<'b>,
@@ -186,7 +182,10 @@ impl LayoutState {
                 changed = self.update_quick_action_bar_state(quick_action_bar_state);
             }
             LayoutEvent::ToggleQuickActionBar => {
-                changed = self.toggle_quick_action_bar();
+                changed = self.toolbar_layout.toggle_quick_action_bar();
+            }
+            LayoutEvent::ToggleRepeatAction => {
+                self.toolbar_layout.toggle_repeat_action();
             }
         }
         if changed {
@@ -206,6 +205,7 @@ pub enum LayoutEvent {
     ToggleSetting,
     UpdateQuickActionBarState(QuickActionBarState),
     ToggleQuickActionBar,
+    ToggleRepeatAction,
 }
 
 impl From<LayoutEvent> for Message {

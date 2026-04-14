@@ -8,13 +8,10 @@ use iced::{
 use tokio::time;
 
 use crate::{
-    app::{MapTask, Message},
+    app::{self, MapTask, Message},
     config::{Config, IndicatorDisplay, Placement},
-    dbus::client::{
-        Fcitx5Services, Fcitx5VirtualKeyboardServiceExt, IFcitx5VirtualKeyboardService,
-    },
     layout::{self, FromKLengthSize as _, KLength, KeyAreaLayout, ToElementCommonParams},
-    state::{ImEvent, LayoutEvent, LayoutState, UpdateConfigEvent},
+    state::{ImEvent, KeyboardBackend, LayoutEvent, LayoutState, UpdateConfigEvent},
     widget::{Movable, Toggle, ToggleCondition},
     window::{SyncOutputResponse, WindowManager, WindowManagerMode, WindowSettings},
 };
@@ -362,7 +359,7 @@ pub struct WindowManagerState<WM> {
     /// a value sync with config file
     indicator_display: IndicatorDisplay,
     to_be_opened_flag: u16,
-    fcitx5_services: Fcitx5Services,
+    keyboard_backend: KeyboardBackend,
     wm: WM,
     hide_delay: Duration,
 }
@@ -373,7 +370,7 @@ impl<WM> WindowManagerState<WM> {
         wm: WM,
         portrait: bool,
         key_area_layout: Rc<KeyAreaLayout>,
-        fcitx5_services: Fcitx5Services,
+        keyboard_backend: KeyboardBackend,
     ) -> Self {
         let max_width = if portrait {
             config.portrait_width()
@@ -391,7 +388,7 @@ impl<WM> WindowManagerState<WM> {
             indicator_width: config.indicator_width(),
             indicator_display: config.indicator_display(),
             to_be_opened_flag: 0,
-            fcitx5_services,
+            keyboard_backend,
             wm,
             hide_delay: *config.hide_delay(),
         }
@@ -1068,34 +1065,26 @@ where
 
 // call fcitx5
 impl<WM> WindowManagerState<WM> {
-    pub(super) fn update_fcitx5_services(&mut self, fcitx5_services: Fcitx5Services) {
-        self.fcitx5_services = fcitx5_services;
-    }
-
-    fn fcitx5_virtual_keyboard_service(&self) -> &Fcitx5VirtualKeyboardServiceExt {
-        self.fcitx5_services.virtual_keyboard()
+    pub(super) fn update_keyboard_backend(&mut self, keyboard_backend: KeyboardBackend) {
+        self.keyboard_backend = keyboard_backend;
     }
 
     fn fcitx5_show(&self) -> Task<Message> {
-        super::call_dbus(
-            self.fcitx5_virtual_keyboard_service(),
-            "send show event failed".to_string(),
-            |s| async move {
-                s.show_virtual_keyboard().await?;
-                Ok(Message::Nothing)
-            },
-        )
+        self.keyboard_backend
+            .show_virtual_keyboard()
+            .map(|r| match r {
+                Ok(_) => Message::Nothing,
+                Err(e) => app::error_with_context(e, "send show event failed"),
+            })
     }
 
     fn fcitx5_hide(&self) -> Task<Message> {
-        super::call_dbus(
-            self.fcitx5_virtual_keyboard_service(),
-            "send hide event failed".to_string(),
-            |s| async move {
-                s.hide_virtual_keyboard().await?;
-                Ok(Message::Nothing)
-            },
-        )
+        self.keyboard_backend
+            .hide_virtual_keyboard()
+            .map(|r| match r {
+                Ok(_) => Message::Nothing,
+                Err(e) => app::error_with_context(e, "send hide event failed"),
+            })
     }
 }
 

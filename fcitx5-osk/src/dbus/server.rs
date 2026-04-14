@@ -8,12 +8,15 @@ use fcitx5_osk_common::{
     signal::ShutdownFlag,
 };
 use getset::{CopyGetters, Getters};
-use iced::futures::{
-    channel::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        oneshot::Sender,
+use iced::{
+    futures::{
+        channel::{
+            mpsc::{self, UnboundedReceiver, UnboundedSender},
+            oneshot::Sender,
+        },
+        StreamExt as _,
     },
-    StreamExt as _,
+    Font,
 };
 use zbus::{
     fdo::Error,
@@ -128,13 +131,16 @@ impl Fcitx5VirtualkeyboardImPanelService {
         global_cursor_index: i32,
     ) -> Result<(), Error> {
         self.send(Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(
-            Arc::new(CandidateAreaState {
-                candidate_text_list,
+            Arc::new(CandidateAreaState::new(
+                candidate_text_list
+                    .into_iter()
+                    .map(|text| vec![(text, None)])
+                    .collect(),
                 has_prev,
                 has_next,
                 page_index,
                 global_cursor_index,
-            }),
+            )),
         ))
     }
 
@@ -177,7 +183,7 @@ impl From<Fcitx5VirtualkeyboardImPanelEvent> for Message {
 #[derive(Debug, Getters, CopyGetters)]
 pub struct CandidateAreaState {
     #[getset(get = "pub")]
-    candidate_text_list: Vec<String>,
+    candidate_text_list: Vec<Vec<(String, Option<Font>)>>,
     #[getset(get_copy = "pub")]
     has_prev: bool,
     #[getset(get_copy = "pub")]
@@ -187,6 +193,24 @@ pub struct CandidateAreaState {
     #[allow(unused)]
     #[getset(get_copy = "pub")]
     global_cursor_index: i32,
+}
+
+impl CandidateAreaState {
+    pub fn new(
+        candidate_text_list: Vec<Vec<(String, Option<Font>)>>,
+        has_prev: bool,
+        has_next: bool,
+        page_index: i32,
+        global_cursor_index: i32,
+    ) -> Self {
+        Self {
+            candidate_text_list,
+            has_prev,
+            has_next,
+            page_index,
+            global_cursor_index,
+        }
+    }
 }
 
 pub enum SocketEnv {

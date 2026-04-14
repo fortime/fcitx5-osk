@@ -1,16 +1,11 @@
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
-use iced::{futures::lock::Mutex as IcedFuturesMutex, Task};
+use iced::{Font, Task};
 
 use crate::{
-    app::Message,
-    dbus::{
-        client::{
-            Fcitx5Services, IFcitx5ControllerService, IFcitx5VirtualKeyboardBackendService,
-            InputMethodInfo,
-        },
-        server::CandidateAreaState as Fcitx5CandidateAreaState,
-    },
+    app::{self, Message},
+    dbus::{client::InputMethodInfo, server::CandidateAreaState as Fcitx5CandidateAreaState},
+    state::KeyboardBackend,
 };
 
 pub struct ImState {
@@ -18,17 +13,17 @@ pub struct ImState {
     ims: HashMap<String, Rc<InputMethodInfo>>,
     im_names: Vec<String>,
     candidate_area_state: CandidateAreaState,
-    fcitx5_services: Fcitx5Services,
+    keyboard_backend: KeyboardBackend,
 }
 
 impl ImState {
-    pub fn new(fcitx5_services: Fcitx5Services) -> Self {
+    pub fn new(keyboard_backend: KeyboardBackend) -> Self {
         Self {
             cur_im: Default::default(),
             ims: Default::default(),
             im_names: Default::default(),
             candidate_area_state: Default::default(),
-            fcitx5_services,
+            keyboard_backend,
         }
     }
 
@@ -100,7 +95,9 @@ impl ImState {
                 // TODO? other logic
                 self.deactivate(&im)
             }
-            ImEvent::SyncImList => return self.sync_input_methods_and_current_im(),
+            ImEvent::SyncImList => {
+                return self.keyboard_backend.sync_input_methods_and_current_im()
+            }
             ImEvent::SyncCurrentIm => return self.sync_current_input_method(),
             ImEvent::ResetCandidateCursor => self.reset_candidate_cursor(),
             ImEvent::PrevCandidates => {
@@ -113,7 +110,7 @@ impl ImState {
                     return self.next_page(page_index);
                 }
             }
-            ImEvent::SelectCandidate(c) => return self.select_candidate(c),
+            ImEvent::SelectCandidate(_) => {}
         }
         Message::nothing()
     }
@@ -121,95 +118,42 @@ impl ImState {
 
 // call fcitx5
 impl ImState {
-    pub(super) fn update_fcitx5_services(&mut self, fcitx5_services: Fcitx5Services) {
-        self.fcitx5_services = fcitx5_services;
-    }
-
-    fn fcitx5_controller_service(&self) -> &Arc<dyn IFcitx5ControllerService + Send + Sync> {
-        self.fcitx5_services.controller()
-    }
-
-    fn fcitx5_virtual_keyboard_backend_service(
-        &self,
-    ) -> &Arc<IcedFuturesMutex<dyn IFcitx5VirtualKeyboardBackendService + Send + Sync>> {
-        self.fcitx5_services.virtual_keyboard_backend()
-    }
-
-    fn sync_input_methods_and_current_im(&self) -> Task<Message> {
-        super::call_dbus(
-            self.fcitx5_controller_service(),
-            "get input method group info and current im failed".to_string(),
-            |s| async move {
-                // if we fetch input methods and current input method in two message, in some cases, we will update current input method first. And it will fail because there is no input methods. So we put them in a call.
-                let group_info = s.full_input_method_group_info("").await?;
-                let input_method = s.current_input_method().await?;
-                Ok(
-                    ImEvent::UpdateImListAndCurrentIm(
-                        group_info.into_input_methods(),
-                        input_method,
-                    )
-                    .into(),
-                )
-            },
-        )
+    pub(super) fn update_keyboard_backend(&mut self, keyboard_backend: KeyboardBackend) {
+        self.keyboard_backend = keyboard_backend;
     }
 
     fn sync_current_input_method(&self) -> Task<Message> {
-        super::call_dbus(
-            self.fcitx5_controller_service(),
-            "get current input method failed".to_string(),
-            |s| async move {
-                let input_method = s.current_input_method().await?;
-                Ok(ImEvent::UpdateCurrentIm(input_method).into())
-            },
-        )
+        self.keyboard_backend
+            .current_input_method()
+            .map(|r| match r {
+                Ok(input_method) => ImEvent::UpdateCurrentIm(input_method).into(),
+                Err(e) => app::error_with_context(e, "get current input method failed"),
+            })
     }
 
     fn select_im(&self, im: String) -> Task<Message> {
-        super::call_dbus(
-            self.fcitx5_controller_service(),
-            "select im failed".to_string(),
-            |s| async move {
-                s.set_current_im(&im).await?;
-                Ok(Message::Nothing)
-            },
-        )
-    }
-
-    fn select_candidate(&self, cursor: usize) -> Task<Message> {
-        super::call_dbus(
-            self.fcitx5_virtual_keyboard_backend_service(),
-            format!("select candidate {} failed", cursor),
-            |s| async move {
-                let s = s.lock().await;
-                s.select_candidate(cursor as i32).await?;
-                Ok(Message::Nothing)
-            },
-        )
+        self.keyboard_backend.set_current_im(im).map(|r| match r {
+            Ok(_) => Message::Nothing,
+            Err(e) => app::error_with_context(e, "select im failed"),
+        })
     }
 
     fn prev_page(&self, page_index: i32) -> Task<Message> {
-        super::call_dbus(
-            self.fcitx5_virtual_keyboard_backend_service(),
-            "prev page failed".to_string(),
-            |s| async move {
-                let s = s.lock().await;
-                s.prev_page(page_index).await?;
-                Ok(Message::Nothing)
-            },
-        )
+        self.keyboard_backend
+            .prev_page(page_index)
+            .map(|r| match r {
+                Ok(_) => Message::Nothing,
+                Err(e) => app::error_with_context(e, "prev page failed"),
+            })
     }
 
     fn next_page(&self, page_index: i32) -> Task<Message> {
-        super::call_dbus(
-            self.fcitx5_virtual_keyboard_backend_service(),
-            "next page failed".to_string(),
-            |s| async move {
-                let s = s.lock().await;
-                s.next_page(page_index).await?;
-                Ok(Message::Nothing)
-            },
-        )
+        self.keyboard_backend
+            .next_page(page_index)
+            .map(|r| match r {
+                Ok(_) => Message::Nothing,
+                Err(e) => app::error_with_context(e, "next page failed"),
+            })
     }
 }
 
@@ -307,7 +251,7 @@ impl CandidateAreaState {
         self.fcitx5_state.is_some()
     }
 
-    pub fn candidate_list(&self) -> &[String] {
+    pub fn candidate_list(&self) -> &[Vec<(String, Option<Font>)>] {
         self.fcitx5_state
             .as_ref()
             .map(|s| &s.candidate_text_list()[self.cursor..])

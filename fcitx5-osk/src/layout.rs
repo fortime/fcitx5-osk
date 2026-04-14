@@ -40,12 +40,12 @@ use crate::{
     dbus::server::ImPanelEvent,
     font,
     state::{
-        BoolDesc, CloseOpSource, DynamicEnumDesc, EnumDesc, Field, FieldType, ImEvent, LayoutEvent,
-        OwnedEnumDesc, RangeDesc, StateExtractor, StepDesc, StoreEvent, TextDesc,
-        UpdateConfigEvent, WindowEvent, WindowManagerEvent,
+        BoolDesc, CloseOpSource, DynamicEnumDesc, EnumDesc, Field, FieldType, ImEvent,
+        KeyboardEvent, LayoutEvent, OwnedEnumDesc, RangeDesc, StateExtractor, StepDesc, StoreEvent,
+        TextDesc, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     store::IdAndConfigPath,
-    widget::{self, ExtPickList as _, Movable, Toggle, ToggleCondition},
+    widget::{self, ExtButton, ExtPickList as _, Movable, Toggle, ToggleCondition, BORDER_RADIUS},
     window::WindowManagerMode,
 };
 
@@ -556,6 +556,7 @@ pub struct ToolbarLayout {
     height_u: u32,
     quick_action_bar_state: QuickActionBarState,
     quick_action_bar_shown: bool,
+    repeat_action_shown: bool,
 }
 
 impl ToolbarLayout {
@@ -564,6 +565,7 @@ impl ToolbarLayout {
             height_u: 1,
             quick_action_bar_state,
             quick_action_bar_shown: false,
+            repeat_action_shown: false,
         };
         // make sure height_u is valid
         res.update_height_u(min_toolbar_height_u);
@@ -592,6 +594,10 @@ impl ToolbarLayout {
         } else {
             false
         }
+    }
+
+    pub fn toggle_repeat_action(&mut self) {
+        self.repeat_action_shown = !self.repeat_action_shown;
     }
 
     pub fn height_u(&self) -> u32 {
@@ -661,7 +667,7 @@ impl ToolbarLayout {
                 candidate_list.len(),
                 candidate_list
                     .iter()
-                    .map(|c| c.chars().count())
+                    .map(|c| c.iter().map(|t| t.0.chars().count()).sum())
                     .max()
                     .unwrap_or(0) as u32
                     * char_width,
@@ -672,7 +678,7 @@ impl ToolbarLayout {
             for candidate in candidate_list {
                 // TODO Simply assume one char consumes 1 * font_size. Calculate the width in the
                 // future.
-                let width = candidate.chars().count() as u32;
+                let width = candidate.iter().map(|t| t.0.chars().count()).sum::<usize>() as u32;
                 if max_width.max(width) * (consumed + 1) * char_width + consumed * spacing
                     > available_candidate_width
                 {
@@ -683,9 +689,14 @@ impl ToolbarLayout {
             }
             (consumed as usize, max_width * char_width)
         };
+        let (consumed, max_width) = if consumed <= 1 {
+            // as least 1
+            (1, Length::Fill)
+        } else {
+            (consumed, Length::Fixed(max_width.val()))
+        };
         let mut index = state.cursor();
-        // as least 1
-        for candidate in &candidate_list[..consumed.max(1)] {
+        for candidate in &candidate_list[..consumed] {
             candidate_row = candidate_row.push(
                 candidate_btn(candidate, font, font_size, max_width)
                     .on_press(ImEvent::SelectCandidate(index).into()),
@@ -704,7 +715,7 @@ impl ToolbarLayout {
         } else {
             None
         };
-        let candidate_element: Element<_> = if state.is_paged() {
+        let candidate_element: Element<_> = if state.is_paged() || consumed == 1 {
             Scrollable::with_direction(
                 candidate_row,
                 Direction::Horizontal(Scrollbar::new().width(1).spacing(unit)),
@@ -873,14 +884,17 @@ impl ToolbarLayout {
     ) -> Element<'b, Message> {
         let mut row = Row::new()
             .height(Length::Fill)
-            .spacing(unit)
+            .spacing(unit * 2)
             .padding(Padding::new(unit.val()))
             .align_y(Vertical::Center);
         row = row.push(
-            Button::new(Text::new("Reload").size(font_size))
-                .on_press(StoreEvent::Load.into())
-                .style(widget::button_style),
+            ExtButton::new(Text::new("Reload").size(font_size))
+                .border_radius(BORDER_RADIUS)
+                .padding(DEFAULT_PADDING)
+                .on_release_with(Some(|| StoreEvent::Load.into())),
         );
+        row = row.push(self.combo_action_element(params, unit, font_size));
+        row = row.push(self.repeat_action_element(params, unit, font_size));
         Container::new(
             Scrollable::with_direction(
                 row,
@@ -891,6 +905,128 @@ impl ToolbarLayout {
         .height(Length::Fill)
         .width(Length::Fill)
         .into()
+    }
+
+    fn combo_action_element<'a, 'b>(
+        &'a self,
+        params: &'a ToElementCommonParams<'b>,
+        unit: KLength,
+        font_size: KLength,
+    ) -> Element<'b, Message> {
+        let font = params.state.keyboard().default_font();
+        let is_combo_mode = params.state.keyboard().is_combo_mode();
+        let content = Row::new()
+            .align_y(Vertical::Center)
+            .push(
+                Text::new("Combo")
+                    .size(font_size)
+                    .shaping(Shaping::Advanced),
+            )
+            .spacing(unit)
+            .push(
+                Toggler::new(is_combo_mode)
+                    .size(font_size)
+                    .style(widget::toggler_style)
+                    .on_toggle(|_| KeyboardEvent::ToggleComboMode.into()),
+            );
+        if is_combo_mode {
+            Row::new()
+                .spacing(unit)
+                .push(widget::button_container(content))
+                .push(
+                    ExtButton::new(
+                        Text::new("Release")
+                            .size(font_size)
+                            .font(font)
+                            .shaping(Shaping::Advanced),
+                    )
+                    .border_radius(BORDER_RADIUS)
+                    .padding(DEFAULT_PADDING)
+                    .on_release_with(Some(|| KeyboardEvent::InsertComboKeyRelease.into())),
+                )
+                .push(
+                    ExtButton::new(
+                        Text::new("ReleaseAll")
+                            .size(font_size)
+                            .font(font)
+                            .shaping(Shaping::Advanced),
+                    )
+                    .border_radius(BORDER_RADIUS)
+                    .padding(DEFAULT_PADDING)
+                    .on_release_with(Some(|| KeyboardEvent::InsertComboKeyReleaseAll.into())),
+                )
+                .into()
+        } else {
+            widget::button_container(content).into()
+        }
+    }
+
+    fn repeat_action_element<'a, 'b>(
+        &'a self,
+        params: &'a ToElementCommonParams<'b>,
+        unit: KLength,
+        font_size: KLength,
+    ) -> Element<'b, Message> {
+        let font = params.state.keyboard().default_font();
+        let content = Row::new()
+            .align_y(Vertical::Center)
+            .push(
+                Text::new("Repeat")
+                    .size(font_size)
+                    .shaping(Shaping::Advanced),
+            )
+            .spacing(unit)
+            .push(
+                Toggler::new(self.repeat_action_shown)
+                    .size(font_size)
+                    .style(widget::toggler_style)
+                    .on_toggle(|_| LayoutEvent::ToggleRepeatAction.into()),
+            );
+        let repeat_keys = params.state.keyboard().repeat_keys();
+        if self.repeat_action_shown && !repeat_keys.is_empty() {
+            let repeat_serial = params.state.keyboard().repeat_serial();
+            let mut texts = Row::new()
+                .padding(padding::horizontal(1.5 * font_size.val()))
+                .push(
+                    Text::new(repeat_keys[0].to_string())
+                        .font(repeat_keys[0].font().unwrap_or(font))
+                        .shaping(Shaping::Advanced)
+                        .size(font_size),
+                );
+            for key in repeat_keys.iter().skip(1) {
+                texts = texts.push(
+                    Text::new(" + ".to_string())
+                        .font(font)
+                        .shaping(Shaping::Advanced)
+                        .size(font_size),
+                );
+                texts = texts.push(
+                    Text::new(key.to_string())
+                        .font(key.font().unwrap_or(font))
+                        .shaping(Shaping::Advanced)
+                        .size(font_size),
+                );
+            }
+            Row::new()
+                .spacing(unit)
+                .push(widget::button_container(content))
+                .push(
+                    ExtButton::new(texts)
+                        .border_radius(BORDER_RADIUS)
+                        .padding(DEFAULT_PADDING)
+                        .on_release_with(Some(|| KeyboardEvent::StopRepeating.into()))
+                        .on_press_with(Some(move || {
+                            KeyboardEvent::RepeatComboKeys((
+                                repeat_serial,
+                                Duration::from_millis(500),
+                            ))
+                            .into()
+                        })),
+                )
+                .into()
+        } else {
+            widget::button_container(content).into()
+        }
     }
 }
 
@@ -1221,19 +1357,24 @@ fn nerd_btn<'a, Message: 'a>(
     .padding(0)
 }
 
-fn candidate_btn<Message>(
-    candidate: &str,
+fn candidate_btn(
+    candidate: &Vec<(String, Option<Font>)>,
     font: Font,
     font_size: KLength,
-    width: KLength,
+    width: Length,
 ) -> Button<'_, Message> {
-    let text = Text::new(candidate)
-        .font(font)
-        .shaping(Shaping::Advanced)
-        .size(font_size)
-        .align_x(Horizontal::Center)
-        .align_y(Vertical::Center);
-    Button::new(text)
+    let mut texts = Row::new();
+    for chars in candidate {
+        texts = texts.push(
+            Text::new(&chars.0)
+                .font(chars.1.unwrap_or(font))
+                .shaping(Shaping::Advanced)
+                .size(font_size)
+                .align_x(Horizontal::Center)
+                .align_y(Vertical::Center),
+        );
+    }
+    Button::new(Container::new(texts).center(Length::Fill))
         .width(width)
         .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
         .padding(0)

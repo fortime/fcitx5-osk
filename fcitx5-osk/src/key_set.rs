@@ -1,6 +1,6 @@
-use std::{collections::HashMap, path::PathBuf, rc::Rc, result::Result as StdResult};
+use std::{collections::HashMap, path::PathBuf, rc::Rc, result::Result as StdResult, sync::Arc};
 
-use getset::{CopyGetters, Getters};
+use getset::Getters;
 use iced::Font;
 use serde::{
     de::{Error, Unexpected},
@@ -24,24 +24,35 @@ struct RawKeyValue {
     font: Option<String>,
 }
 
-#[derive(CopyGetters, Getters)]
-pub struct KeyValue {
-    #[getset(get = "pub")]
+#[derive(Debug, PartialEq, Eq)]
+struct KeyValueInner {
     symbol: String,
-    #[getset(get_copy = "pub")]
     keysym: Keysym,
-    #[getset(get_copy = "pub")]
     keycode: Option<i16>,
-    #[getset(get_copy = "pub")]
     font: Option<Font>,
 }
 
-#[derive(CopyGetters, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ThinKeyValue {
-    #[getset(get_copy = "pub")]
-    keysym: Keysym,
-    #[getset(get_copy = "pub")]
-    keycode: Option<i16>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyValue {
+    inner: Arc<KeyValueInner>,
+}
+
+impl KeyValue {
+    pub fn symbol(&self) -> &str {
+        &self.inner.symbol
+    }
+
+    pub fn keysym(&self) -> Keysym {
+        self.inner.keysym
+    }
+
+    pub fn keycode(&self) -> Option<i16> {
+        self.inner.keycode
+    }
+
+    pub fn font(&self) -> Option<Font> {
+        self.inner.font
+    }
 }
 
 impl<'de> Deserialize<'de> for KeyValue {
@@ -80,20 +91,13 @@ impl<'de> Deserialize<'de> for KeyValue {
         }
         tracing::debug!("symbol of {:x}: {}", u32::from(keysym), symbol);
         Ok(Self {
-            symbol,
-            keysym,
-            keycode: raw.keycode,
-            font: raw.font.as_deref().map(font::load),
+            inner: Arc::new(KeyValueInner {
+                symbol,
+                keysym,
+                keycode: raw.keycode,
+                font: raw.font.as_deref().map(font::load),
+            }),
         })
-    }
-}
-
-impl KeyValue {
-    pub fn to_thin(&self) -> ThinKeyValue {
-        ThinKeyValue {
-            keysym: self.keysym,
-            keycode: self.keycode,
-        }
     }
 }
 
@@ -115,13 +119,13 @@ impl Key {
         shift ^ caps_lock
     }
 
-    pub fn key_value(&self, shift: bool, caps_lock: bool) -> ThinKeyValue {
+    pub fn key_value(&self, shift: bool, caps_lock: bool) -> KeyValue {
         let key_value = if Self::is_shifted(shift, caps_lock) {
             self.raw.secondaries.first().unwrap_or(&self.raw.primary)
         } else {
             &self.raw.primary
         };
-        key_value.to_thin()
+        key_value.clone()
     }
 
     pub fn has_secondary(&self) -> bool {

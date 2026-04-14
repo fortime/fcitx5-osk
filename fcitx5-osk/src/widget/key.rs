@@ -6,6 +6,7 @@ use iced::{
         widget::{tree, Operation, Tree},
         Clipboard, Layout, Shell, Widget,
     },
+    border::Radius,
     event::Status,
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
@@ -70,7 +71,7 @@ pub struct Key<'a, Message, PressCb, ReleaseCb, Theme = iced::Theme, Renderer = 
     padding: Padding,
     on_press_with: Option<PressCb>,
     on_release_with: Option<ReleaseCb>,
-    border_radius: f32,
+    border_radius: Radius,
 }
 
 impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
@@ -136,8 +137,13 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
         self
     }
 
-    pub fn padding(mut self, padding: Padding) -> Self {
-        self.padding = padding;
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.padding = padding.into();
+        self
+    }
+
+    pub fn border_radius(mut self, border_radius: impl Into<Radius>) -> Self {
+        self.border_radius = border_radius.into();
         self
     }
 }
@@ -150,10 +156,7 @@ where
     Renderer: renderer::Renderer,
 {
     /// Creates a [`Key`] with the given content.
-    pub fn new(
-        content: impl Into<Element<'a, Message, Theme, Renderer>>,
-        border_radius: f32,
-    ) -> Self {
+    pub fn new(content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
         let content = content.into();
         let size = content.as_widget().size_hint();
         Self {
@@ -161,9 +164,9 @@ where
             width: size.width.fluid(),
             height: size.height.fluid(),
             padding: Default::default(),
-            on_press_with: None,
-            on_release_with: None,
-            border_radius,
+            border_radius: Default::default(),
+            on_press_with: Default::default(),
+            on_release_with: Default::default(),
         }
     }
 }
@@ -263,7 +266,7 @@ where
     ) -> MouseInteraction {
         let is_mouse_over = cursor.is_over(layout.bounds());
 
-        if is_mouse_over && self.on_press_with.is_some() {
+        if is_mouse_over && (self.on_press_with.is_some() || self.on_release_with.is_some()) {
             MouseInteraction::Pointer
         } else {
             MouseInteraction::default()
@@ -392,11 +395,7 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
     };
 
     if pressed {
-        if let (false, Some(cb), Some(position)) = (
-            state.is_pressed(&finger),
-            widget.on_press_with.as_ref(),
-            position,
-        ) {
+        if let (false, Some(position)) = (state.is_pressed(&finger), position) {
             if bounds.contains(position) {
                 tracing::trace!(
                     "key[{:?}] is pressed at {:?} by finger {:?}",
@@ -405,39 +404,41 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
                     finger
                 );
                 if !state.has_finger_pressed() {
-                    shell.publish(cb(KeyEvent {
-                        pressed,
-                        cancelled,
-                        finger,
-                        bounds,
-                    }));
+                    if let Some(cb) = &widget.on_press_with {
+                        shell.publish(cb(KeyEvent {
+                            pressed,
+                            cancelled,
+                            finger,
+                            bounds,
+                        }));
+                    }
                 }
                 state.finger_pressed(finger);
                 shell.capture_event();
             }
         }
     } else if state.is_pressed(&finger) {
-        if let Some(cb) = widget.on_release_with.as_ref() {
-            state.finger_released(&finger);
-            tracing::trace!(
-                "key[{:?}] is released by finger {:?}, pressed: {}",
-                bounds,
-                finger,
-                state.fingers.len(),
-            );
-            if !state.has_finger_pressed() {
-                // there is no finger is pressed, set hovered to false
-                if finger.is_some() {
-                    state.hovered = false;
-                }
+        state.finger_released(&finger);
+        tracing::trace!(
+            "key[{:?}] is released by finger {:?}, pressed: {}",
+            bounds,
+            finger,
+            state.fingers.len(),
+        );
+        if !state.has_finger_pressed() {
+            // there is no finger is pressed, set hovered to false
+            if finger.is_some() {
+                state.hovered = false;
+            }
+            if let Some(cb) = widget.on_release_with.as_ref() {
                 shell.publish(cb(KeyEvent {
                     pressed,
                     cancelled,
                     finger,
                     bounds,
                 }));
+                shell.capture_event();
             }
-            shell.capture_event();
         }
     }
 }
@@ -457,7 +458,7 @@ pub struct PopupKey<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
     padding: Padding,
     on_enter: Option<Message>,
     on_exit: Option<Message>,
-    border_radius: f32,
+    border_radius: Radius,
 }
 
 impl<Message, Theme, Renderer> PopupKey<'_, Message, Theme, Renderer> {
@@ -485,8 +486,13 @@ impl<Message, Theme, Renderer> PopupKey<'_, Message, Theme, Renderer> {
         self
     }
 
-    pub fn padding(mut self, padding: Padding) -> Self {
-        self.padding = padding;
+    pub fn padding(mut self, padding: impl Into<Padding>) -> Self {
+        self.padding = padding.into();
+        self
+    }
+
+    pub fn border_radius(mut self, border_radius: impl Into<Radius>) -> Self {
+        self.border_radius = border_radius.into();
         self
     }
 }
@@ -499,7 +505,6 @@ where
     pub fn new(
         content: impl Into<Element<'a, Message, Theme, Renderer>>,
         finger: Option<TouchFinger>,
-        border_radius: f32,
     ) -> Self {
         let content = content.into();
         let size = content.as_widget().size_hint();
@@ -509,9 +514,9 @@ where
             width: size.width.fluid(),
             height: size.height.fluid(),
             padding: Default::default(),
-            on_enter: None,
-            on_exit: None,
-            border_radius,
+            border_radius: Default::default(),
+            on_enter: Default::default(),
+            on_exit: Default::default(),
         }
     }
 }
@@ -613,10 +618,12 @@ where
                 (true, false, Some(on_enter), _) => {
                     state.is_active = true;
                     shell.publish(on_enter.clone());
+                    shell.capture_event();
                 }
                 (false, true, _, Some(on_exit)) => {
                     state.is_active = false;
                     shell.publish(on_exit.clone());
+                    shell.capture_event();
                 }
                 _ => {}
             }
@@ -633,7 +640,7 @@ where
     ) -> MouseInteraction {
         let is_mouse_over = cursor.is_over(layout.bounds());
 
-        if is_mouse_over && self.on_enter.is_some() {
+        if is_mouse_over && (self.on_enter.is_some() || self.on_exit.is_some()) {
             MouseInteraction::Pointer
         } else {
             MouseInteraction::default()

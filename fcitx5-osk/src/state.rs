@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     future::Future,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -9,11 +10,11 @@ use std::{
 use anyhow::Result;
 use getset::{Getters, MutGetters};
 use iced::{window::Id, Element, Size, Task, Theme, Vector};
+use zbus::Result as ZbusResult;
 
 use crate::{
     app::{self, error_with_context, MapTask, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
-    dbus::client::Fcitx5Services,
     layout::{KLength, ToElementCommonParams},
     store::Store,
     window::{WindowManager, WindowManagerMode},
@@ -30,7 +31,7 @@ pub use config::{
     StepDesc, TextDesc, UpdateConfigEvent,
 };
 pub use im::{ImEvent, ImState};
-pub use keyboard::{KeyEvent, KeyboardEvent, KeyboardState};
+pub use keyboard::{KeyEvent, KeyboardBackend, KeyboardEvent, KeyboardState};
 pub use layout::{LayoutEvent, LayoutState};
 pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerState};
 
@@ -54,7 +55,7 @@ impl<WM> State<WM> {
     pub fn new(
         config_manager: ConfigManager,
         wm: WM,
-        fcitx5_services: Fcitx5Services,
+        keyboard_backend: KeyboardBackend,
         detect_theme_enabled: Arc<AtomicBool>,
     ) -> Self {
         let config = config_manager.as_ref();
@@ -67,15 +68,15 @@ impl<WM> State<WM> {
                 config.holding_timeout(),
                 &key_area_layout,
                 &store,
-                fcitx5_services.clone(),
+                keyboard_backend.clone(),
             ),
-            im: ImState::new(fcitx5_services.clone()),
+            im: ImState::new(keyboard_backend.clone()),
             window_manager: WindowManagerState::new(
                 config,
                 wm,
                 portrait,
                 key_area_layout,
-                fcitx5_services,
+                keyboard_backend,
             ),
             detect_theme_enabled,
             theme: Theme::Light,
@@ -129,11 +130,12 @@ impl<WM> State<WM> {
         self.color_theme = color_theme;
     }
 
-    pub fn update_fcitx5_services(&mut self, fcitx5_services: Fcitx5Services) {
-        self.im.update_fcitx5_services(fcitx5_services.clone());
+    pub fn update_keyboard_backend(&mut self, keyboard_backend: KeyboardBackend) {
+        self.im.update_keyboard_backend(keyboard_backend.clone());
         self.keyboard
-            .update_fcitx5_services(fcitx5_services.clone());
-        self.window_manager.update_fcitx5_services(fcitx5_services);
+            .update_keyboard_backend(keyboard_backend.clone());
+        self.window_manager
+            .update_keyboard_backend(keyboard_backend);
     }
 }
 
@@ -205,6 +207,7 @@ where
     pub fn on_im_event(&mut self, event: ImEvent) -> Task<WM::Message> {
         match event {
             ImEvent::UpdateCurrentIm(im) => self.update_cur_im(&im),
+            ImEvent::SelectCandidate(cursor) => self.keyboard.select_candidate(cursor).map_task(),
             // make sure virtual keyboard mode of fcitx5 is activated
             ImEvent::SelectIm(_) => self
                 .keyboard_mut()
@@ -411,4 +414,15 @@ where
         Err(e) => app::error_with_context(e, err_msg.clone()),
         Ok(t) => t,
     })
+}
+
+fn dbus_task<S, FN, F, T>(service: Cow<'_, S>, f: FN) -> Task<ZbusResult<T>>
+where
+    S: Clone,
+    FN: FnOnce(S) -> F,
+    F: Future<Output = ZbusResult<T>> + 'static + Send,
+    T: 'static,
+{
+    let service = service.into_owned();
+    Task::future(f(service))
 }

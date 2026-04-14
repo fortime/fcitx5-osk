@@ -11,15 +11,13 @@ use iced::{
 use tokio::task::JoinHandle;
 use v1::Fcitx5ControllerServiceStub;
 
-use crate::{
-    app::wayland::WaylandMessage, dbus::client::Fcitx5Services, misc::NamedSubscriptionData,
-};
+use crate::{app::wayland::WaylandMessage, misc::NamedSubscriptionData, state::KeyboardBackend};
 
 use super::connection::WaylandConnection;
 
 struct State {
     rx: Option<UnboundedReceiver<WaylandMessage>>,
-    fcitx5_services: Option<Fcitx5Services>,
+    keyboard_backend: Option<KeyboardBackend>,
     bg_handle: Option<JoinHandle<()>>,
     closed: bool,
 }
@@ -28,7 +26,7 @@ impl State {
     pub fn new(rx: UnboundedReceiver<WaylandMessage>) -> Self {
         Self {
             rx: Some(rx),
-            fcitx5_services: None,
+            keyboard_backend: None,
             bg_handle: None,
             closed: false,
         }
@@ -77,10 +75,10 @@ impl InputMethodContext {
         )
     }
 
-    pub fn fcitx5_services(&self) -> Result<Fcitx5Services> {
+    pub fn keyboard_backend(&self) -> Result<KeyboardBackend> {
         let mut guard = self.state();
-        if let Some(fcitx5_services) = &guard.fcitx5_services {
-            Ok(fcitx5_services.clone())
+        if let Some(keyboard_backend) = &guard.keyboard_backend {
+            Ok(keyboard_backend.clone())
         } else {
             // create a mock fcitx5 backend using input-method-v1, so that the keyboard can be
             // shown and input in kscreenlocker.
@@ -96,9 +94,9 @@ impl InputMethodContext {
             guard.bg_handle = Some(handle);
             let stub = Arc::new(Fcitx5ControllerServiceStub);
             let client = Arc::new(iced::futures::lock::Mutex::new(client));
-            let fcitx5_services = Fcitx5Services::new_with(stub.clone(), stub, client);
-            guard.fcitx5_services = Some(fcitx5_services.clone());
-            Ok(fcitx5_services)
+            let keyboard_backend = KeyboardBackend::new_with(stub.clone(), stub, client);
+            guard.keyboard_backend = Some(keyboard_backend.clone());
+            Ok(keyboard_backend)
         }
     }
 
@@ -112,7 +110,7 @@ impl InputMethodContext {
         }
         tracing::debug!("close InputMethodContext");
         drop(guard.bg_handle.take());
-        drop(guard.fcitx5_services.take());
+        drop(guard.keyboard_backend.take());
         guard.closed = true;
     }
 }
@@ -209,10 +207,12 @@ mod v1 {
 
     #[async_trait::async_trait]
     impl IFcitx5VirtualKeyboardService for Fcitx5ControllerServiceStub {
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn show_virtual_keyboard(&self) -> ZbusResult<()> {
             Ok(())
         }
 
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn hide_virtual_keyboard(&self) -> ZbusResult<()> {
             Ok(())
         }
@@ -264,18 +264,22 @@ mod v1 {
             Ok(())
         }
 
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn select_candidate(&self, _index: i32) -> ZbusResult<()> {
             Ok(())
         }
 
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn prev_page(&self, _index: i32) -> ZbusResult<()> {
             Ok(())
         }
 
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn next_page(&self, _index: i32) -> ZbusResult<()> {
             Ok(())
         }
 
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
         async fn reset_pressed_key_events(&mut self) -> ZbusResult<()> {
             // Since only shift in all modifier keys is handled, there is no need to reset
             Ok(())
