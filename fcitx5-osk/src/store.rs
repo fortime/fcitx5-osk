@@ -236,8 +236,26 @@ where
         }
         for file in dir_path.read_dir()? {
             let file = file?;
-            if let Some("toml") = file.path().extension().and_then(|p| p.to_str()) {
-                let figment = Figment::new().merge(Toml::file(file.path()));
+            let file_path = file.path();
+            if let Some("toml") = file_path.extension().and_then(|p| p.to_str()) {
+                let mut figment = Figment::new().merge(Toml::file(file_path));
+
+                // Merge override files under .d
+                let mut dot_d_path = file.path();
+                if let Some(file_name) = dot_d_path.file_name().and_then(|n| n.to_str()) {
+                    dot_d_path.set_file_name(format!("{file_name}.d"));
+                    if dot_d_path.is_dir() {
+                        for custom_file in dot_d_path.read_dir()? {
+                            let custom_file_path = custom_file?.path();
+                            if let Some("toml") =
+                                custom_file_path.extension().and_then(|p| p.to_str())
+                            {
+                                figment = figment.merge(Toml::file(custom_file_path));
+                            }
+                        }
+                    }
+                }
+
                 let mut new: V = figment.extract()?;
                 new.set_path(file.path());
                 let new = Rc::new(new);
