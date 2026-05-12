@@ -3,6 +3,7 @@ use std::{borrow::Cow, collections::HashMap, env, fmt::Display, path::PathBuf, r
 
 use crate::{
     config::Config,
+    custom_action::CustomAction,
     font,
     key_set::{Key, KeySet},
     layout::{KeyAreaLayout, KeyId},
@@ -38,6 +39,7 @@ pub struct Store {
     key_area_layouts: HashMap<String, Rc<KeyAreaLayout>>,
     default_key_set: Rc<KeySet>,
     key_sets: HashMap<String, Rc<KeySet>>,
+    custom_actions: HashMap<String, Rc<CustomAction>>,
     im_layout_mapping: HashMap<String, HashMap<String, String>>,
     im_font_mapping: HashMap<String, Font>,
 }
@@ -74,6 +76,7 @@ impl Store {
             key_area_layouts: Default::default(),
             default_key_set,
             key_sets: Default::default(),
+            custom_actions: Default::default(),
             im_layout_mapping: Default::default(),
             im_font_mapping: Default::default(),
         }
@@ -112,6 +115,10 @@ impl Store {
             config.key_set_folders(),
             "key_sets",
         ))?;
+        let custom_actions = init_confs(&xdg_config_folders_if_empty(
+            config.custom_action_folders(),
+            "custom_actions",
+        ))?;
         let im_layout_mapping = config.im_layout_mapping().clone();
         let im_font_mapping = config
             .im_font_mapping()
@@ -134,6 +141,7 @@ impl Store {
             key_area_layouts,
             default_key_set,
             key_sets,
+            custom_actions,
             im_layout_mapping,
             im_font_mapping,
         })
@@ -191,6 +199,10 @@ impl Store {
             .and_then(|m| m.get(im_name))
             .and_then(|layout_name| self.key_area_layout(layout_name))
             .unwrap_or_else(|| self.default_key_area_layout(portrait))
+    }
+
+    pub fn custom_action(&self, name: &str) -> Option<Rc<CustomAction>> {
+        self.custom_actions.get(name).cloned()
     }
 }
 

@@ -1,8 +1,8 @@
 use std::{
     borrow::Cow,
     collections::HashMap,
-    fmt::{Display, Formatter as FmtFormatter, Result as FmtResult},
     mem,
+    rc::Rc,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc,
@@ -14,7 +14,7 @@ use anyhow::Result;
 use getset::Getters;
 use iced::{
     alignment::{Horizontal, Vertical},
-    futures::lock::Mutex as IcedFuturesMutex,
+    futures::{channel::mpsc::UnboundedSender, lock::Mutex as IcedFuturesMutex},
     widget::{container::Style as ContainerStyle, text::Shaping, Column, Container, Row, Text},
     Element, Font, Padding, Task,
 };
@@ -24,6 +24,7 @@ use zbus::{Connection, Result as ZbusResult};
 
 use crate::{
     app::{self, Message},
+    custom_action::{CustomAction, CustomActionCandidate, CustomActionKind},
     dbus::{
         client::{
             Fcitx5ControllerServiceProxy, Fcitx5VirtualKeyboardBackendServiceProxy,
@@ -34,7 +35,7 @@ use crate::{
         server::{CandidateAreaState, Fcitx5VirtualkeyboardImPanelEvent},
     },
     font,
-    key_set::{Key, KeyValue},
+    key_set::{ComboKey, Key, KeyValue},
     layout::{KLength, KeyAreaLayout},
     state::ImEvent,
     store::Store,
@@ -106,6 +107,9 @@ pub struct KeyboardState {
     fcitx5_hidden: Fcitx5Hidden,
     keyboard_backend: KeyboardBackend,
     keyboard_backend_state: KeyboardBackendState,
+    custom_actions: Vec<(Arc<str>, Rc<CustomAction>)>,
+    #[allow(unused)]
+    tx: UnboundedSender<Message>,
 }
 
 impl KeyboardState {
@@ -114,14 +118,16 @@ impl KeyboardState {
         key_area_layout: &KeyAreaLayout,
         store: &Store,
         keyboard_backend: KeyboardBackend,
+        custom_actions: &[String],
+        tx: UnboundedSender<Message>,
     ) -> Self {
         let mut res = Self {
             id: 0,
             primary_text_size_u: Default::default(),
             secondary_text_size_u: Default::default(),
             font: Default::default(),
-            keys: HashMap::new(),
-            pressed_keys: HashMap::new(),
+            keys: Default::default(),
+            pressed_keys: Default::default(),
             view_flags: 0,
             holding_timeout,
             holding_key_state: None,
@@ -130,8 +136,11 @@ impl KeyboardState {
             fcitx5_hidden: Fcitx5Hidden::Unset,
             keyboard_backend,
             keyboard_backend_state: Default::default(),
+            custom_actions: Default::default(),
+            tx,
         };
         res.update_key_area_layout(key_area_layout, store);
+        res.update_custom_actions(custom_actions, store);
         res
     }
 
@@ -154,6 +163,17 @@ impl KeyboardState {
             .map(|n| font::load(n))
             .unwrap_or_default();
         self.keyboard_backend_state = Default::default();
+    }
+
+    pub fn update_custom_actions(&mut self, custom_actions: &[String], store: &Store) {
+        self.custom_actions.clear();
+        for custom_action in custom_actions {
+            if let Some(a) = store.custom_action(custom_action) {
+                self.custom_actions.push((custom_action.as_str().into(), a));
+            } else {
+                tracing::warn!("No custom action{custom_action} found");
+            }
+        }
     }
 
     pub fn select_candidate(&mut self, cursor: usize) -> Task<Message> {
@@ -225,6 +245,12 @@ impl KeyboardState {
                     self.keyboard_backend_state.repeat_serial.wrapping_add(1);
                 Message::nothing()
             }
+            KeyboardEvent::ClickCustomAction(custom_action_name) => {
+                self.press_custom_action(custom_action_name)
+            }
+            KeyboardEvent::ExtendCustomActionCandidate((serial, candidates)) => {
+                self.extend_custom_action_candidates(serial, candidates)
+            }
         }
     }
 
@@ -240,7 +266,18 @@ impl KeyboardState {
         let KeyEvent { common, inner } = event;
         match inner {
             KeyEventInner::Pressed(key_widget_event) => {
-                return self.press_key(common, key_widget_event)
+                if !self
+                    .keyboard_backend_state
+                    .custom_action_candidates
+                    .is_empty()
+                {
+                    KeyboardBackend::inc_custom_action_serial(&mut self.keyboard_backend_state);
+                    // clear custom candidates then press
+                    return Task::done(KeyboardBackend::candidate_area_state_message(vec![]))
+                        .chain(self.press_key(common, key_widget_event));
+                } else {
+                    return self.press_key(common, key_widget_event);
+                }
             }
             KeyEventInner::Holding(key_widget_event, pressed_time) => {
                 self.hold_key(common, key_widget_event, pressed_time);
@@ -508,6 +545,78 @@ impl KeyboardState {
             .into(),
         )
     }
+
+    pub fn press_custom_action(&mut self, custom_action_name: Arc<str>) -> Task<Message> {
+        let custom_action = self.custom_actions.iter().find_map(|ca| {
+            if ca.0 == custom_action_name {
+                Some(&ca.1)
+            } else {
+                None
+            }
+        });
+
+        let Some(custom_action) = custom_action else {
+            tracing::warn!("No custom action[{custom_action_name}] found");
+            return Message::nothing();
+        };
+
+        let serial = KeyboardBackend::inc_custom_action_serial(&mut self.keyboard_backend_state);
+
+        match custom_action.action() {
+            CustomActionKind::Static { groups } => {
+                let candidates = groups
+                    .into_iter()
+                    .map(|g| CustomActionCandidate::Keys(g.keys().clone()))
+                    .collect();
+                Task::done(KeyboardEvent::ExtendCustomActionCandidate((serial, candidates)).into())
+            }
+            #[cfg(feature = "custom-action-http-api")]
+            CustomActionKind::HttpApi(params) => {
+                let serial =
+                    KeyboardBackend::inc_custom_action_serial(&mut self.keyboard_backend_state);
+                let custom_action_serial = self.keyboard_backend_state.custom_action_serial.clone();
+                let tx = self.tx.clone();
+                let params = params.clone();
+                Task::future(async move {
+                    crate::custom_action::http_api::execute(tx, serial, params, move |s| {
+                        s != custom_action_serial.load(Ordering::Relaxed)
+                    })
+                    .await
+                })
+                .map(move |r| match r {
+                    Ok(_) => Message::Nothing,
+                    Err(e) => app::error_with_context(
+                        e,
+                        format!(
+                            "Failed to execute the http api custom action: {custom_action_name}"
+                        ),
+                    ),
+                })
+            }
+        }
+    }
+
+    fn extend_custom_action_candidates(
+        &mut self,
+        serial: u32,
+        candidates: Vec<CustomActionCandidate>,
+    ) -> Task<Message> {
+        let custom_action_serial =
+            KeyboardBackend::custom_action_serial(&self.keyboard_backend_state);
+        if serial != custom_action_serial {
+            tracing::warn!(
+                "Skip ExtendCustomActionCandidate, expect: {custom_action_serial}, found: {serial}",
+            );
+            return Message::nothing();
+        }
+        self.keyboard_backend_state
+            .custom_action_candidates
+            .extend(candidates);
+        Task::done(KeyboardBackend::custom_action_candidate_message(
+            &self.keyboard_backend_state,
+            self.font,
+        ))
+    }
 }
 
 // call fcitx5
@@ -733,6 +842,10 @@ impl KeyboardState {
     pub fn default_font(&self) -> Font {
         self.font
     }
+
+    pub fn custom_actions(&self) -> &[(Arc<str>, Rc<CustomAction>)] {
+        &self.custom_actions
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -787,6 +900,8 @@ pub enum KeyboardEvent {
     InsertComboKeyReleaseAll,
     RepeatComboKeys((u32, Duration)),
     StopRepeating,
+    ClickCustomAction(Arc<str>),
+    ExtendCustomActionCandidate((u32, Vec<CustomActionCandidate>)),
 }
 
 impl From<KeyboardEvent> for Message {
@@ -809,34 +924,6 @@ impl Default for Mode {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum ComboKey {
-    Key(KeyValue),
-    Release,
-    ReleaseAll,
-}
-
-impl Display for ComboKey {
-    fn fmt(&self, f: &mut FmtFormatter<'_>) -> FmtResult {
-        let s = match self {
-            ComboKey::Key(key_value) => key_value.symbol(),
-            ComboKey::Release => "Release",
-            ComboKey::ReleaseAll => "ReleaseAll",
-        };
-        f.write_str(s)
-    }
-}
-
-impl ComboKey {
-    pub fn font(&self) -> Option<Font> {
-        match self {
-            ComboKey::Key(key_value) => key_value.font(),
-            ComboKey::Release => None,
-            ComboKey::ReleaseAll => None,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 struct ComboState {
     keys: Vec<ComboKey>,
@@ -849,6 +936,8 @@ struct KeyboardBackendState {
     repeat_keys: Vec<ComboKey>,
     repeat_serial: u32,
     mode: Mode,
+    custom_action_serial: Arc<AtomicU32>,
+    custom_action_candidates: Vec<CustomActionCandidate>,
 }
 
 #[derive(Clone, Debug, Getters)]
@@ -933,17 +1022,48 @@ impl KeyboardBackend {
         .into()
     }
 
+    fn combo_keys_to_candidate_text(
+        combo_keys: &[ComboKey],
+        default_font: Font,
+    ) -> Vec<(String, Option<Font>)> {
+        let mut text = vec![];
+        for key in combo_keys {
+            text.push((key.to_string(), Some(key.font().unwrap_or(default_font))));
+            text.push((" + ".to_string(), Some(default_font)));
+        }
+        text.pop();
+        text
+    }
+
     fn combo_keys_message(combo_keys: &[ComboKey], default_font: Font) -> Message {
         let mut candidate_text_list = vec![];
         if !combo_keys.is_empty() {
-            let mut text = vec![];
-            for key in combo_keys {
-                text.push((key.to_string(), Some(key.font().unwrap_or(default_font))));
-                text.push((" + ".to_string(), Some(default_font)));
-            }
-            text.pop();
-            candidate_text_list.push(text);
+            candidate_text_list.push(Self::combo_keys_to_candidate_text(combo_keys, default_font));
         }
+        Self::candidate_area_state_message(candidate_text_list)
+    }
+
+    fn custom_action_candidate_message(
+        state: &KeyboardBackendState,
+        default_font: Font,
+    ) -> Message {
+        let candidate_text_list = state
+            .custom_action_candidates
+            .iter()
+            .map(|c| match c {
+                CustomActionCandidate::Prompt(p) => p
+                    .into_iter()
+                    .map(|(text, f)| (text.clone(), Some(f.unwrap_or(default_font))))
+                    .collect(),
+                CustomActionCandidate::Keys(keys) => {
+                    if keys.is_empty() {
+                        vec![("INVALID KEYS".to_string(), Some(default_font))]
+                    } else {
+                        Self::combo_keys_to_candidate_text(&**keys, default_font)
+                    }
+                }
+            })
+            .collect();
         Self::candidate_area_state_message(candidate_text_list)
     }
 
@@ -1048,6 +1168,29 @@ impl KeyboardBackend {
     }
 
     fn select_candidate(&self, state: &mut KeyboardBackendState, cursor: usize) -> Task<Message> {
+        if !state.custom_action_candidates.is_empty() {
+            if let Some(candidate) = state.custom_action_candidates.get_mut(cursor) {
+                if let CustomActionCandidate::Keys(keys) = candidate {
+                    mem::swap(keys, &mut state.repeat_keys);
+                    // Select a candidate then clear
+                    state.custom_action_candidates.clear();
+                    return self
+                        .process_combo_keys(state.repeat_keys.clone())
+                        .map(|r| match r {
+                            Ok(_) => Self::candidate_area_state_message(vec![]),
+                            Err(e) => app::error_with_context(e, "error to process combo keys"),
+                        });
+                } else {
+                    // Do nothing
+                }
+            } else {
+                tracing::warn!(
+                    "Cursor[{cursor}] is too large, length: {}",
+                    state.custom_action_candidates.len()
+                );
+            }
+            return Message::nothing();
+        }
         match &mut state.mode {
             Mode::Normal { .. } => super::call_dbus(
                 &self.virtual_keyboard_backend,
@@ -1306,6 +1449,18 @@ impl KeyboardBackend {
                 Task::done(Self::combo_keys_message(&combo_state.keys, default_font))
             }
         }
+    }
+
+    fn custom_action_serial(state: &KeyboardBackendState) -> u32 {
+        state.custom_action_serial.load(Ordering::SeqCst)
+    }
+
+    fn inc_custom_action_serial(state: &mut KeyboardBackendState) -> u32 {
+        let mut serial = Self::custom_action_serial(state);
+        serial = serial.wrapping_add(1);
+        state.custom_action_candidates.clear();
+        state.custom_action_serial.store(serial, Ordering::SeqCst);
+        serial
     }
 }
 

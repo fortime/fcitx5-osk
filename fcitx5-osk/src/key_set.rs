@@ -1,4 +1,11 @@
-use std::{collections::HashMap, path::PathBuf, rc::Rc, result::Result as StdResult, sync::Arc};
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter as FmtFormatter, Result as FmtResult},
+    path::PathBuf,
+    rc::Rc,
+    result::Result as StdResult,
+    sync::Arc,
+};
 
 use getset::Getters;
 use iced::Font;
@@ -174,4 +181,39 @@ impl IdAndConfigPath for KeySet {
     fn set_path<T: Into<PathBuf>>(&mut self, path: T) {
         self.path = Some(path.into());
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum ComboKey {
+    Key(KeyValue),
+    Release,
+    ReleaseAll,
+}
+
+impl Display for ComboKey {
+    fn fmt(&self, f: &mut FmtFormatter<'_>) -> FmtResult {
+        let s = match self {
+            ComboKey::Key(key_value) => key_value.symbol(),
+            ComboKey::Release => "Release",
+            ComboKey::ReleaseAll => "ReleaseAll",
+        };
+        f.write_str(s)
+    }
+}
+
+impl ComboKey {
+    pub fn font(&self) -> Option<Font> {
+        match self {
+            ComboKey::Key(key_value) => key_value.font(),
+            ComboKey::Release => None,
+            ComboKey::ReleaseAll => None,
+        }
+    }
+}
+
+#[derive(Deserialize, Getters)]
+pub struct ComboKeyGroup {
+    #[getset(get = "pub")]
+    pub keys: Vec<ComboKey>,
 }

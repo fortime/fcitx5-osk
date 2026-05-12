@@ -16,6 +16,7 @@ use zbus::Connection;
 
 mod app;
 mod config;
+mod custom_action;
 mod dbus;
 mod font;
 mod key_set;

@@ -159,6 +159,7 @@ type KeyboardMessageReceiver = RefCell<Option<UnboundedReceiver<Message>>>;
 pub struct AsyncAppState {
     keyboard_backend: KeyboardBackend,
     fcitx5_osk_service_client: Fcitx5OskServiceClient,
+    tx: UnboundedSender<Message>,
     rx: KeyboardMessageReceiver,
     display_socket: Option<OwnedFd>,
     detect_theme_enabled: Arc<AtomicBool>,
@@ -204,13 +205,14 @@ impl AsyncAppState {
         .await?;
         let detect_theme_enabled = Arc::new(AtomicBool::new(false));
         tokio::spawn(detect_theme(
-            tx,
+            tx.clone(),
             shutdown_flag,
             detect_theme_enabled.clone(),
         ));
         Ok(Self {
             keyboard_backend,
             fcitx5_osk_service_client,
+            tx,
             rx: RefCell::new(Some(rx)),
             display_socket,
             detect_theme_enabled,
@@ -241,13 +243,20 @@ impl<WM> Keyboard<WM> {
         let AsyncAppState {
             keyboard_backend,
             fcitx5_osk_service_client,
+            tx,
             rx,
             display_socket,
             detect_theme_enabled,
         } = async_state;
 
         fcitx5_osk_service_client.set_manual_mode(config_manager.as_ref().manual_mode());
-        let state = State::new(config_manager, wm, keyboard_backend, detect_theme_enabled);
+        let state = State::new(
+            config_manager,
+            wm,
+            keyboard_backend,
+            detect_theme_enabled,
+            tx,
+        );
         let mut init_task = Task::done(StoreEvent::Load.into());
         if !wait_for_socket {
             // open indicator if it is not waiting for a socket.

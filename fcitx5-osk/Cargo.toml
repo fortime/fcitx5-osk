@@ -33,6 +33,10 @@ wayland-client.workspace = true
 wayland-protocols.workspace = true
 wayland-protocols-wlr.workspace = true
 num-traits.workspace = true
+reqwest = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 
 [features]
+default = ["custom-action-http-api"]
 console-subscriber = ["fcitx5-osk-common/console-subscriber"]
+custom-action-http-api = ["dep:reqwest", "dep:base64"]

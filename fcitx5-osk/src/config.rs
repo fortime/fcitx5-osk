@@ -40,6 +40,11 @@ pub struct Config {
     #[serde(default)]
     theme_folders: Vec<PathBuf>,
 
+    /// Folders storing custom action toml files. If not set, the program will search toml files in `fcitx5-osk/custom_actions` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
+    #[getset(get = "pub")]
+    #[serde(default)]
+    custom_action_folders: Vec<PathBuf>,
+
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default = "default_landscape_width")]
     landscape_width: KLength,
@@ -130,6 +135,11 @@ pub struct Config {
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default)]
     quick_action_bar_state: QuickActionBarState,
+
+    /// Enabled custom actions
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    custom_actions: Vec<String>,
 }
 
 impl Config {

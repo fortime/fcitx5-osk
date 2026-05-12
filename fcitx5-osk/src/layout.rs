@@ -895,6 +895,9 @@ impl ToolbarLayout {
         );
         row = row.push(self.combo_action_element(params, unit, font_size));
         row = row.push(self.repeat_action_element(params, unit, font_size));
+        for custom_action in params.state.keyboard().custom_actions() {
+            row = row.push(self.custom_action_element(font_size, &custom_action.0));
+        }
         Container::new(
             Scrollable::with_direction(
                 row,
@@ -1027,6 +1030,25 @@ impl ToolbarLayout {
         } else {
             widget::button_container(content).into()
         }
+    }
+
+    fn custom_action_element<'a, 'b>(
+        &'a self,
+        font_size: KLength,
+        custom_action_name: &'b Arc<str>,
+    ) -> Element<'b, Message> {
+        let cloned_name = custom_action_name.clone();
+        ExtButton::new(
+            Text::new(&**custom_action_name)
+                .size(font_size)
+                .shaping(Shaping::Advanced),
+        )
+        .border_radius(BORDER_RADIUS)
+        .padding(DEFAULT_PADDING)
+        .on_release_with(Some(move || {
+            KeyboardEvent::ClickCustomAction(cloned_name.clone()).into()
+        }))
+        .into()
     }
 }
 

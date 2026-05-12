@@ -9,7 +9,9 @@ use std::{
 
 use anyhow::Result;
 use getset::{Getters, MutGetters};
-use iced::{window::Id, Element, Size, Task, Theme, Vector};
+use iced::{
+    futures::channel::mpsc::UnboundedSender, window::Id, Element, Size, Task, Theme, Vector,
+};
 use zbus::Result as ZbusResult;
 
 use crate::{
@@ -57,6 +59,7 @@ impl<WM> State<WM> {
         wm: WM,
         keyboard_backend: KeyboardBackend,
         detect_theme_enabled: Arc<AtomicBool>,
+        tx: UnboundedSender<Message>,
     ) -> Self {
         let config = config_manager.as_ref();
         let store = Store::new();
@@ -69,6 +72,8 @@ impl<WM> State<WM> {
                 &key_area_layout,
                 &store,
                 keyboard_backend.clone(),
+                config.custom_actions().as_ref(),
+                tx,
             ),
             im: ImState::new(keyboard_backend.clone()),
             window_manager: WindowManagerState::new(
@@ -240,6 +245,11 @@ where
             StoreEvent::Load => match Store::load(self.config.config()) {
                 Ok(s) => {
                     self.store = s;
+                    // Update enabled custom actions
+                    self.keyboard.update_custom_actions(
+                        self.config.config().custom_actions().as_ref(),
+                        &self.store,
+                    );
                     // Update theme after store is changed
                     self.sync_theme(None);
                     // Update layout by cur im after store is changed
