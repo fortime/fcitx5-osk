@@ -424,6 +424,7 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             // there is no finger is pressed, set hovered to false
             if finger.is_some() {
                 state.hovered = false;
+                shell.request_redraw();
             }
             if let Some(cb) = widget.on_release_with.as_ref() {
                 shell.publish(cb());

@@ -429,6 +429,7 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             // there is no finger is pressed, set hovered to false
             if finger.is_some() {
                 state.hovered = false;
+                shell.request_redraw();
             }
             if let Some(cb) = widget.on_release_with.as_ref() {
                 shell.publish(cb(KeyEvent {
@@ -617,11 +618,13 @@ where
             match (is_hovered, state.is_active, &self.on_enter, &self.on_exit) {
                 (true, false, Some(on_enter), _) => {
                     state.is_active = true;
+                    shell.request_redraw();
                     shell.publish(on_enter.clone());
                     shell.capture_event();
                 }
                 (false, true, _, Some(on_exit)) => {
                     state.is_active = false;
+                    shell.request_redraw();
                     shell.publish(on_exit.clone());
                     shell.capture_event();
                 }
