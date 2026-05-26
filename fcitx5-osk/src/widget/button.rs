@@ -372,10 +372,6 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
     let state: &mut State = tree.state.downcast_mut();
 
     let bounds = layout.bounds();
-    if state.hovered != cursor.is_over(bounds) {
-        state.hovered = !state.hovered;
-        shell.request_redraw();
-    }
 
     let (pressed, finger, position) = match *event {
         Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
@@ -391,6 +387,13 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             (false, Some(id), Some(position))
         }
         Event::Touch(TouchEvent::FingerLost { id, position }) => (false, Some(id), Some(position)),
+        Event::Mouse(MouseEvent::CursorMoved { position }) => {
+            if bounds.contains(position) != state.hovered {
+                state.hovered = !state.hovered;
+                shell.request_redraw();
+            }
+            return;
+        }
         _ => return,
     };
 
@@ -421,11 +424,6 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             state.fingers.len(),
         );
         if !state.has_finger_pressed() {
-            // there is no finger is pressed, set hovered to false
-            if finger.is_some() {
-                state.hovered = false;
-                shell.request_redraw();
-            }
             if let Some(cb) = widget.on_release_with.as_ref() {
                 shell.publish(cb());
                 shell.capture_event();
