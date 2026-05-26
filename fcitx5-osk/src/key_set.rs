@@ -135,10 +135,6 @@ impl Key {
         key_value.clone()
     }
 
-    pub fn has_secondary(&self) -> bool {
-        !self.raw.secondaries.is_empty()
-    }
-
     pub fn primary(&self) -> &KeyValue {
         &self.raw.primary
     }

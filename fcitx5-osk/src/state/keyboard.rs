@@ -80,6 +80,7 @@ struct HoldingKeyState {
     // we use this flags to record which key is selected, once it is empty, we will use the primary
     // keysym.
     flags: Vec<KeyValue>,
+    pressed_time: u128,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -274,7 +275,7 @@ impl KeyboardState {
                     .chain(self.press_key(common, key_widget_event));
             }
             KeyEventInner::Holding(key_widget_event, pressed_time) => {
-                self.hold_key(common, key_widget_event, pressed_time);
+                return self.hold_key(common, key_widget_event, pressed_time);
             }
             KeyEventInner::Released(key_widget_event) => {
                 return self.release_key(common, key_widget_event)
@@ -493,15 +494,24 @@ impl KeyboardState {
 
         let key = &holding_key_state.key;
         let mut row = Row::new();
-        let mut skip = 0;
         let mut popup_key_area_width = KLength::default();
-        if Key::is_shifted(is_shift_set, is_caps_lock_set) {
+        if holding_key_state.pressed_time + self.holding_timeout.as_millis() <= now() {
+            for secondary in key.secondaries().iter() {
+                row = row.push(self.new_popup_key(holding_key_state, secondary, unit));
+                popup_key_area_width += self.popup_key_width_u * unit;
+            }
             row = row.push(self.new_popup_key(holding_key_state, key.primary(), unit));
-            skip = 1;
             popup_key_area_width += self.popup_key_width_u * unit;
-        }
-        for secondary in key.secondaries().iter().skip(skip) {
-            row = row.push(self.new_popup_key(holding_key_state, secondary, unit));
+        } else {
+            if Key::is_shifted(is_shift_set, is_caps_lock_set) {
+                if let Some(first) = key.secondaries().first() {
+                    row = row.push(self.new_popup_key(holding_key_state, first, unit));
+                } else {
+                    row = row.push(self.new_popup_key(holding_key_state, key.primary(), unit));
+                }
+            } else {
+                row = row.push(self.new_popup_key(holding_key_state, key.primary(), unit));
+            }
             popup_key_area_width += self.popup_key_width_u * unit;
         }
 
@@ -652,7 +662,7 @@ impl KeyboardState {
 
         let key_state = self.pressed_keys.entry(common.key_name.clone());
         let mut contains = true;
-        let pressed_time = UNIX_EPOCH.elapsed().map(|d| d.as_millis()).unwrap_or(0);
+        let pressed_time = now();
         {
             let contains = &mut contains;
             key_state.or_insert_with(|| {
@@ -665,15 +675,13 @@ impl KeyboardState {
         }
         let mut task = self.clear_fcitx5_hidden();
         if modifier_state == ModifierState::NoState && !contains {
-            let holding_timeout = self.holding_timeout;
-            let next = Task::future(async move {
-                time::sleep(holding_timeout).await;
+            let next = Task::done(
                 KeyEvent::new(
                     common,
                     KeyEventInner::Holding(key_widget_event, pressed_time),
                 )
-                .into()
-            });
+                .into(),
+            );
             task = task.chain(next);
         } else if modifier_state != ModifierState::CapsLock
             && modifier_state != ModifierState::Shift
@@ -720,7 +728,7 @@ impl KeyboardState {
                 .take_if(|s| s.name == common.key_name);
 
             let pressed_time = key_state.pressed_time;
-            let released_time = UNIX_EPOCH.elapsed().map(|d| d.as_millis()).unwrap_or(0);
+            let released_time = now();
 
             // shift may be used as a shortcut to switch the state of an input
             // method, We only send key pressed event to fcitx5, if the
@@ -791,7 +799,8 @@ impl KeyboardState {
         common: KeyEventCommon,
         key_widget_event: KeyWidgetEvent,
         pressed_time: u128,
-    ) {
+    ) -> Task<Message> {
+        let mut task = Message::nothing();
         if let Some(key_state) = self.pressed_keys.get(&common.key_name) {
             // check if the pressed time is the same
             if key_state.pressed_time != pressed_time {
@@ -800,10 +809,10 @@ impl KeyboardState {
                     pressed_time,
                     key_state.pressed_time
                 );
-                return;
+                return task;
             }
         } else {
-            return;
+            return task;
         }
 
         if let Some(holding_key_state) = &self.holding_key_state {
@@ -812,19 +821,25 @@ impl KeyboardState {
                 holding_key_state.name,
                 common.key_name
             );
-            return;
+            return task;
         }
 
         if let Some(key) = self.keys.get(&*common.key_name) {
-            if key.has_secondary() {
-                self.holding_key_state = Some(HoldingKeyState {
-                    name: common.key_name,
-                    key_widget_event,
-                    key: key.clone(),
-                    flags: Vec::with_capacity(key.secondaries().len()),
-                })
-            }
+            self.holding_key_state = Some(HoldingKeyState {
+                name: common.key_name,
+                key_widget_event,
+                key: key.clone(),
+                flags: Vec::with_capacity(key.secondaries().len()),
+                pressed_time,
+            });
+            // Trigger a redraw after holding timeout
+            let timeout = self.holding_timeout;
+            task = Task::future(async move {
+                time::sleep(timeout).await;
+                Message::Nothing
+            });
         }
+        task
     }
 
     pub fn clear_fcitx5_hidden(&mut self) -> Task<Message> {
@@ -1384,7 +1399,7 @@ impl KeyboardBackend {
 
         let mut reqs = vec![];
         let mut stack: Vec<Option<KeyValue>> = vec![];
-        let mut time = UNIX_EPOCH.elapsed().map(|d| d.as_millis()).unwrap_or(0);
+        let mut time = now();
 
         // Generate key events according to combo keys
         for combo_key in combo_keys {
@@ -1496,4 +1511,8 @@ fn to_modifier_state(key_value: &KeyValue) -> ModifierState {
         Keysym::Super_L | Keysym::Super_R => ModifierState::Super,
         _ => ModifierState::NoState,
     }
+}
+
+fn now() -> u128 {
+    UNIX_EPOCH.elapsed().map(|d| d.as_millis()).unwrap_or(0)
 }

@@ -181,7 +181,7 @@ fn default_indicator_width() -> KLength {
 }
 
 fn default_holding_timeout() -> Duration {
-    Duration::from_millis(200)
+    Duration::from_millis(500)
 }
 
 fn default_hide_delay() -> Duration {
