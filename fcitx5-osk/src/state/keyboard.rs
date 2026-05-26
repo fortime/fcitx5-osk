@@ -194,10 +194,12 @@ impl KeyboardState {
             KeyboardEvent::ToggleComboMode => {
                 if self.pressed_keys.is_empty() {
                     // make sure virtual keyboard is enabled in fcitx5
-                    self.clear_fcitx5_hidden().chain(
-                        self.keyboard_backend
-                            .toggle_combo_mode(&mut self.keyboard_backend_state),
-                    )
+                    self.clear_fcitx5_hidden()
+                        .chain(self.clear_custom_action())
+                        .chain(
+                            self.keyboard_backend
+                                .toggle_combo_mode(&mut self.keyboard_backend_state),
+                        )
                 } else {
                     // do nothing if there is any keys pressed
                     Message::nothing()
@@ -217,6 +219,7 @@ impl KeyboardState {
                 tracing::debug!("repeat combo keys: {serial}, cur: {}", self.repeat_serial());
                 if serial == self.keyboard_backend_state.repeat_serial {
                     self.clear_fcitx5_hidden()
+                        .chain(self.clear_custom_action())
                         .chain(
                             self.keyboard_backend
                                 .process_combo_keys(self.keyboard_backend_state.repeat_keys.clone())
@@ -248,8 +251,8 @@ impl KeyboardState {
             KeyboardEvent::ClickCustomAction(custom_action_name) => {
                 self.press_custom_action(custom_action_name)
             }
-            KeyboardEvent::ExtendCustomActionCandidate((serial, candidates)) => {
-                self.extend_custom_action_candidates(serial, candidates)
+            KeyboardEvent::PushFrontCustomActionCandidate((serial, candidates)) => {
+                self.push_front_custom_action_candidates(serial, candidates)
             }
         }
     }
@@ -266,18 +269,9 @@ impl KeyboardState {
         let KeyEvent { common, inner } = event;
         match inner {
             KeyEventInner::Pressed(key_widget_event) => {
-                if !self
-                    .keyboard_backend_state
-                    .custom_action_candidates
-                    .is_empty()
-                {
-                    KeyboardBackend::inc_custom_action_serial(&mut self.keyboard_backend_state);
-                    // clear custom candidates then press
-                    return Task::done(KeyboardBackend::candidate_area_state_message(vec![]))
-                        .chain(self.press_key(common, key_widget_event));
-                } else {
-                    return self.press_key(common, key_widget_event);
-                }
+                return self
+                    .clear_custom_action()
+                    .chain(self.press_key(common, key_widget_event));
             }
             KeyEventInner::Holding(key_widget_event, pressed_time) => {
                 self.hold_key(common, key_widget_event, pressed_time);
@@ -568,7 +562,9 @@ impl KeyboardState {
                     .into_iter()
                     .map(|g| CustomActionCandidate::Keys(g.keys().clone()))
                     .collect();
-                Task::done(KeyboardEvent::ExtendCustomActionCandidate((serial, candidates)).into())
+                Task::done(
+                    KeyboardEvent::PushFrontCustomActionCandidate((serial, candidates)).into(),
+                )
             }
             #[cfg(feature = "custom-action-http-api")]
             CustomActionKind::HttpApi(params) => {
@@ -596,19 +592,24 @@ impl KeyboardState {
         }
     }
 
-    fn extend_custom_action_candidates(
+    fn push_front_custom_action_candidates(
         &mut self,
         serial: u32,
-        candidates: Vec<CustomActionCandidate>,
+        mut candidates: Vec<CustomActionCandidate>,
     ) -> Task<Message> {
         let custom_action_serial =
             KeyboardBackend::custom_action_serial(&self.keyboard_backend_state);
         if serial != custom_action_serial {
             tracing::warn!(
-                "Skip ExtendCustomActionCandidate, expect: {custom_action_serial}, found: {serial}",
+                "Skip PushFrontCustomActionCandidate, expect: {custom_action_serial}, found: {serial}",
             );
             return Message::nothing();
         }
+        // Push front
+        mem::swap(
+            &mut candidates,
+            &mut self.keyboard_backend_state.custom_action_candidates,
+        );
         self.keyboard_backend_state
             .custom_action_candidates
             .extend(candidates);
@@ -616,6 +617,20 @@ impl KeyboardState {
             &self.keyboard_backend_state,
             self.font,
         ))
+    }
+
+    fn clear_custom_action(&mut self) -> Task<Message> {
+        if !self
+            .keyboard_backend_state
+            .custom_action_candidates
+            .is_empty()
+        {
+            KeyboardBackend::inc_custom_action_serial(&mut self.keyboard_backend_state);
+            // clear custom candidates then press
+            Task::done(KeyboardBackend::candidate_area_state_message(vec![]))
+        } else {
+            Message::nothing()
+        }
     }
 }
 
@@ -901,7 +916,8 @@ pub enum KeyboardEvent {
     RepeatComboKeys((u32, Duration)),
     StopRepeating,
     ClickCustomAction(Arc<str>),
-    ExtendCustomActionCandidate((u32, Vec<CustomActionCandidate>)),
+    // Push new candidates in the front, so new coming candidates can be shown immediately
+    PushFrontCustomActionCandidate((u32, Vec<CustomActionCandidate>)),
 }
 
 impl From<KeyboardEvent> for Message {

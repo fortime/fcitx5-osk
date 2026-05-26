@@ -7,16 +7,18 @@ use serde::Deserialize;
 
 #[cfg(feature = "custom-action-http-api")]
 pub mod http_api {
-    use std::{collections::HashMap, result::Result as StdResult, sync::Arc};
+    use std::{collections::HashMap, result::Result as StdResult, sync::Arc, time::Duration};
 
     use anyhow::Result;
     use base64::{prelude::BASE64_STANDARD_NO_PAD, Engine as _};
+    use chrono::{DateTime, Utc};
     use iced::futures::channel::mpsc::UnboundedSender;
     use reqwest::{
-        header::{HeaderMap, HeaderName},
-        Method, Url,
+        header::{HeaderMap, HeaderName, RETRY_AFTER},
+        Method, StatusCode, Url,
     };
     use serde::{de::Error, Deserialize, Deserializer};
+    use tokio::time;
 
     use crate::{
         app::Message, custom_action::CustomActionCandidate, font, key_set::ComboKeyGroup,
@@ -136,13 +138,14 @@ pub mod http_api {
 
             let mut url: Url = target.url.parse()?;
             url.query_pairs_mut().extend_pairs(query.iter());
+            let mut method = target.method.0.clone();
 
             loop {
                 if should_stop(serial) {
                     tracing::warn!("Serial[{serial}] is changed, skip url[{url}]");
                     break;
                 }
-                let mut req_builder = client.request(target.method.0.clone(), url.clone());
+                let mut req_builder = client.request(method.clone(), url.clone());
                 req_builder = req_builder.headers(headers.clone());
                 // body is used once
                 if let Some(body) = body.take() {
@@ -150,15 +153,36 @@ pub mod http_api {
                 }
 
                 let resp = req_builder.send().await?;
-                if !resp.status().is_success() {
-                    tracing::debug!(
-                        "Error response, url: {url}, status: {}, message: {}",
-                        resp.status(),
-                        resp.text()
-                            .await
-                            .unwrap_or_else(|_| "Unknown error".to_string())
-                    );
-                    anyhow::bail!("Calling url[{url}] error");
+                if resp.status() != StatusCode::OK {
+                    if resp.status() == StatusCode::NO_CONTENT {
+                        // retry the url when it is 204
+                        if let Some(retry_after) = resp
+                            .headers()
+                            .get(RETRY_AFTER)
+                            .and_then(|r| r.to_str().ok())
+                        {
+                            let mut retry_after = if let Ok(r) = retry_after.parse::<u64>() {
+                                r
+                            } else {
+                                if let Ok(d) = DateTime::parse_from_rfc2822(retry_after) {
+                                    d.signed_duration_since(Utc::now()).num_seconds() as u64;
+                                }
+                                1
+                            };
+                            retry_after = retry_after.clamp(1, 15);
+                            time::sleep(Duration::from_secs(retry_after)).await;
+                        }
+                        continue;
+                    } else {
+                        tracing::debug!(
+                            "Error response, url: {url}, status: {}, message: {}",
+                            resp.status(),
+                            resp.text()
+                                .await
+                                .unwrap_or_else(|_| "Unknown error".to_string())
+                        );
+                        anyhow::bail!("Calling url[{url}] error");
+                    }
                 }
 
                 let resp: HttpApiResponse = resp.json().await?;
@@ -175,18 +199,18 @@ pub mod http_api {
                     candidates.push(CustomActionCandidate::Keys(group.keys));
                 }
                 tx.unbounded_send(
-                    KeyboardEvent::ExtendCustomActionCandidate((serial, candidates)).into(),
+                    KeyboardEvent::PushFrontCustomActionCandidate((serial, candidates)).into(),
                 )?;
 
                 if let Some(next) = resp.next {
                     url = next.parse()?;
+                    method = Method::GET;
                 } else {
                     break;
                 }
             }
-            //reqwest::get()
         }
-        todo!()
+        Ok(())
     }
 }
 
