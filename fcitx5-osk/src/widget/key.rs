@@ -7,7 +7,6 @@ use iced::{
         Clipboard, Layout, Shell, Widget,
     },
     border::Radius,
-    event::Status,
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
         Interaction as MouseInteraction,
@@ -249,7 +248,7 @@ where
             shell,
             viewport,
         );
-        if shell.event_status() == Status::Captured {
+        if shell.is_event_captured() {
             return;
         }
 
@@ -596,7 +595,7 @@ where
             shell,
             viewport,
         );
-        if shell.event_status() == Status::Captured {
+        if shell.is_event_captured() {
             return;
         }
 
@@ -613,18 +612,19 @@ where
         if finger == self.finger {
             let state: &mut PopupKeyState = tree.state.downcast_mut();
             let is_hovered = layout.bounds().contains(position);
+            if is_hovered {
+                shell.capture_event();
+            }
             match (is_hovered, state.is_active, &self.on_enter, &self.on_exit) {
                 (true, false, Some(on_enter), _) => {
                     state.is_active = true;
                     shell.request_redraw();
                     shell.publish(on_enter.clone());
-                    shell.capture_event();
                 }
                 (false, true, _, Some(on_exit)) => {
                     state.is_active = false;
                     shell.request_redraw();
                     shell.publish(on_exit.clone());
-                    shell.capture_event();
                 }
                 _ => {}
             }

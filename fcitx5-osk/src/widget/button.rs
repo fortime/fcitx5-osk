@@ -7,7 +7,6 @@ use iced::{
         Clipboard, Layout, Shell, Widget,
     },
     border::{self, Radius},
-    event::Status,
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
         Interaction as MouseInteraction,
@@ -251,7 +250,7 @@ where
             shell,
             viewport,
         );
-        if shell.event_status() == Status::Captured {
+        if shell.is_event_captured() {
             return;
         }
 
