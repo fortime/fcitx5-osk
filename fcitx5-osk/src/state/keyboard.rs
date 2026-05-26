@@ -559,7 +559,7 @@ impl KeyboardState {
         match custom_action.action() {
             CustomActionKind::Static { groups } => {
                 let candidates = groups
-                    .into_iter()
+                    .iter()
                     .map(|g| CustomActionCandidate::Keys(g.keys().clone()))
                     .collect();
                 Task::done(
@@ -1068,14 +1068,14 @@ impl KeyboardBackend {
             .iter()
             .map(|c| match c {
                 CustomActionCandidate::Prompt(p) => p
-                    .into_iter()
+                    .iter()
                     .map(|(text, f)| (text.clone(), Some(f.unwrap_or(default_font))))
                     .collect(),
                 CustomActionCandidate::Keys(keys) => {
                     if keys.is_empty() {
                         vec![("INVALID KEYS".to_string(), Some(default_font))]
                     } else {
-                        Self::combo_keys_to_candidate_text(&**keys, default_font)
+                        Self::combo_keys_to_candidate_text(keys, default_font)
                     }
                 }
             })

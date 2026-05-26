@@ -1032,8 +1032,8 @@ impl ToolbarLayout {
         }
     }
 
-    fn custom_action_element<'a, 'b>(
-        &'a self,
+    fn custom_action_element<'b>(
+        &self,
         font_size: KLength,
         custom_action_name: &'b Arc<str>,
     ) -> Element<'b, Message> {
