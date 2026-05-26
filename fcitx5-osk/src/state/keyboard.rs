@@ -406,34 +406,33 @@ impl KeyboardState {
             let middle = Text::new(primary.symbol())
                 .shaping(Shaping::Advanced)
                 .font(primary.font().unwrap_or(self.font));
-            let mut top = Row::new().spacing(unit);
+            let mut top = Row::new().spacing(unit / 2.);
             let mut has_secondary = false;
             for secondary in secondary
                 .into_iter()
                 .chain(secondary_key_values.iter().skip(1))
             {
                 has_secondary = true;
-                let padding = Text::new(" ").size(TEXT_PADDING_LENGTH as f32);
                 let text = Text::new(secondary.symbol())
                     .font(secondary.font().unwrap_or(self.font))
                     .shaping(Shaping::Advanced)
-                    .width(inner_width)
                     .height(secondary_height)
                     .size(secondary_text_size)
-                    .align_y(Vertical::Center)
-                    .align_x(Horizontal::Right);
-                top = top.push(padding).push(text);
+                    .align_y(Vertical::Center);
+                top = top.push(text);
             }
             let key_value = key.key_value(is_shift_set, is_caps_lock_set);
             if has_secondary {
-                column = column.push(top.height(secondary_height)).push(
-                    middle
-                        .width(inner_width)
-                        .height(primary_height)
-                        .size(primary_text_size)
-                        .align_y(Vertical::Center)
-                        .align_x(Horizontal::Center),
-                );
+                column = column
+                    .push(Container::new(top).align_right(inner_width))
+                    .push(
+                        middle
+                            .width(inner_width)
+                            .height(primary_height)
+                            .size(primary_text_size)
+                            .align_y(Vertical::Center)
+                            .align_x(Horizontal::Center),
+                    );
             } else {
                 // If there is no secondary, set it in the middle of the key
                 column = column.push(
