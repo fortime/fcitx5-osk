@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     mem,
+    ops::Range,
     rc::Rc,
     sync::{
         atomic::{AtomicU32, Ordering},
@@ -569,7 +570,10 @@ impl KeyboardState {
             CustomActionKind::Static { groups } => {
                 let candidates = groups
                     .iter()
-                    .map(|g| CustomActionCandidate::Keys(g.keys().clone()))
+                    .map(|g| CustomActionCandidate::Keys {
+                        mask_range: None,
+                        keys: g.keys().clone(),
+                    })
                     .collect();
                 Task::done(
                     KeyboardEvent::PushFrontCustomActionCandidate((serial, candidates)).into(),
@@ -1053,12 +1057,17 @@ impl KeyboardBackend {
     }
 
     fn combo_keys_to_candidate_text(
+        mask_range: Option<&Range<usize>>,
         combo_keys: &[ComboKey],
         default_font: Font,
     ) -> Vec<(String, Option<Font>)> {
         let mut text = vec![];
-        for key in combo_keys {
-            text.push((key.to_string(), Some(key.font().unwrap_or(default_font))));
+        for (idx, key) in combo_keys.iter().enumerate() {
+            if mask_range.filter(|r| r.contains(&idx)).is_some() {
+                text.push(("*".to_string(), Some(default_font)));
+            } else {
+                text.push((key.to_string(), key.font().or(Some(default_font))));
+            }
             text.push((" + ".to_string(), Some(default_font)));
         }
         text.pop();
@@ -1068,7 +1077,11 @@ impl KeyboardBackend {
     fn combo_keys_message(combo_keys: &[ComboKey], default_font: Font) -> Message {
         let mut candidate_text_list = vec![];
         if !combo_keys.is_empty() {
-            candidate_text_list.push(Self::combo_keys_to_candidate_text(combo_keys, default_font));
+            candidate_text_list.push(Self::combo_keys_to_candidate_text(
+                None,
+                combo_keys,
+                default_font,
+            ));
         }
         Self::candidate_area_state_message(candidate_text_list)
     }
@@ -1085,11 +1098,11 @@ impl KeyboardBackend {
                     .iter()
                     .map(|(text, f)| (text.clone(), Some(f.unwrap_or(default_font))))
                     .collect(),
-                CustomActionCandidate::Keys(keys) => {
+                CustomActionCandidate::Keys { mask_range, keys } => {
                     if keys.is_empty() {
                         vec![("INVALID KEYS".to_string(), Some(default_font))]
                     } else {
-                        Self::combo_keys_to_candidate_text(keys, default_font)
+                        Self::combo_keys_to_candidate_text(mask_range.as_ref(), keys, default_font)
                     }
                 }
             })
@@ -1200,16 +1213,20 @@ impl KeyboardBackend {
     fn select_candidate(&self, state: &mut KeyboardBackendState, cursor: usize) -> Task<Message> {
         if !state.custom_action_candidates.is_empty() {
             if let Some(candidate) = state.custom_action_candidates.get_mut(cursor) {
-                if let CustomActionCandidate::Keys(keys) = candidate {
-                    mem::swap(keys, &mut state.repeat_keys);
+                if let CustomActionCandidate::Keys { mask_range, keys } = candidate {
+                    // Don't record masked keys
+                    let keys = if mask_range.is_none() {
+                        mem::swap(keys, &mut state.repeat_keys);
+                        state.repeat_keys.clone()
+                    } else {
+                        mem::take(keys)
+                    };
                     // Select a candidate then clear
                     state.custom_action_candidates.clear();
-                    return self
-                        .process_combo_keys(state.repeat_keys.clone())
-                        .map(|r| match r {
-                            Ok(_) => Self::candidate_area_state_message(vec![]),
-                            Err(e) => app::error_with_context(e, "error to process combo keys"),
-                        });
+                    return self.process_combo_keys(keys).map(|r| match r {
+                        Ok(_) => Self::candidate_area_state_message(vec![]),
+                        Err(e) => app::error_with_context(e, "error to process combo keys"),
+                    });
                 } else {
                     // Do nothing
                 }

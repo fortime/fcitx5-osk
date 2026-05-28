@@ -1,4 +1,4 @@
-#[cfg(feature = "custom-action-http-api")]
+use std::ops::Range;
 use std::path::PathBuf;
 
 use getset::Getters;
@@ -7,12 +7,15 @@ use serde::Deserialize;
 
 #[cfg(feature = "custom-action-http-api")]
 pub mod http_api {
-    use std::{collections::HashMap, result::Result as StdResult, sync::Arc, time::Duration};
+    use std::{
+        collections::HashMap, mem, ops::Deref, result::Result as StdResult, sync::Arc,
+        time::Duration,
+    };
 
     use anyhow::Result;
-    use base64::{prelude::BASE64_STANDARD_NO_PAD, Engine as _};
     use chrono::{DateTime, Utc};
     use iced::futures::channel::mpsc::UnboundedSender;
+    use openssl::pkey::{PKey, Private};
     use reqwest::{
         header::{HeaderMap, HeaderName, RETRY_AFTER},
         Method, StatusCode, Url,
@@ -21,7 +24,11 @@ pub mod http_api {
     use tokio::time;
 
     use crate::{
-        app::Message, custom_action::CustomActionCandidate, font, key_set::ComboKeyGroup,
+        app::Message,
+        custom_action::CustomActionCandidate,
+        font,
+        key_set::{ComboKey, ComboKeyGroup, KeyValue},
+        misc::secret_envelope,
         state::KeyboardEvent,
     };
 
@@ -40,26 +47,6 @@ pub mod http_api {
         }
     }
 
-    struct BodyWrapper(Option<Vec<u8>>);
-
-    impl<'de> Deserialize<'de> for BodyWrapper {
-        fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            let body: Option<&str> = Deserialize::deserialize(deserializer)?;
-            if let Some(body) = body {
-                if let Ok(body) = BASE64_STANDARD_NO_PAD.decode(body) {
-                    Ok(BodyWrapper(Some(body)))
-                } else {
-                    Err(Error::custom("Invalid base64 encoding of body"))
-                }
-            } else {
-                Ok(BodyWrapper(None))
-            }
-        }
-    }
-
     #[derive(Deserialize)]
     struct Target {
         headers_name: Option<String>,
@@ -67,6 +54,9 @@ pub mod http_api {
         query_name: Option<String>,
         url: String,
         method: MethodWrapper,
+        need_encrypt: Option<bool>,
+        need_enter: Option<bool>,
+        need_mask: Option<bool>,
     }
 
     #[derive(Deserialize)]
@@ -76,7 +66,7 @@ pub mod http_api {
         #[serde(default)]
         queries: HashMap<String, HashMap<String, String>>,
         #[serde(default)]
-        bodies: HashMap<String, BodyWrapper>,
+        bodies: HashMap<String, HashMap<String, String>>,
         targets: Vec<Target>,
     }
 
@@ -101,7 +91,28 @@ pub mod http_api {
     pub struct HttpApiResponse {
         prompts: Vec<Vec<(String, Option<String>)>>,
         groups: Vec<ComboKeyGroup>,
+        secret: Option<String>,
         next: Option<String>,
+    }
+
+    struct ZeroizingString(String);
+
+    impl Drop for ZeroizingString {
+        fn drop(&mut self) {
+            let mut s = mem::take(&mut self.0);
+            unsafe {
+                // Safety, s will be dropped immediately
+                s.as_bytes_mut().fill(0);
+            }
+        }
+    }
+
+    impl Deref for ZeroizingString {
+        type Target = str;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
     }
 
     pub async fn execute(
@@ -131,14 +142,23 @@ pub mod http_api {
                 .as_ref()
                 .and_then(|n| params.queries.get(n))
                 .unwrap_or(&default_query);
-            let mut body = target
-                .body_name
-                .as_ref()
-                .and_then(|n| params.bodies.get(n).and_then(|b| b.0.as_ref()));
+            let body = target.body_name.as_ref().and_then(|n| params.bodies.get(n));
 
             let mut url: Url = target.url.parse()?;
             url.query_pairs_mut().extend_pairs(query.iter());
             let mut method = target.method.0.clone();
+
+            let key_pair = if target.need_encrypt.unwrap_or_default() {
+                let pri_key = secret_envelope::new_private_key()?;
+                let pub_key_pem = String::from_utf8(pri_key.public_key_to_pem()?)?;
+                Some((pri_key, pub_key_pem))
+            } else {
+                None
+            };
+            // Always mask if it needs encrypt
+            let need_mask =
+                target.need_encrypt.unwrap_or_default() || target.need_mask.unwrap_or_default();
+            let need_enter = target.need_enter.unwrap_or_default();
 
             loop {
                 if should_stop(serial) {
@@ -147,9 +167,12 @@ pub mod http_api {
                 }
                 let mut req_builder = client.request(method.clone(), url.clone());
                 req_builder = req_builder.headers(headers.clone());
-                // body is used once
-                if let Some(body) = body.take() {
-                    req_builder = req_builder.body(body.clone());
+                if method == Method::POST || method == Method::PUT {
+                    let mut body = body.cloned().unwrap_or_default();
+                    if let Some((_, pub_key_pem)) = &key_pair {
+                        body.insert("pub_key".to_string(), pub_key_pem.clone());
+                    }
+                    req_builder = req_builder.json(&body);
                 }
 
                 let resp = req_builder.send().await?;
@@ -195,8 +218,39 @@ pub mod http_api {
                         .collect();
                     candidates.push(CustomActionCandidate::Prompt(text));
                 }
-                for group in resp.groups {
-                    candidates.push(CustomActionCandidate::Keys(group.keys));
+                for mut group in resp.groups {
+                    let mut keys = mem::take(&mut group.keys);
+                    let mask_range = if need_mask { Some(0..keys.len()) } else { None };
+                    // Don't mask enter
+                    if need_enter {
+                        if let Some(kv) = KeyValue::from_char('\n') {
+                            keys.push(ComboKey::Key(kv));
+                        }
+                    }
+                    candidates.push(CustomActionCandidate::Keys { mask_range, keys });
+                }
+                if let Some(secret) = resp.secret {
+                    let text = if let Some((pri_key, _)) = &key_pair {
+                        decrypt(pri_key, &secret)?
+                    } else {
+                        anyhow::bail!("A secret is returned, but `need_encrypt` is false");
+                    };
+                    let mut keys = Vec::with_capacity(text.len());
+                    for c in text.chars() {
+                        if let Some(kv) = KeyValue::from_char(c) {
+                            keys.push(ComboKey::Key(kv));
+                        } else {
+                            anyhow::bail!("Can't convert char[{c}] to key event");
+                        }
+                    }
+                    let mask_range = if need_mask { Some(0..keys.len()) } else { None };
+                    // Don't mask enter
+                    if need_enter {
+                        if let Some(kv) = KeyValue::from_char('\n') {
+                            keys.push(ComboKey::Key(kv));
+                        }
+                    }
+                    candidates.push(CustomActionCandidate::Keys { mask_range, keys });
                 }
                 tx.unbounded_send(
                     KeyboardEvent::PushFrontCustomActionCandidate((serial, candidates)).into(),
@@ -211,6 +265,18 @@ pub mod http_api {
             }
         }
         Ok(())
+    }
+
+    fn decrypt(pri_key: &PKey<Private>, secret: &str) -> Result<ZeroizingString> {
+        let data = secret_envelope::decrypt(pri_key, secret)?;
+        match String::from_utf8(data) {
+            Ok(s) => Ok(ZeroizingString(s)),
+            Err(e) => {
+                // zeroize
+                e.into_bytes().fill(0);
+                anyhow::bail!("Secret isn't a valid utf8 string")
+            }
+        }
     }
 }
 
@@ -256,7 +322,9 @@ impl IdAndConfigPath for CustomAction {
 
 #[derive(Clone, Debug)]
 pub enum CustomActionCandidate {
-    #[allow(unused)]
     Prompt(Vec<(String, Option<Font>)>),
-    Keys(Vec<ComboKey>),
+    Keys {
+        mask_range: Option<Range<usize>>,
+        keys: Vec<ComboKey>,
+    },
 }

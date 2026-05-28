@@ -3,6 +3,9 @@ use std::{
     hash::{Hash, Hasher},
 };
 
+#[cfg(feature = "custom-action-http-api")]
+pub mod secret_envelope;
+
 pub struct NamedSubscriptionData<T> {
     name: Cow<'static, str>,
     data: T,

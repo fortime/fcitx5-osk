@@ -8,6 +8,8 @@ use iced::Font;
 static FONTS: OnceLock<Mutex<HashMap<String, &'static str>>> = OnceLock::new();
 static DEFAULT_NERD_FONT: Mutex<Font> = Mutex::new(Font::with_name("NotoSerif NF"));
 
+pub static DEFAULT_NERD_FONT_ID: &str = "fcitx5 osk nerd";
+
 fn fonts() -> &'static Mutex<HashMap<String, &'static str>> {
     FONTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -21,7 +23,7 @@ pub fn set_default_nerd_font(name: &str) {
 }
 
 pub fn load(name: &str) -> Font {
-    if name == "fcitx5 osk nerd" {
+    if name == DEFAULT_NERD_FONT_ID {
         return *DEFAULT_NERD_FONT
             .lock()
             .expect("DEFAULT_NERD_FONT is poisoned");

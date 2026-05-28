@@ -1,10 +1,11 @@
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter as FmtFormatter, Result as FmtResult},
+    mem::MaybeUninit,
     path::PathBuf,
     rc::Rc,
     result::Result as StdResult,
-    sync::Arc,
+    sync::{Arc, LazyLock, RwLock},
 };
 
 use getset::Getters;
@@ -15,7 +16,13 @@ use serde::{
 };
 use xkeysym::Keysym;
 
-use crate::{font, store::IdAndConfigPath};
+use crate::{
+    font::{self, DEFAULT_NERD_FONT_ID},
+    store::IdAndConfigPath,
+};
+
+static KEY_VALUE_POOL: LazyLock<Arc<RwLock<HashMap<char, KeyValue>>>> =
+    LazyLock::new(Default::default);
 
 #[derive(Deserialize)]
 struct RawKeyValue {
@@ -39,28 +46,196 @@ struct KeyValueInner {
     font: Option<Font>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct KeyValue {
-    inner: Arc<KeyValueInner>,
+    inner: MaybeUninit<Arc<KeyValueInner>>,
 }
 
 impl KeyValue {
+    fn inner(&self) -> &Arc<KeyValueInner> {
+        unsafe {
+            // # Safety, it will be always valid before drop
+            self.inner.assume_init_ref()
+        }
+    }
+
     pub fn symbol(&self) -> &str {
-        &self.inner.symbol
+        &self.inner().symbol
     }
 
     pub fn keysym(&self) -> Keysym {
-        self.inner.keysym
+        self.inner().keysym
     }
 
     pub fn keycode(&self) -> Option<i16> {
-        self.inner.keycode
+        self.inner().keycode
     }
 
     pub fn font(&self) -> Option<Font> {
-        self.inner.font
+        self.inner().font
+    }
+
+    pub fn from_char(c: char) -> Option<Self> {
+        match KEY_VALUE_POOL.read() {
+            Ok(p) => {
+                let kv = p.get(&c);
+                if kv.is_some() {
+                    return kv.cloned();
+                }
+            }
+            Err(_) => tracing::warn!("KEY_VALUE_POOL is poisoned, try creating a new KeyValue"),
+        }
+
+        let (kc, s) = match c {
+            '1' => (10, "1"),
+            '2' => (11, "2"),
+            '3' => (12, "3"),
+            '4' => (13, "4"),
+            '5' => (14, "5"),
+            '6' => (15, "6"),
+            '7' => (16, "7"),
+            '8' => (17, "8"),
+            '9' => (18, "9"),
+            '0' => (19, "0"),
+            'q' => (24, "q"),
+            'w' => (25, "w"),
+            'e' => (26, "e"),
+            'r' => (27, "r"),
+            't' => (28, "t"),
+            'y' => (29, "y"),
+            'u' => (30, "u"),
+            'i' => (31, "i"),
+            'o' => (32, "o"),
+            'p' => (33, "p"),
+            'a' => (38, "a"),
+            's' => (39, "s"),
+            'd' => (40, "d"),
+            'f' => (41, "f"),
+            'g' => (42, "g"),
+            'h' => (43, "h"),
+            'j' => (44, "j"),
+            'k' => (45, "k"),
+            'l' => (46, "l"),
+            'z' => (52, "z"),
+            'x' => (53, "x"),
+            'c' => (54, "c"),
+            'v' => (55, "v"),
+            'b' => (56, "b"),
+            'n' => (57, "n"),
+            'm' => (58, "m"),
+            'Q' => (-24, "Q"),
+            'W' => (-25, "W"),
+            'E' => (-26, "E"),
+            'R' => (-27, "R"),
+            'T' => (-28, "T"),
+            'Y' => (-29, "Y"),
+            'U' => (-30, "U"),
+            'I' => (-31, "I"),
+            'O' => (-32, "O"),
+            'P' => (-33, "P"),
+            'A' => (-38, "A"),
+            'S' => (-39, "S"),
+            'D' => (-40, "D"),
+            'F' => (-41, "F"),
+            'G' => (-42, "G"),
+            'H' => (-43, "H"),
+            'J' => (-44, "J"),
+            'K' => (-45, "K"),
+            'L' => (-46, "L"),
+            'Z' => (-52, "Z"),
+            'X' => (-53, "X"),
+            'C' => (-54, "C"),
+            'V' => (-55, "V"),
+            'B' => (-56, "B"),
+            'N' => (-57, "N"),
+            'M' => (-58, "M"),
+            ' ' => (65, " "),
+            '!' => (-10, "!"),
+            '@' => (-11, "@"),
+            '#' => (-12, "#"),
+            '$' => (-13, "$"),
+            '%' => (-14, "%"),
+            '^' => (-15, "^"),
+            '&' => (-16, "&"),
+            '*' => (-17, "*"),
+            '(' => (-18, "("),
+            ')' => (-19, ")"),
+            '-' => (20, "-"),
+            '_' => (-20, "_"),
+            '=' => (21, "="),
+            '+' => (-21, "+"),
+            '[' => (34, "["),
+            '{' => (-34, "{"),
+            ']' => (35, "]"),
+            '}' => (-35, "}"),
+            '\\' => (51, "\\"),
+            '|' => (-51, "|"),
+            ';' => (47, ";"),
+            ':' => (-47, ":"),
+            '\'' => (48, "'"),
+            '"' => (-48, "\""),
+            ',' => (59, ","),
+            '<' => (-59, "<"),
+            '.' => (60, "."),
+            '>' => (-60, ">"),
+            '/' => (61, "/"),
+            '?' => (-61, "?"),
+            '`' => (49, "`"),
+            '~' => (-49, "~"),
+            '\n' => (36, "󰌑"),
+            _ => {
+                tracing::warn!("Unsupport char[{c}]");
+                return None;
+            }
+        };
+
+        let font = if c == '\n' {
+            Some(font::load(DEFAULT_NERD_FONT_ID))
+        } else {
+            None
+        };
+
+        let kv = Self {
+            inner: MaybeUninit::new(Arc::new(KeyValueInner {
+                symbol: s.to_string(),
+                keysym: Keysym::from_char(c),
+                keycode: Some(kc),
+                font,
+            })),
+        };
+
+        let _ = KEY_VALUE_POOL.write().map(|mut p| p.insert(c, kv.clone()));
+
+        Some(kv)
     }
 }
+
+impl Drop for KeyValue {
+    fn drop(&mut self) {
+        unsafe {
+            // # Safety, it will be always valid before drop
+            self.inner.assume_init_drop();
+        }
+        // zeroize
+        self.inner = MaybeUninit::zeroed();
+    }
+}
+
+impl Clone for KeyValue {
+    fn clone(&self) -> Self {
+        Self {
+            inner: MaybeUninit::new(self.inner().clone()),
+        }
+    }
+}
+
+impl PartialEq for KeyValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner() == other.inner()
+    }
+}
+
+impl Eq for KeyValue {}
 
 impl<'de> Deserialize<'de> for KeyValue {
     fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
@@ -98,12 +273,12 @@ impl<'de> Deserialize<'de> for KeyValue {
         }
         tracing::debug!("symbol of {:x}: {}", u32::from(keysym), symbol);
         Ok(Self {
-            inner: Arc::new(KeyValueInner {
+            inner: MaybeUninit::new(Arc::new(KeyValueInner {
                 symbol,
                 keysym,
                 keycode: raw.keycode,
                 font: raw.font.as_deref().map(font::load),
-            }),
+            })),
         })
     }
 }
