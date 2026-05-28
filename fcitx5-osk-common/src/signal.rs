@@ -46,7 +46,7 @@ pub async fn try_default_signals() -> Result<Signals> {
         SignalKind::interrupt(),
         SignalKind::terminate(),
         SignalKind::hangup(),
-        SignalKind::pipe(),
+        //SignalKind::pipe(),
         SignalKind::quit(),
     ])
     .await
