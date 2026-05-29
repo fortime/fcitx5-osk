@@ -15,7 +15,7 @@ use iced::{
 use zbus::Result as ZbusResult;
 
 use crate::{
-    app::{self, error_with_context, MapTask, Message},
+    app::{self, error_with_context, KeyboardNotification, MapTask, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
     layout::{KLength, ToElementCommonParams},
     store::Store,
@@ -242,7 +242,7 @@ where
 
     pub fn on_store_event(&mut self, event: StoreEvent) -> Task<WM::Message> {
         match event {
-            StoreEvent::Load => match Store::load(self.config.config()) {
+            StoreEvent::Load(notify) => match Store::load(self.config.config()) {
                 Ok(s) => {
                     self.store = s;
                     // Update enabled custom actions
@@ -253,11 +253,19 @@ where
                     // Update theme after store is changed
                     self.sync_theme(None);
                     // Update layout by cur im after store is changed
-                    self.update_layout_by_im(None)
-                        .unwrap_or_else(Message::from_nothing)
+                    let mut task = self
+                        .update_layout_by_im(None)
+                        .unwrap_or_else(Message::from_nothing);
+                    if notify {
+                        task = task.chain(Task::done(
+                            Message::from(KeyboardNotification::Info("Assets loaded".to_string()))
+                                .into(),
+                        ));
+                    }
+                    task
                 }
                 Err(e) => {
-                    let msg = format!("Unable to load assests, caused by: {e:?}");
+                    let msg = format!("Unable to load assets, caused by: {e:?}");
                     Task::done(error_with_context(e, msg).into())
                 }
             },
@@ -402,7 +410,7 @@ impl From<ThemeEvent> for Message {
 
 #[derive(Clone, Debug)]
 pub enum StoreEvent {
-    Load,
+    Load(bool),
 }
 
 impl From<StoreEvent> for Message {

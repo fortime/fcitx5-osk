@@ -105,6 +105,7 @@ trait NotificationDialogContent {
 
 #[derive(Clone, Debug)]
 pub enum KeyboardNotification {
+    Info(String),
     Error(Arc<Error>),
     Fatal(Arc<Error>),
 }
@@ -112,6 +113,7 @@ pub enum KeyboardNotification {
 impl NotificationDialogContent for &KeyboardNotification {
     fn msg(&self) -> String {
         match self {
+            KeyboardNotification::Info(msg) => msg.to_string(),
             KeyboardNotification::Error(e) => format!("Error: {e}"),
             KeyboardNotification::Fatal(e) => format!("Fatal error: {e}"),
         }
@@ -119,6 +121,7 @@ impl NotificationDialogContent for &KeyboardNotification {
 
     fn button_text(&self) -> String {
         match self {
+            KeyboardNotification::Info(_) => "Ok".to_string(),
             KeyboardNotification::Error(_) => "Close".to_string(),
             KeyboardNotification::Fatal(_) => "Exit".to_string(),
         }
@@ -138,6 +141,7 @@ impl KeyboardNotification {
 
     fn priority(&self) -> u8 {
         match self {
+            KeyboardNotification::Info(_) => 3,
             KeyboardNotification::Error(_) => 2,
             KeyboardNotification::Fatal(_) => 1,
         }
@@ -248,7 +252,7 @@ impl<WM> Keyboard<WM> {
             detect_theme_enabled,
             tx,
         );
-        let mut init_task = Task::done(StoreEvent::Load.into());
+        let mut init_task = Task::done(StoreEvent::Load(false).into());
         if !wait_for_socket {
             // open indicator if it is not waiting for a socket.
             init_task = Task::done(WindowManagerEvent::OpenIndicator.into());
@@ -269,6 +273,7 @@ impl<WM> Keyboard<WM> {
 
     pub fn handle_error_message(&mut self, e: KeyboardNotification) {
         match &e {
+            KeyboardNotification::Info(_) => {}
             KeyboardNotification::Error(e) => tracing::error!("Error: {e:#}"),
             KeyboardNotification::Fatal(e) => tracing::error!("Fatal error: {e:?}"),
         }

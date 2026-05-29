@@ -891,7 +891,7 @@ impl ToolbarLayout {
             ExtButton::new(Text::new("Reload").size(font_size))
                 .border_radius(BORDER_RADIUS)
                 .padding(DEFAULT_PADDING)
-                .on_release_with(Some(|| StoreEvent::Load.into())),
+                .on_release_with(Some(|| StoreEvent::Load(true).into())),
         );
         row = row.push(self.combo_action_element(params, unit, font_size));
         row = row.push(self.repeat_action_element(params, unit, font_size));
