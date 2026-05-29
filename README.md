@@ -4,13 +4,15 @@
 
 Fcitx 5 Osk is an on-screen keyboard designed to work with Fcitx 5. It provides a virtual keyboard for inputting text across various environments.
 
-***I have only test it on kwin6 wayland/xwayland.***
+***I have only tested it on kwin6 wayland/xwayland.***
 
 * landscape view
 ![landscape view](assets/landscape.png)
 
 * portrait view
 ![portrait view](assets/portrait.png)
+
+See [CHANGELOG.md](CHANGELOG.md) for changes since `0.1.0`.
 
 ## Features
 
@@ -21,6 +23,7 @@ Fcitx 5 Osk is an on-screen keyboard designed to work with Fcitx 5. It provides 
 * Support custom layouts and keys.
 * Support theming.
 * Support dock and float mode.
+* Support manual mode, a quick action bar, combo mode, repeat actions, and custom actions.
 
 ## Fcitx 5 Osk Kwin Launcher
 
@@ -32,7 +35,7 @@ Fcitx 5 Osk Kwin Launcher is a critical component that enables Fcitx 5 Osk to fu
 
 ## Fcitx 5 Osk Key Helper
 
-Since fcitx5 doesn't forward modifier events correctly on Wayland, uppercase letters cannot be input. I have summitted a [PR fcitx/fcitx5#1292](https://github.com/fcitx/fcitx5/pull/1292), but it looks like it won't be merged. So, I came up a workaround: create a keyboard with evdev and use this keyboard to handle modifier events. This is what `fcitx5-osk-key-helper` does.
+Since fcitx5 doesn't forward modifier events correctly on Wayland, uppercase letters cannot be input. I have submitted a [PR fcitx/fcitx5#1292](https://github.com/fcitx/fcitx5/pull/1292), but it looks like it won't be merged. So, I came up a workaround: create a keyboard with evdev and use this keyboard to handle modifier events. This is what `fcitx5-osk-key-helper` does.
 
 ### Caveat
 
@@ -119,11 +122,11 @@ fcitx5-osk force-show
 
 Or you can click "Fcitx 5 Osk" in the application menu directly. You can add a quick launcher in the panel too.
 
-### Custom Layouts, Keys and Themes
+### Custom Layouts, Keys, Themes and Actions
 
-You can create your own layouts, keys and themes, and specify the layout to be used in a specified input method. Keys are organized by a key set.
+You can create your own layouts, keys, themes and custom actions, and specify the layout to be used in a specified input method. Keys are organized by a key set.
 
-* By default, `fcitx5-osk` will search toml files in 'fcitx5-osk/layouts', 'fcitx5-osk/key\_sets' and 'fcitx5-osk/themes' under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. If `$XDG_CONFIG_HOME` is not set, `$HOME/.config` will be used. If there are multiple config has the same name, the latter one has higher priority.
+* By default, `fcitx5-osk` will search toml files in `fcitx5-osk/layouts`, `fcitx5-osk/key_sets`, `fcitx5-osk/themes` and `fcitx5-osk/custom_actions` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. If `$XDG_CONFIG_HOME` is not set, `$HOME/.config` will be used. If there are multiple configs with the same name, the latter one has higher priority.
 
 * Set the layout to be used 
 ```toml
@@ -211,7 +214,7 @@ text = "#232629"
 primary = "#3daee9"
 success = "#27ae60"
 danger = "#da4453"
-waring = "#f67400"
+warning = "#f67400"
 
 # This is the extended palette for advanced settings
 # all fields of `extended_palette` must be provided if you add the `extended_palette` section
@@ -293,7 +296,138 @@ text = "#232629"
 color = "#ffffff"
 text = "#232629"
 ```
+
+#### Custom Action Toml File
+
+Custom actions are shown in the quick action bar. Put action files under `${XDG_CONFIG_HOME:-$HOME/.config}/fcitx5-osk/custom_actions`, then enable them in `${XDG_CONFIG_HOME:-$HOME/.config}/fcitx5-osk/config.toml`:
+
+```toml
+quick_action_bar_state = "On"
+custom_actions = ["Ctrl+"]
 ```
+
+`quick_action_bar_state` can be `Off`, `On` or `Toggle`. The action name in `custom_actions` must match the `name` field in the action file.
+
+Here is a static action that provides `Ctrl+C` and `Ctrl+V` candidates:
+
+```toml
+# ~/.config/fcitx5-osk/custom_actions/ctrl_plus.toml
+name = "Ctrl+"
+
+[action]
+type = "Static"
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffe3
+s = "Ctrl"
+kc = 37
+
+[[action.groups.keys]]
+type = "Key"
+c = "c"
+kc = 54
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffe3
+s = "Ctrl"
+kc = 37
+
+[[action.groups.keys]]
+type = "Key"
+c = "v"
+kc = 55
+```
+
+Each `[[action.groups]]` entry creates one candidate. Each key in a group has `type = "Key"` and uses the same fields as a key set key value:
+
+* `c`: a character, such as `"c"` or `"v"`.
+* `ks`: an X keysym value, such as `0xffe3` for Ctrl.
+* `s`: the symbol shown in the UI.
+* `kc`: the X11 keycode. A negative keycode means Shift should be pressed.
+* `f`: optional font name or font id.
+
+You can also use `type = "Release"` to release the last pressed key in combo mode, or `type = "ReleaseAll"` to release all pressed keys.
+
+##### `HttpApi` Custom Actions
+
+`HttpApi` custom actions are enabled by default at build time. They request candidates from an HTTP endpoint, then show the returned prompts or key groups in the candidate area. Use this for integrations such as OTP or password providers. The [otp-push](https://github.com/fortime/otp-push) project provides a server for requesting and returning OTP or secret values for this workflow.
+
+Installed packages may provide template actions, [otp.toml](pkg/share/fcitx5-osk/custom_actions/otp.toml) and [pw.toml](pkg/share/fcitx5-osk/custom_actions/pw.toml), under `/usr/share/fcitx5-osk/custom_actions/`. Link the template into your user config folder and put private values in a drop-in directory next to the linked file:
+
+```bash
+mkdir -p ~/.config/fcitx5-osk/custom_actions
+ln -s /usr/share/fcitx5-osk/custom_actions/otp.toml ~/.config/fcitx5-osk/custom_actions/otp.toml
+mkdir -p ~/.config/fcitx5-osk/custom_actions/otp.toml.d
+```
+
+Then create a drop-in file to override user-specific settings:
+
+```toml
+# ~/.config/fcitx5-osk/custom_actions/otp.toml.d/user.toml
+name = "user-overridden-name"
+
+[action.headers.auth]
+X-Api-Token = ["your-token"]
+```
+
+Finally, enable the action in `${XDG_CONFIG_HOME:-$HOME/.config}/fcitx5-osk/config.toml`:
+
+```toml
+quick_action_bar_state = "On"
+custom_actions = ["OTP"]
+```
+
+For password-style actions that need encrypted responses, use the same pattern with the `pw.toml` template:
+
+```bash
+ln -s /usr/share/fcitx5-osk/custom_actions/pw.toml ~/.config/fcitx5-osk/custom_actions/pw.toml
+mkdir -p ~/.config/fcitx5-osk/custom_actions/pw.toml.d
+```
+
+```toml
+# ~/.config/fcitx5-osk/custom_actions/pw.toml.d/user.toml
+name = "user-overridden-name"
+
+[action.headers.auth]
+X-Api-Token = ["your-token"]
+```
+
+A minimal `HttpApi` action looks like this:
+
+```toml
+name = "OTP"
+
+[action]
+type = "HttpApi"
+
+[action.headers.auth]
+X-Api-Token = ["your-token"]
+
+[[action.targets]]
+headers_name = "auth"
+url = "https://example.com/api/request"
+method = "POST"
+need_enter = true
+```
+
+The action supports shared `headers`, `queries` and `bodies` tables. Each target can select them with `headers_name`, `query_name` and `body_name`. `need_enter` appends Enter to returned key groups, `need_mask` hides candidate text, and `need_encrypt` requests an encrypted secret flow and always masks the secret.
+
+The HTTP response is JSON with these fields:
+
+```json
+{
+  "prompts": [[["Label", null]]],
+  "groups": [],
+  "secret": null,
+  "next": null
+}
+```
+
+`prompts` shows text candidates, `groups` returns key groups using the same `type = "Key"` shape as static custom actions, `secret` returns encrypted text for `need_encrypt = true`, and `next` makes the action continue polling with `GET`.
 
 ## Troubleshoot
 
@@ -313,4 +447,4 @@ With `QT_IM_MODULE` set, the virtual keyboard won't be shown in the SDDM login s
 * [ ] use `RefreshRequest` to implement long press event?
 * [x] support custom theme
 * [ ] support custom shape of key
-* [ ] support repeat key mode?
+* [x] support repeat key mode
