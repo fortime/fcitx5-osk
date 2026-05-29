@@ -1,0 +1,88 @@
+name = "FN"
+
+[action]
+type = "Static"
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffbe
+s = "F1"
+kc = 67
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffbf
+s = "F2"
+kc = 68
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc0
+s = "F3"
+kc = 69
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc1
+s = "F4"
+kc = 70
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc2
+s = "F5"
+kc = 71
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc3
+s = "F6"
+kc = 72
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc4
+s = "F7"
+kc = 73
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc5
+s = "F8"
+kc = 74
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc6
+s = "F9"
+kc = 75
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc7
+s = "F10"
+kc = 76
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc8
+s = "F11"
+kc = 95
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffc9
+s = "F12"
+kc = 96

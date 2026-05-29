@@ -1,0 +1,28 @@
+name = "Ctrl+"
+
+[action]
+type = "Static"
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffe3
+s = "Ctrl"
+kc = 37
+
+[[action.groups.keys]]
+type = "Key"
+c = "c"
+kc = 54
+
+[[action.groups]]
+[[action.groups.keys]]
+type = "Key"
+ks = 0xffe3
+s = "Ctrl"
+kc = 37
+
+[[action.groups.keys]]
+type = "Key"
+c = "v"
+kc = 55

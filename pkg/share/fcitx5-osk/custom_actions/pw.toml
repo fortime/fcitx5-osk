@@ -1,0 +1,14 @@
+name = "PW"
+
+[action]
+type = "HttpApi"
+
+[action.headers.auth]
+X-Api-Token = [ "xxx" ]
+
+[[action.targets]]
+headers_name = "auth"
+url = "https://otp-push.fortime.fyi:8443/api/client/otp/fcitx5-osk/request"
+method = "POST"
+need_encrypt = true
+need_enter = true
