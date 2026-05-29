@@ -407,7 +407,7 @@ type = "HttpApi"
 [action.headers.auth]
 X-Api-Token = ["your-token"]
 
-[[action.targets]]
+[action.targets.0]
 headers_name = "auth"
 url = "https://example.com/api/request"
 method = "POST"

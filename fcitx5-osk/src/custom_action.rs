@@ -20,7 +20,10 @@ pub mod http_api {
         Method, StatusCode, Url,
         header::{HeaderMap, HeaderName, RETRY_AFTER},
     };
-    use serde::{Deserialize, Deserializer, de::Error};
+    use serde::{
+        Deserialize, Deserializer,
+        de::{Error, Unexpected},
+    };
     use tokio::time;
 
     use crate::{
@@ -67,6 +70,7 @@ pub mod http_api {
         queries: HashMap<String, HashMap<String, String>>,
         #[serde(default)]
         bodies: HashMap<String, HashMap<String, String>>,
+        #[serde(deserialize_with = "deserialize_targets")]
         targets: Vec<Target>,
     }
 
@@ -273,6 +277,24 @@ pub mod http_api {
                 anyhow::bail!("Secret isn't a valid utf8 string")
             }
         }
+    }
+
+    fn deserialize_targets<'de, D>(deserializer: D) -> Result<Vec<Target>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let targets = <HashMap<String, Target>>::deserialize(deserializer)?;
+        let mut arr = Vec::with_capacity(targets.len());
+        for (idx, target) in targets {
+            arr.push((
+                idx.parse::<usize>().map_err(|_| {
+                    D::Error::invalid_value(Unexpected::Str(&idx), &"a str of usize")
+                })?,
+                target,
+            ));
+        }
+        arr.sort_unstable_by_key(|i| i.0);
+        Ok(arr.into_iter().map(|(_, target)| target).collect())
     }
 }
 

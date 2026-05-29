@@ -6,7 +6,7 @@ type = "HttpApi"
 [action.headers.auth]
 X-Api-Token = [ "xxx" ]
 
-[[action.targets]]
+[action.targets.0]
 headers_name = "auth"
 url = "https://otp-push.fortime.fyi:8443/api/client/otp/fcitx5-osk/request"
 method = "POST"
