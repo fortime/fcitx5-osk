@@ -35,7 +35,7 @@ use std::{
 };
 
 use crate::{
-    app::{KeyboardError, Message},
+    app::{KeyboardNotification, Message},
     config::{IndicatorDisplay, QuickActionBarState},
     dbus::server::ImPanelEvent,
     font,
@@ -1267,7 +1267,7 @@ where
                         value: v.to_string(),
                     })
                 } else {
-                    KeyboardError::Error(Arc::new(anyhow::anyhow!(
+                    KeyboardNotification::Error(Arc::new(anyhow::anyhow!(
                         r#"Invalid value for option["{}"]: {}"#,
                         key,
                         v

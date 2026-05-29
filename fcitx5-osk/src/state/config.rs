@@ -9,7 +9,7 @@ use iced::Task;
 use strum::IntoEnumIterator;
 
 use crate::{
-    app::{KeyboardError, Message},
+    app::{KeyboardNotification, Message},
     config::{Config, ConfigManager, IndicatorDisplay, Placement, QuickActionBarState},
     dbus::server::ImPanelEvent,
     layout::KLength,
@@ -445,7 +445,7 @@ impl ConfigState {
                             if let Ok(v) = value.parse::<f32>() {
                                 Message::from(WindowManagerEvent::UpdateWidth(v.into()))
                             } else {
-                                KeyboardError::Error(Arc::new(anyhow::anyhow!(
+                                KeyboardNotification::Error(Arc::new(anyhow::anyhow!(
                                     "{value} is not a f32"
                                 )))
                                 .into()

@@ -53,7 +53,7 @@ pub mod x11;
 #[derive(Clone, Debug)]
 pub enum Message {
     AfterError,
-    Error(KeyboardError),
+    Notification(KeyboardNotification),
     Fcitx5VirtualkeyboardImPanelEvent(Fcitx5VirtualkeyboardImPanelEvent),
     ImEvent(ImEvent),
     ImPanelEvent(ImPanelEvent),
@@ -97,59 +97,50 @@ where
     }
 }
 
-trait ErrorDialogContent {
-    fn err_msg(&self) -> String;
+trait NotificationDialogContent {
+    fn msg(&self) -> String;
 
     fn button_text(&self) -> String;
 }
 
 #[derive(Clone, Debug)]
-pub enum KeyboardError {
+pub enum KeyboardNotification {
     Error(Arc<Error>),
     Fatal(Arc<Error>),
 }
 
-impl ErrorDialogContent for &KeyboardError {
-    fn err_msg(&self) -> String {
+impl NotificationDialogContent for &KeyboardNotification {
+    fn msg(&self) -> String {
         match self {
-            KeyboardError::Error(e) => format!("Error: {e}"),
-            KeyboardError::Fatal(e) => format!("Fatal error: {e}"),
+            KeyboardNotification::Error(e) => format!("Error: {e}"),
+            KeyboardNotification::Fatal(e) => format!("Fatal error: {e}"),
         }
     }
 
     fn button_text(&self) -> String {
         match self {
-            KeyboardError::Error(_) => "Close".to_string(),
-            KeyboardError::Fatal(_) => "Exit".to_string(),
+            KeyboardNotification::Error(_) => "Close".to_string(),
+            KeyboardNotification::Fatal(_) => "Exit".to_string(),
         }
     }
 }
 
-impl ErrorDialogContent for &str {
-    fn err_msg(&self) -> String {
-        self.to_string()
-    }
-
-    fn button_text(&self) -> String {
-        "Close".to_string()
+impl From<KeyboardNotification> for Message {
+    fn from(value: KeyboardNotification) -> Self {
+        Self::Notification(value)
     }
 }
 
-impl From<KeyboardError> for Message {
-    fn from(value: KeyboardError) -> Self {
-        Self::Error(value)
-    }
-}
-
-impl KeyboardError {
+impl KeyboardNotification {
     fn is_priority_over(&self, other: &Self) -> bool {
-        if let KeyboardError::Fatal(_) = self {
-            return true;
+        self.priority() > other.priority()
+    }
+
+    fn priority(&self) -> u8 {
+        match self {
+            KeyboardNotification::Error(_) => 2,
+            KeyboardNotification::Fatal(_) => 1,
         }
-        if let KeyboardError::Fatal(_) = other {
-            return false;
-        }
-        true
     }
 }
 
@@ -222,7 +213,7 @@ impl AsyncAppState {
 
 pub struct Keyboard<WM> {
     state: State<WM>,
-    error: Option<KeyboardError>,
+    notification: Option<KeyboardNotification>,
     shutdown_flag: ShutdownFlag,
     shutdown_sent: bool,
     fcitx5_osk_service_client: Fcitx5OskServiceClient,
@@ -265,7 +256,7 @@ impl<WM> Keyboard<WM> {
         (
             Self {
                 state,
-                error: None,
+                notification: None,
                 shutdown_flag,
                 shutdown_sent: false,
                 fcitx5_osk_service_client,
@@ -276,20 +267,20 @@ impl<WM> Keyboard<WM> {
         )
     }
 
-    pub fn handle_error_message(&mut self, e: KeyboardError) {
+    pub fn handle_error_message(&mut self, e: KeyboardNotification) {
         match &e {
-            KeyboardError::Error(e) => tracing::error!("Error: {e:#}"),
-            KeyboardError::Fatal(e) => tracing::error!("Fatal error: {e:?}"),
+            KeyboardNotification::Error(e) => tracing::error!("Error: {e:#}"),
+            KeyboardNotification::Fatal(e) => tracing::error!("Fatal error: {e:?}"),
         }
-        if let Some(existing) = &self.error {
+        if let Some(existing) = &self.notification {
             if existing.is_priority_over(&e) {
                 tracing::warn!("skip error, error is drop: {:?}", e);
             } else {
                 tracing::warn!("overwrite existing error, error is drop: {:?}", existing);
-                self.error = Some(e);
+                self.notification = Some(e);
             }
         } else {
-            self.error = Some(e);
+            self.notification = Some(e);
         }
     }
 }
@@ -301,13 +292,13 @@ where
 {
     const TRANSPARENT_THEME_NAME: &str = "_transparent";
 
-    fn error_dialog<T: ErrorDialogContent>(&self, e: T) -> Element<'_, Message> {
+    fn notification_dialog<T: NotificationDialogContent>(&self, e: T) -> Element<'_, Message> {
         let font_size = self.state.window_manager().font_size();
-        let err_msg = e.err_msg();
+        let msg = e.msg();
         let button_text = e.button_text();
         Container::new(
             Column::new()
-                .push(Text::new(err_msg).size(font_size))
+                .push(Text::new(msg).size(font_size))
                 .push(Button::new(Text::new(button_text).size(font_size)))
                 .spacing(10)
                 .padding(10),
@@ -322,8 +313,8 @@ where
         let visible = self.fcitx5_osk_service_client.visible().unwrap_or(true);
         if visible && window_type.is_keyboard() {
             let base = self.state.to_element(id);
-            let res = if let Some(e) = &self.error {
-                modal(base, self.error_dialog(e), Message::AfterError)
+            let res = if let Some(e) = &self.notification {
+                modal(base, self.notification_dialog(e), Message::AfterError)
             } else {
                 base
             };
@@ -397,9 +388,9 @@ where
         let mut task = Task::done(Message::Nothing.into());
         match message {
             Message::Nothing => unreachable!("Nothing should be return before here"),
-            Message::Error(e) => self.handle_error_message(e),
+            Message::Notification(e) => self.handle_error_message(e),
             Message::AfterError => {
-                if let Some(KeyboardError::Fatal(_)) = self.error.take() {
+                if let Some(KeyboardNotification::Fatal(_)) = self.notification.take() {
                     task = task.chain(self.state.window_manager_mut().shutdown());
                 }
             }
@@ -692,7 +683,7 @@ where
     E: Into<Error>,
     M: Into<String>,
 {
-    KeyboardError::Error(Arc::new(e.into().context(err_msg.into()))).into()
+    KeyboardNotification::Error(Arc::new(e.into().context(err_msg.into()))).into()
 }
 
 pub fn fatal_with_context<E, M>(e: E, err_msg: M) -> Message
@@ -700,5 +691,5 @@ where
     E: Into<Error>,
     M: Into<String>,
 {
-    KeyboardError::Fatal(Arc::new(e.into().context(err_msg.into()))).into()
+    KeyboardNotification::Fatal(Arc::new(e.into().context(err_msg.into()))).into()
 }
