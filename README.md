@@ -7,10 +7,19 @@ Fcitx 5 Osk is an on-screen keyboard designed to work with Fcitx 5. It provides 
 ***I have only tested it on kwin6 wayland/xwayland.***
 
 * landscape view
-![landscape view](assets/landscape.png)
+<img width="800" alt="landscape" src="https://github.com/user-attachments/assets/7514f98a-256b-42ad-be48-c3060aa59ab9" />
 
 * portrait view
-![portrait view](assets/portrait.png)
+<img width="500" alt="portrait" src="https://github.com/user-attachments/assets/af88ef5e-f195-417e-a7e1-d31856fe6fb4" />
+
+* custom actions, combo mode and repeat mode
+<video src="https://github.com/user-attachments/assets/62b24bad-22d8-407b-97f1-f26d4dd8b812"></video>
+
+* request otp
+<video src="https://github.com/user-attachments/assets/0f7df9d6-1c26-4319-ab22-613471dd0e3f"></video>
+
+* request password
+<video src="https://github.com/user-attachments/assets/a822b556-18f0-4d8d-a197-6b9a4e060db4"></video>
 
 See [CHANGELOG.md](CHANGELOG.md) for changes since `0.1.0`.
 
