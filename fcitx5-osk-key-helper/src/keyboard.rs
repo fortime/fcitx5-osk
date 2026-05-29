@@ -1,5 +1,5 @@
 use anyhow::Result;
-use evdev::{uinput::VirtualDevice, AttributeSet, KeyCode, KeyEvent};
+use evdev::{AttributeSet, KeyCode, KeyEvent, uinput::VirtualDevice};
 
 pub struct Keyboard {
     device: VirtualDevice,

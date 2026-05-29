@@ -11,8 +11,8 @@ use std::{
 use getset::Getters;
 use iced::Font;
 use serde::{
-    de::{Error, Unexpected},
     Deserialize, Deserializer,
+    de::{Error, Unexpected},
 };
 use xkeysym::Keysym;
 

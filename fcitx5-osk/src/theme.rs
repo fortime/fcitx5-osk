@@ -2,15 +2,15 @@ use std::{path::PathBuf, result::Result as StdResult};
 
 use getset::Getters;
 use iced::{
-    theme::{
-        palette::{Background, Danger, Extended, Pair, Primary, Secondary, Success, Warning},
-        Palette, Theme as IcedTheme,
-    },
     Color,
+    theme::{
+        Palette, Theme as IcedTheme,
+        palette::{Background, Danger, Extended, Pair, Primary, Secondary, Success, Warning},
+    },
 };
 use serde::{
-    de::{Error, Unexpected},
     Deserialize, Deserializer,
+    de::{Error, Unexpected},
 };
 
 use crate::store::IdAndConfigPath;

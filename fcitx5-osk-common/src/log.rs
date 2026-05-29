@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter, Result as FmtResult};
 use anyhow::Result;
 #[cfg(feature = "console-subscriber")]
 use tempfile::{NamedTempFile, TempPath};
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 pub struct LogGuard {
     #[cfg(feature = "console-subscriber")]

@@ -96,7 +96,7 @@ impl ImState {
                 self.deactivate(&im)
             }
             ImEvent::SyncImList => {
-                return self.keyboard_backend.sync_input_methods_and_current_im()
+                return self.keyboard_backend.sync_input_methods_and_current_im();
             }
             ImEvent::SyncCurrentIm => return self.sync_current_input_method(),
             ImEvent::ResetCandidateCursor => self.reset_candidate_cursor(),
@@ -216,10 +216,10 @@ impl CandidateAreaState {
             self.cursor = 0;
         } else {
             // check if there is any previous page in fcitx5
-            if let Some(fcitx5_state) = &self.fcitx5_state {
-                if fcitx5_state.has_prev() {
-                    return Some(fcitx5_state.page_index() - 1);
-                }
+            if let Some(fcitx5_state) = &self.fcitx5_state
+                && fcitx5_state.has_prev()
+            {
+                return Some(fcitx5_state.page_index() - 1);
             }
         }
         None

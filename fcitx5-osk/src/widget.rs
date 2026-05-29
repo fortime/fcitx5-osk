@@ -9,9 +9,9 @@ mod pick_list {
     use std::borrow::Borrow;
 
     use iced::{
-        advanced::text,
-        widget::{pick_list::Catalog, PickList},
         Pixels,
+        advanced::text,
+        widget::{PickList, pick_list::Catalog},
     };
 
     pub trait ExtPickList {
@@ -38,12 +38,11 @@ mod pick_list {
 
 mod scrollable {
     use iced::{
-        border,
+        Color, Shadow, Theme, Vector, border,
         widget::{
             container,
             scrollable::{AutoScroll, Rail, Scroller, Status, Style},
         },
-        Color, Shadow, Theme, Vector,
     };
 
     /// Edited version of `iced::widget::scrollable::default`
@@ -149,8 +148,8 @@ mod scrollable {
 
 mod slider {
     use iced::{
-        widget::slider::{self, HandleShape, Status, Style},
         Theme,
+        widget::slider::{self, HandleShape, Status, Style},
     };
 
     use crate::layout::KLength;
@@ -190,8 +189,8 @@ mod slider {
 
 mod toggler {
     use iced::{
-        widget::toggler::{self, Status, Style},
         Theme,
+        widget::toggler::{self, Status, Style},
     };
 
     /// Edited version of `iced::widget::toggler::default`
@@ -225,7 +224,7 @@ mod toggler {
     }
 }
 
-pub use button::{button_container, ExtButton, BORDER_RADIUS};
+pub use button::{BORDER_RADIUS, ExtButton, button_container};
 #[allow(unused)]
 pub use debugger::LayoutDebugger;
 pub use key::{Key, KeyEvent, PopupKey};

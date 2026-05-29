@@ -11,7 +11,7 @@ use fcitx5_osk_common::dbus::client::Fcitx5OskKeyHelperControllerServiceProxy;
 use getset::Getters;
 use serde::Deserialize;
 use tokio::time;
-use zbus::{fdo, zvariant::OwnedValue, Connection, Result as ZbusResult};
+use zbus::{Connection, Result as ZbusResult, fdo, zvariant::OwnedValue};
 use zvariant::Type;
 
 /// "sssa{sv}a(sssssssbsa{sv})"

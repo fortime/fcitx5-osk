@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
 use iced::{
+    Border, Element, Event, Length, Padding, Rectangle, Renderer, Size, Theme, Vector,
     advanced::{
-        layout, overlay, renderer,
-        widget::{tree, Operation, Tree},
-        Clipboard, Layout, Shell, Widget,
+        Clipboard, Layout, Shell, Widget, layout, overlay, renderer,
+        widget::{Operation, Tree, tree},
     },
     border::{self, Radius},
     mouse::{
@@ -12,8 +12,7 @@ use iced::{
         Interaction as MouseInteraction,
     },
     touch::{Event as TouchEvent, Finger as TouchFinger},
-    widget::{button::DEFAULT_PADDING, container::Style as ContainerStyle, Container},
-    Border, Element, Event, Length, Padding, Rectangle, Renderer, Size, Theme, Vector,
+    widget::{Container, button::DEFAULT_PADDING, container::Style as ContainerStyle},
 };
 
 pub const BORDER_RADIUS: f32 = 5.;
@@ -397,22 +396,22 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
     };
 
     if pressed {
-        if let (false, Some(position)) = (state.is_pressed(&finger), position) {
-            if bounds.contains(position) {
-                tracing::trace!(
-                    "ExtButton[{:?}] is pressed at {:?} by finger {:?}",
-                    bounds,
-                    position,
-                    finger
-                );
-                if !state.has_finger_pressed() {
-                    if let Some(cb) = &widget.on_press_with {
-                        shell.publish(cb());
-                        shell.capture_event();
-                    }
-                }
-                state.finger_pressed(finger);
+        if let (false, Some(position)) = (state.is_pressed(&finger), position)
+            && bounds.contains(position)
+        {
+            tracing::trace!(
+                "ExtButton[{:?}] is pressed at {:?} by finger {:?}",
+                bounds,
+                position,
+                finger
+            );
+            if !state.has_finger_pressed()
+                && let Some(cb) = &widget.on_press_with
+            {
+                shell.publish(cb());
+                shell.capture_event();
             }
+            state.finger_pressed(finger);
         }
     } else if state.is_pressed(&finger) {
         state.finger_released(&finger);
@@ -422,11 +421,11 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             finger,
             state.fingers.len(),
         );
-        if !state.has_finger_pressed() {
-            if let Some(cb) = widget.on_release_with.as_ref() {
-                shell.publish(cb());
-                shell.capture_event();
-            }
+        if !state.has_finger_pressed()
+            && let Some(cb) = widget.on_release_with.as_ref()
+        {
+            shell.publish(cb());
+            shell.capture_event();
         }
     }
 }

@@ -2,13 +2,13 @@ use std::{collections::HashMap, future::Future, path::PathBuf, time::Duration};
 
 use anyhow::Result;
 use figment::{
-    providers::{Format, Toml},
     Figment,
+    providers::{Format, Toml},
 };
 use getset::{CopyGetters, Getters, Setters};
 use iced::futures::{
-    channel::mpsc::{self, TryRecvError, UnboundedSender},
     StreamExt,
+    channel::mpsc::{self, TryRecvError, UnboundedSender},
 };
 use serde::{Deserialize, Serialize};
 use strum::EnumIter;
@@ -237,12 +237,11 @@ impl ConfigManager {
                 };
 
                 if let Some(path) = path.as_ref() {
-                    if let Some(parent) = path.parent() {
-                        if !parent.exists() {
-                            if let Err(e) = fs::create_dir_all(parent).await {
-                                tracing::error!("writing {parent:?} failed: {e}");
-                            }
-                        }
+                    if let Some(parent) = path.parent()
+                        && !parent.exists()
+                        && let Err(e) = fs::create_dir_all(parent).await
+                    {
+                        tracing::error!("writing {parent:?} failed: {e}");
                     }
 
                     if let Err(e) = fs::write(&path, latest).await {

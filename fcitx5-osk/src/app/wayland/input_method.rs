@@ -2,11 +2,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use anyhow::Result;
 use iced::{
-    futures::{
-        channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Stream,
-    },
     Subscription,
+    futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 use tokio::task::JoinHandle;
 use v1::Fcitx5ControllerServiceStub;
@@ -59,7 +56,7 @@ impl InputMethodContext {
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
         fn wayland_input_method_subscription(
             data: &NamedSubscriptionData<Arc<Mutex<State>>>,
-        ) -> impl Stream<Item = WaylandMessage> {
+        ) -> UnboundedReceiver<WaylandMessage> {
             if let Some(rx) = data.data().lock().ok().and_then(|mut s| s.rx.take()) {
                 rx
             } else {
@@ -125,14 +122,14 @@ mod v1 {
     use std::{
         future::Future,
         sync::{
-            atomic::{AtomicU32, Ordering},
             Arc, Mutex, MutexGuard,
+            atomic::{AtomicU32, Ordering},
         },
     };
 
     use anyhow::{Context, Result};
     use iced::futures::channel::mpsc::UnboundedSender;
-    use wayland_client::{event_created_child, Connection, Dispatch, Proxy, QueueHandle};
+    use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, event_created_child};
     use wayland_protocols::wp::input_method::zv1::client::{
         zwp_input_method_context_v1::ZwpInputMethodContextV1,
         zwp_input_method_v1::{self, Event as ZwpInputMethodV1Event, ZwpInputMethodV1},
@@ -141,8 +138,8 @@ mod v1 {
 
     use crate::{
         app::{
-            wayland::{connection::WaylandConnection, WaylandMessage},
             Message,
+            wayland::{WaylandMessage, connection::WaylandConnection},
         },
         dbus::{
             client::{

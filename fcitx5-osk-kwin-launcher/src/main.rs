@@ -3,8 +3,8 @@ use std::{
     os::fd::{FromRawFd, OwnedFd},
     process,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
@@ -19,9 +19,9 @@ use fcitx5_osk_common::{
 use futures_util::{FutureExt as _, StreamExt};
 use tokio::process::Command;
 use zbus::{
+    Connection,
     fdo::{DBusProxy, Result as ZbusFdoResult},
     names::{UniqueName, WellKnownName},
-    Connection,
 };
 
 use crate::dbus::client::{Fcitx5ControllerServiceProxy, FdoServices};
@@ -286,12 +286,15 @@ async fn watch_kwin_virtual_keyboard(
                 true
             };
             // check tablet mode, show only if it is in tablet mode.
-            tracing::debug!("kwin virtual keyboard active: {active}, tablet_mode_check: {tablet_mode_check}, tablet mode: {tablet_mode}");
-            if active && tablet_mode {
-                if let Err(e) = fcitx5_osk_services.controller().show().await {
-                    // allow error
-                    tracing::error!("Unable to call `show` of fcitx5 osk: {e:#?}");
-                }
+            tracing::debug!(
+                "kwin virtual keyboard active: {active}, tablet_mode_check: {tablet_mode_check}, tablet mode: {tablet_mode}"
+            );
+            if active
+                && tablet_mode
+                && let Err(e) = fcitx5_osk_services.controller().show().await
+            {
+                // allow error
+                tracing::error!("Unable to call `show` of fcitx5 osk: {e:#?}");
             }
         }
     }

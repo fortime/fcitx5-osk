@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use figment::{
-    providers::{Format, Toml},
     Figment,
+    providers::{Format, Toml},
 };
 use getset::{CopyGetters, Getters};
 use serde::{Deserialize, Serialize};

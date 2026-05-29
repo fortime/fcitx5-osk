@@ -91,7 +91,7 @@ pub mod client {
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
         fn process_key_event(&self, serial: u64, keycode: u16, is_release: bool)
-            -> ZbusResult<u64>;
+        -> ZbusResult<u64>;
     }
 
     #[derive(Clone, Debug, Getters)]

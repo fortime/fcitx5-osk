@@ -4,9 +4,9 @@ use std::{
 };
 
 use wayland_client::{
+    ConnectError, Connection, Dispatch, Proxy, QueueHandle,
     globals::{self, GlobalError, GlobalList, GlobalListContents},
     protocol::wl_registry::WlRegistry,
-    ConnectError, Connection, Dispatch, Proxy, QueueHandle,
 };
 
 #[derive(Debug)]

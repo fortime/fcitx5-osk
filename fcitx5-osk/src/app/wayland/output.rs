@@ -5,23 +5,19 @@ use std::{
 
 use anyhow::Result;
 use iced::{
-    futures::{
-        channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Stream,
-    },
     Subscription,
+    futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 use iced_layershell::reexport::{Anchor, Layer, WlRegion};
 use tokio::task::JoinHandle;
 use wayland_client::{
-    delegate_noop,
+    Connection, Dispatch, Proxy, QueueHandle, WEnum, delegate_noop,
     protocol::{
         wl_compositor::WlCompositor,
         wl_output::{Event as WlOutputEvent, Transform, WlOutput},
         wl_registry::{Event as WlRegistryEvent, WlRegistry},
         wl_surface::WlSurface,
     },
-    Connection, Dispatch, Proxy, QueueHandle, WEnum,
 };
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
@@ -34,8 +30,8 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 
 use crate::{
     app::{
-        wayland::{connection::WaylandConnection, WaylandMessage},
         Message,
+        wayland::{WaylandMessage, connection::WaylandConnection},
     },
     misc::NamedSubscriptionData,
     state::WindowManagerEvent,
@@ -138,7 +134,7 @@ impl OutputContext {
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
         fn wayland_output_subscription(
             data: &NamedSubscriptionData<Arc<Mutex<State>>>,
-        ) -> impl Stream<Item = WaylandMessage> {
+        ) -> UnboundedReceiver<WaylandMessage> {
             if let Some(rx) = data.data().lock().ok().and_then(|mut s| s.rx.take()) {
                 rx
             } else {
@@ -175,10 +171,10 @@ impl OutputContext {
                 guard.selected_output = Some(output_geometry.output_name);
                 return Some(output_geometry);
             }
-            if let Some(selected_output) = guard.selected_output {
-                if selected_output == output_info.output_name {
-                    selected_output_info = Some(output_info);
-                }
+            if let Some(selected_output) = guard.selected_output
+                && selected_output == output_info.output_name
+            {
+                selected_output_info = Some(output_info);
             }
         }
 
@@ -221,19 +217,19 @@ impl OutputContext {
             guard.bg_handle = Some(tokio::spawn(async move {
                 if let Err(e) = bg.await {
                     tracing::error!("wayland WlOutput event queue exit with error: {:?}", e);
-                    if let Ok(state) = output_context.connection.state() {
-                        if let Some(error) = state.connection().protocol_error() {
-                            tracing::error!(
-                                "Wayland protocol error: object[{}], code[{}], message[{}]",
-                                error.object_id,
-                                error.code,
-                                error.message
-                            );
-                            panic!(
-                                "Wayland protocol error: object[{}], code[{}], message[{}]",
-                                error.object_id, error.code, error.message
-                            );
-                        }
+                    if let Ok(state) = output_context.connection.state()
+                        && let Some(error) = state.connection().protocol_error()
+                    {
+                        tracing::error!(
+                            "Wayland protocol error: object[{}], code[{}], message[{}]",
+                            error.object_id,
+                            error.code,
+                            error.message
+                        );
+                        panic!(
+                            "Wayland protocol error: object[{}], code[{}], message[{}]",
+                            error.object_id, error.code, error.message
+                        );
                     }
                 }
             }));
@@ -505,7 +501,9 @@ impl Dispatch<WlRegistry, ()> for OutputListener {
                 if interface == WlOutput::interface().name {
                     // minimum version
                     if *version < 4 {
-                        tracing::warn!("The version of wl_output is less than 4, geometry can't be handled correctly");
+                        tracing::warn!(
+                            "The version of wl_output is less than 4, geometry can't be handled correctly"
+                        );
                         return;
                     }
                     tracing::debug!("Add output {}", name);
@@ -691,7 +689,10 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for OutputListener {
                 {
                     // Client will only destroy layer shell surface after it is removed from state. So
                     // this is closed from the server side.
-                    tracing::error!("The layer shell surface of output[{}] is closed from the server side, the change of geometry on this output won't work", output_name);
+                    tracing::error!(
+                        "The layer shell surface of output[{}] is closed from the server side, the change of geometry on this output won't work",
+                        output_name
+                    );
                 }
             }
             _ => {}

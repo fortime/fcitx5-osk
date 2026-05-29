@@ -1,13 +1,12 @@
 use std::cell::RefCell;
 
 use iced::{
+    Element, Event, Length, Rectangle, Size, Vector,
     advanced::{
-        layout, overlay, renderer,
-        widget::{tree, Operation, Tree},
-        Clipboard, Layout, Shell, Widget,
+        Clipboard, Layout, Shell, Widget, layout, overlay, renderer,
+        widget::{Operation, Tree, tree},
     },
     mouse::{Cursor, Interaction},
-    Element, Event, Length, Rectangle, Size, Vector,
 };
 
 pub struct LayoutDebugger<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {

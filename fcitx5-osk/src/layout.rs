@@ -3,24 +3,24 @@
 
 use getset::{CopyGetters, Getters};
 use iced::{
+    Color, Element, Font, Length, Padding, Pixels, Size, Theme,
     advanced::svg::Handle as SvgHandle,
     alignment::{Horizontal, Vertical},
     padding,
     widget::{
-        button::{Style as ButtonStyle, DEFAULT_PADDING},
+        Button, Column, Container, PickList, Row, Scrollable, Slider, Space, Svg, Text, Toggler,
+        button::{DEFAULT_PADDING, Style as ButtonStyle},
         container::Style as ContainerStyle,
         scrollable::{Direction, Scrollbar},
         text::Shaping,
         text_input::TextInput,
-        Button, Column, Container, PickList, Row, Scrollable, Slider, Space, Svg, Text, Toggler,
     },
     window::Id,
-    Color, Element, Font, Length, Padding, Pixels, Size, Theme,
 };
 use num_traits::FromPrimitive;
 use serde::{
-    de::{self, Error, Unexpected, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Error, Unexpected, Visitor},
 };
 
 use std::{
@@ -45,7 +45,7 @@ use crate::{
         TextDesc, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     store::IdAndConfigPath,
-    widget::{self, ExtButton, ExtPickList as _, Movable, Toggle, ToggleCondition, BORDER_RADIUS},
+    widget::{self, BORDER_RADIUS, ExtButton, ExtPickList as _, Movable, Toggle, ToggleCondition},
     window::WindowManagerMode,
 };
 
@@ -524,7 +524,7 @@ impl<'de> Deserialize<'de> for KeyRowElement {
                     return Err(Error::invalid_value(
                         Unexpected::Str(width_u),
                         &"width should be empty or a u32 integer",
-                    ))
+                    ));
                 }
             };
             let height_u = items
@@ -1305,11 +1305,7 @@ where
     }
 
     fn row_num(&self, state: &dyn StateExtractor) -> u32 {
-        if self.is_enabled(state) {
-            2
-        } else {
-            1
-        }
+        if self.is_enabled(state) { 2 } else { 1 }
     }
 }
 

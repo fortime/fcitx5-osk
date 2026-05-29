@@ -1,9 +1,9 @@
 use std::{marker::PhantomData, rc::Rc, time::Duration};
 
 use iced::{
+    Element, Font, Point, Size, Task,
     widget::{Container, Space, Stack},
     window::Id,
-    Element, Font, Point, Size, Task,
 };
 use tokio::time;
 

@@ -1,17 +1,16 @@
 use std::time::{Duration, Instant};
 
 use iced::{
+    Element, Event, Length, Point, Rectangle, Size, Vector,
     advanced::{
-        layout, overlay, renderer,
-        widget::{tree, Operation, Tree},
-        Clipboard, Layout, Shell, Widget,
+        Clipboard, Layout, Shell, Widget, layout, overlay, renderer,
+        widget::{Operation, Tree, tree},
     },
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
         Interaction as MouseInteraction,
     },
     touch::{Event as TouchEvent, Finger as TouchFinger},
-    Element, Event, Length, Point, Rectangle, Size, Vector,
 };
 
 /// Local state of the [`Movable`].

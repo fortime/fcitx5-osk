@@ -1,10 +1,10 @@
 use std::{mem, rc::Rc};
 
 use iced::{
+    Element, Font, Padding, Size,
     alignment::Horizontal,
     padding,
     widget::{Column, Container},
-    Element, Font, Padding, Size,
 };
 
 use crate::{

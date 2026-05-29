@@ -6,21 +6,18 @@ use std::{
 
 use anyhow::Result;
 use iced::{
-    futures::{
-        channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Stream,
-    },
     Size, Subscription, Vector,
+    futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 use x11rb::{
     connection::Connection as _,
     protocol::{
+        Event as X11Event,
         randr::{self, ConnectionExt, Notify, NotifyEvent, NotifyMask, Rotation},
         xproto::{
             Atom, AtomEnum, ChangeWindowAttributesAux, ConnectionExt as _, EventMask,
             PropertyNotifyEvent, Screen,
         },
-        Event as X11Event,
     },
     resource_manager::{self, Database},
     rust_connection::RustConnection,
@@ -170,7 +167,7 @@ impl OutputContext {
     pub fn subscription(&self) -> Subscription<Message> {
         fn x11_output_subscription(
             data: &NamedSubscriptionData<Arc<Mutex<State>>>,
-        ) -> impl Stream<Item = Message> {
+        ) -> UnboundedReceiver<Message> {
             if let Some(rx) = data.data().lock().ok().and_then(|mut s| s.rx.take()) {
                 rx
             } else {
@@ -209,10 +206,10 @@ impl OutputContext {
                 output_geometry.scale_factor = scale_factor;
                 return Some(output_geometry);
             }
-            if let Some(selected_output) = guard.selected_output {
-                if selected_output == output_info.output {
-                    selected_output_info = Some(output_info);
-                }
+            if let Some(selected_output) = guard.selected_output
+                && selected_output == output_info.output
+            {
+                selected_output_info = Some(output_info);
             }
         }
 
@@ -255,7 +252,7 @@ impl OutputContext {
             return Ok(());
         }
         if guard.bg_handle.is_none() {
-            let bg = listen(self)?;
+            let bg = listen(self.clone())?;
             guard.bg_handle = Some(thread::spawn(move || {
                 if let Err(e) = bg() {
                     tracing::error!("x11 output eventloop exit with error: {:?}", e);
@@ -365,7 +362,7 @@ impl OutputContext {
     }
 }
 
-fn listen(output_context: &OutputContext) -> Result<impl FnOnce() -> Result<()>> {
+fn listen(output_context: OutputContext) -> Result<impl FnOnce() -> Result<()>> {
     let (conn, default_screen) = (output_context.connection_supplier)()?;
 
     let atoms = Atoms::new(&conn)?.reply()?;

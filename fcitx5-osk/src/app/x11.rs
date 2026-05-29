@@ -1,12 +1,12 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, vec};
 
 use anyhow::Result;
 use fcitx5_osk_common::signal::ShutdownFlag;
 use iced::{
-    futures::{stream, Stream},
+    Element, Subscription, Task, Theme,
+    futures::stream::{self, Iter},
     theme::Style,
     window::Id,
-    Element, Subscription, Task, Theme,
 };
 use x11rb::rust_connection::RustConnection;
 
@@ -86,7 +86,7 @@ impl X11Keyboard {
     pub fn subscription(&self) -> Subscription<Message> {
         fn output_context_listen(
             data: &NamedSubscriptionData<OutputContext>,
-        ) -> impl Stream<Item = Message> {
+        ) -> Iter<vec::IntoIter<Message>> {
             // These messages only work in the first call
             let mut once_messages = vec![];
             // Wayland connection environment variables will be set in the call of `self.inner.subscription()`.

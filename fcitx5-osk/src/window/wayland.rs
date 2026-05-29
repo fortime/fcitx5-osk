@@ -1,8 +1,8 @@
 use std::{collections::HashMap, env, mem};
 
 use iced::{
-    window::{self as iced_window, Id},
     Point, Size, Task,
+    window::{self as iced_window, Id},
 };
 use iced_layershell::reexport::{
     Anchor, KeyboardInteractivity, Layer, NewInputPanelSettings, NewLayerShellSettings,
@@ -11,8 +11,8 @@ use iced_layershell::reexport::{
 
 use crate::{
     app::{
-        wayland::{OutputContext, OutputGeometry, WaylandMessage},
         Message,
+        wayland::{OutputContext, OutputGeometry, WaylandMessage},
     },
     config::Placement,
     has_text_within_env,
@@ -26,15 +26,17 @@ pub fn is_available() -> bool {
 }
 
 pub unsafe fn set_env(socket: Option<&str>, display: Option<&str>) {
-    if let Some(socket) = socket {
-        env::set_var("WAYLAND_SOCKET", socket);
-    } else {
-        env::remove_var("WAYLAND_SOCKET");
-    }
-    if let Some(display) = display {
-        env::set_var("WAYLAND_DISPLAY", display);
-    } else {
-        env::remove_var("WAYLAND_DISPLAY");
+    unsafe {
+        if let Some(socket) = socket {
+            env::set_var("WAYLAND_SOCKET", socket);
+        } else {
+            env::remove_var("WAYLAND_SOCKET");
+        }
+        if let Some(display) = display {
+            env::set_var("WAYLAND_DISPLAY", display);
+        } else {
+            env::remove_var("WAYLAND_DISPLAY");
+        }
     }
     tracing::debug!(
         "socket: {:?}, display: {:?}",
@@ -220,13 +222,13 @@ impl WindowManager for WaylandWindowManager {
     }
 
     fn closed(&mut self, id: Id) -> Task<Self::Message> {
-        if let Some(settings) = self.settings.remove(&id) {
-            if settings.placement == Placement::Dock {
-                // In Kwin6, the output change event is before the closed event, so we should reset
-                // exclusive_zone at the beginning of closing the keyboard to have a correct output
-                // logical_height
-                self.exclusive_zone.take();
-            }
+        if let Some(settings) = self.settings.remove(&id)
+            && settings.placement == Placement::Dock
+        {
+            // In Kwin6, the output change event is before the closed event, so we should reset
+            // exclusive_zone at the beginning of closing the keyboard to have a correct output
+            // logical_height
+            self.exclusive_zone.take();
         }
         Message::from_nothing()
     }
@@ -280,10 +282,10 @@ impl WindowManager for WaylandWindowManager {
                 movable_screen_size(&self.screen_size, &self.exclusive_zone),
             );
         }
-        if let Some(settings) = self.settings.get(&id) {
-            if let Some(margin) = self.margin(settings) {
-                return self.set_margin(id, margin);
-            }
+        if let Some(settings) = self.settings.get(&id)
+            && let Some(margin) = self.margin(settings)
+        {
+            return self.set_margin(id, margin);
         }
         Message::from_nothing()
     }

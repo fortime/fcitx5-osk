@@ -2,20 +2,20 @@ use std::{
     borrow::Cow,
     future::Future,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
 use anyhow::Result;
 use getset::{Getters, MutGetters};
 use iced::{
-    futures::channel::mpsc::UnboundedSender, window::Id, Element, Size, Task, Theme, Vector,
+    Element, Size, Task, Theme, Vector, futures::channel::mpsc::UnboundedSender, window::Id,
 };
 use zbus::Result as ZbusResult;
 
 use crate::{
-    app::{self, error_with_context, KeyboardNotification, MapTask, Message},
+    app::{self, KeyboardNotification, MapTask, Message, error_with_context},
     config::{Config, ConfigManager, IndicatorDisplay, Placement},
     layout::{KLength, ToElementCommonParams},
     store::Store,

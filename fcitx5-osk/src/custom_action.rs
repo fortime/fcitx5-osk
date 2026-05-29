@@ -17,10 +17,10 @@ pub mod http_api {
     use iced::futures::channel::mpsc::UnboundedSender;
     use openssl::pkey::{PKey, Private};
     use reqwest::{
-        header::{HeaderMap, HeaderName, RETRY_AFTER},
         Method, StatusCode, Url,
+        header::{HeaderMap, HeaderName, RETRY_AFTER},
     };
-    use serde::{de::Error, Deserialize, Deserializer};
+    use serde::{Deserialize, Deserializer, de::Error};
     use tokio::time;
 
     use crate::{
@@ -222,10 +222,8 @@ pub mod http_api {
                     let mut keys = mem::take(&mut group.keys);
                     let mask_range = if need_mask { Some(0..keys.len()) } else { None };
                     // Don't mask enter
-                    if need_enter {
-                        if let Some(kv) = KeyValue::from_char('\n') {
-                            keys.push(ComboKey::Key(kv));
-                        }
+                    if need_enter && let Some(kv) = KeyValue::from_char('\n') {
+                        keys.push(ComboKey::Key(kv));
                     }
                     candidates.push(CustomActionCandidate::Keys { mask_range, keys });
                 }
@@ -245,10 +243,8 @@ pub mod http_api {
                     }
                     let mask_range = if need_mask { Some(0..keys.len()) } else { None };
                     // Don't mask enter
-                    if need_enter {
-                        if let Some(kv) = KeyValue::from_char('\n') {
-                            keys.push(ComboKey::Key(kv));
-                        }
+                    if need_enter && let Some(kv) = KeyValue::from_char('\n') {
+                        keys.push(ComboKey::Key(kv));
                     }
                     candidates.push(CustomActionCandidate::Keys { mask_range, keys });
                 }

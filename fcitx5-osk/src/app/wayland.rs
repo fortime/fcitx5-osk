@@ -1,28 +1,28 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, vec};
 
 use anyhow::Result;
 use connection::WaylandConnection;
 use fcitx5_osk_common::signal::ShutdownFlag;
 use iced::{
-    futures::{stream, Stream},
+    Element, Subscription, Task, Theme,
+    futures::stream::{self, Iter},
     theme::Style,
     window::Id,
-    Element, Subscription, Task, Theme,
 };
 use iced_layershell::{
-    build_pattern,
+    Settings, build_pattern,
     settings::{LayerShellSettings, StartMode},
-    to_layer_message, Settings,
+    to_layer_message,
 };
 
 pub use crate::app::wayland::output::{OutputContext, OutputGeometry};
 use crate::{
-    app::{self, wayland::input_method::InputMethodContext, Keyboard, MapTask, Message},
+    app::{self, Keyboard, MapTask, Message, wayland::input_method::InputMethodContext},
     config::ConfigManager,
     font,
     misc::NamedSubscriptionData,
     state::WindowManagerEvent,
-    window::{wayland::WaylandWindowManager, WindowManagerMode},
+    window::{WindowManagerMode, wayland::WaylandWindowManager},
 };
 
 use super::AsyncAppState;
@@ -110,7 +110,7 @@ impl WaylandKeyboard {
     pub fn subscription(&self) -> Subscription<WaylandMessage> {
         fn output_context_listen(
             data: &NamedSubscriptionData<OutputContext>,
-        ) -> impl Stream<Item = WaylandMessage> {
+        ) -> Iter<vec::IntoIter<WaylandMessage>> {
             // These messages only work in the first call
             let mut once_messages = vec![];
             // Wayland connection environment variables will be set in the call of `self.inner.subscription()`.

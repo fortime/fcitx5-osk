@@ -9,19 +9,19 @@ use fcitx5_osk_common::{
 };
 use getset::{CopyGetters, Getters};
 use iced::{
+    Font,
     futures::{
+        StreamExt as _,
         channel::{
             mpsc::{self, UnboundedReceiver, UnboundedSender},
             oneshot::Sender,
         },
-        StreamExt as _,
     },
-    Font,
 };
 use zbus::{
+    Connection,
     fdo::Error,
     object_server::{InterfaceRef, SignalEmitter},
-    Connection,
 };
 
 use crate::{
@@ -290,7 +290,9 @@ impl Fcitx5OskServiceClient {
 
     fn send(&self, signal: PropertyChangedSignal) {
         if self.tx.unbounded_send(signal).is_err() {
-            tracing::error!("The channel of fcitx5_osk_service_event_loop has been closed, unable to handle the request")
+            tracing::error!(
+                "The channel of fcitx5_osk_service_event_loop has been closed, unable to handle the request"
+            )
         }
     }
 }

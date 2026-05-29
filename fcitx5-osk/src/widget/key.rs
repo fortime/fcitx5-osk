@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
 use iced::{
+    Border, Color, Element, Event, Length, Padding, Rectangle, Size, Vector,
     advanced::{
-        layout, overlay, renderer,
-        widget::{tree, Operation, Tree},
-        Clipboard, Layout, Shell, Widget,
+        Clipboard, Layout, Shell, Widget, layout, overlay, renderer,
+        widget::{Operation, Tree, tree},
     },
     border::Radius,
     mouse::{
@@ -12,7 +12,6 @@ use iced::{
         Interaction as MouseInteraction,
     },
     touch::{Event as TouchEvent, Finger as TouchFinger},
-    Border, Color, Element, Event, Length, Padding, Rectangle, Size, Vector,
 };
 
 /// Local state of the [`Key`].
@@ -397,27 +396,27 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
     };
 
     if pressed {
-        if let (false, Some(position)) = (state.is_pressed(&finger), position) {
-            if bounds.contains(position) {
-                tracing::trace!(
-                    "key[{:?}] is pressed at {:?} by finger {:?}",
+        if let (false, Some(position)) = (state.is_pressed(&finger), position)
+            && bounds.contains(position)
+        {
+            tracing::trace!(
+                "key[{:?}] is pressed at {:?} by finger {:?}",
+                bounds,
+                position,
+                finger
+            );
+            if !state.has_finger_pressed()
+                && let Some(cb) = &widget.on_press_with
+            {
+                shell.publish(cb(KeyEvent {
+                    pressed,
+                    cancelled,
+                    finger,
                     bounds,
-                    position,
-                    finger
-                );
-                if !state.has_finger_pressed() {
-                    if let Some(cb) = &widget.on_press_with {
-                        shell.publish(cb(KeyEvent {
-                            pressed,
-                            cancelled,
-                            finger,
-                            bounds,
-                        }));
-                    }
-                }
-                state.finger_pressed(finger);
-                shell.capture_event();
+                }));
             }
+            state.finger_pressed(finger);
+            shell.capture_event();
         }
     } else if state.is_pressed(&finger) {
         state.finger_released(&finger);
@@ -427,16 +426,16 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             finger,
             state.fingers.len(),
         );
-        if !state.has_finger_pressed() {
-            if let Some(cb) = widget.on_release_with.as_ref() {
-                shell.publish(cb(KeyEvent {
-                    pressed,
-                    cancelled,
-                    finger,
-                    bounds,
-                }));
-                shell.capture_event();
-            }
+        if !state.has_finger_pressed()
+            && let Some(cb) = widget.on_release_with.as_ref()
+        {
+            shell.publish(cb(KeyEvent {
+                pressed,
+                cancelled,
+                finger,
+                bounds,
+            }));
+            shell.capture_event();
         }
     }
 }

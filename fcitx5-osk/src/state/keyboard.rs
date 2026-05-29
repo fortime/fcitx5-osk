@@ -5,8 +5,8 @@ use std::{
     ops::Range,
     rc::Rc,
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc,
+        atomic::{AtomicU32, Ordering},
     },
     time::{Duration, UNIX_EPOCH},
 };
@@ -14,10 +14,10 @@ use std::{
 use anyhow::Result;
 use getset::Getters;
 use iced::{
+    Element, Font, Padding, Task,
     alignment::{Horizontal, Vertical},
     futures::{channel::mpsc::UnboundedSender, lock::Mutex as IcedFuturesMutex},
-    widget::{container::Style as ContainerStyle, text::Shaping, Column, Container, Row, Text},
-    Element, Font, Padding, Task,
+    widget::{Column, Container, Row, Text, container::Style as ContainerStyle, text::Shaping},
 };
 use tokio::time;
 use xkeysym::Keysym;
@@ -40,7 +40,7 @@ use crate::{
     layout::{KLength, KeyAreaLayout},
     state::ImEvent,
     store::Store,
-    widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey, BORDER_RADIUS},
+    widget::{BORDER_RADIUS, Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
 };
 
 const TEXT_PADDING_LENGTH: u32 = 3;
@@ -279,7 +279,7 @@ impl KeyboardState {
                 return self.hold_key(common, key_widget_event, pressed_time);
             }
             KeyEventInner::Released(key_widget_event) => {
-                return self.release_key(common, key_widget_event)
+                return self.release_key(common, key_widget_event);
             }
             KeyEventInner::SelectSecondary => {
                 self.change_selected_secondary(common, true);
@@ -1423,18 +1423,17 @@ impl KeyboardBackend {
                 ComboKey::Key(key_value) => {
                     // Check if the key is pressed already, release it before pressing it
                     for pressed_key in &mut stack {
-                        if let Some(p) = pressed_key {
-                            if p.keycode() == key_value.keycode()
-                                || p.keysym() == key_value.keysym()
-                            {
-                                reqs.push(ProcessKeyEventRequest {
-                                    key_value: p.clone(),
-                                    is_release: true,
-                                    time,
-                                });
-                                time += INTERVAL;
-                                pressed_key.take();
-                            }
+                        if let Some(p) = pressed_key
+                            && (p.keycode() == key_value.keycode()
+                                || p.keysym() == key_value.keysym())
+                        {
+                            reqs.push(ProcessKeyEventRequest {
+                                key_value: p.clone(),
+                                is_release: true,
+                                time,
+                            });
+                            time += INTERVAL;
+                            pressed_key.take();
                         }
                     }
                     stack.push(Some(key_value.clone()));

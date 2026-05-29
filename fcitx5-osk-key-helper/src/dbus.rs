@@ -1,5 +1,5 @@
 mod server {
-    use zbus::{fdo::Error, message::Header, Connection};
+    use zbus::{Connection, fdo::Error, message::Header};
 
     use crate::keyboard::Keyboard;
 

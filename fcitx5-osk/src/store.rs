@@ -12,8 +12,8 @@ use crate::{
 
 use anyhow::Result;
 use figment::{
-    providers::{Format, Toml},
     Figment,
+    providers::{Format, Toml},
 };
 use iced::{Font, Theme as IcedTheme};
 use serde::Deserialize;

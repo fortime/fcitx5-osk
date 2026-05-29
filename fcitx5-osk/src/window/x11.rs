@@ -2,8 +2,8 @@ use std::{collections::HashMap, env, sync::Arc};
 
 use anyhow::Result;
 use iced::{
-    window::{self as iced_window, settings::PlatformSpecific, Id, Level, Position, Settings},
     Point, Size, Task,
+    window::{self as iced_window, Id, Level, Position, Settings, settings::PlatformSpecific},
 };
 use x11rb::{
     connection::Connection, properties::WmHints, protocol::xproto, rust_connection::RustConnection,
@@ -12,8 +12,8 @@ use x11rb::{
 
 use crate::{
     app::{
-        x11::{OutputContext, OutputGeometry},
         Message,
+        x11::{OutputContext, OutputGeometry},
     },
     config::Placement,
     has_text_within_env,
@@ -337,10 +337,12 @@ pub fn is_available() -> bool {
 }
 
 pub unsafe fn set_env(display: Option<&str>) {
-    if let Some(display) = display {
-        env::set_var("Display", display);
-    } else {
-        env::remove_var("Display");
+    unsafe {
+        if let Some(display) = display {
+            env::set_var("Display", display);
+        } else {
+            env::remove_var("Display");
+        }
     }
 }
 

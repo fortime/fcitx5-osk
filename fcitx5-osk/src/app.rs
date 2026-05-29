@@ -4,8 +4,8 @@ use std::{
     os::fd::{AsRawFd, OwnedFd},
     rc::Rc,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
@@ -13,18 +13,15 @@ use std::{
 use anyhow::{Context, Error, Result};
 use fcitx5_osk_common::signal::ShutdownFlag;
 use iced::{
+    Color, Element, Event as IcedEvent, Length, Subscription, Task, Theme,
     advanced::widget::Text,
-    futures::{
-        channel::{
-            mpsc::{self, UnboundedReceiver, UnboundedSender},
-            oneshot::{self, Sender},
-        },
-        Stream,
+    futures::channel::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        oneshot::{self, Sender},
     },
     theme::{self, Base as _, Style},
     widget::{self, Button, Column, Container, MouseArea, Space, Stack},
     window::{Event as IcedWindowEvent, Id},
-    Color, Element, Event as IcedEvent, Length, Subscription, Task, Theme,
 };
 use iced_futures::event;
 use tokio::time;
@@ -336,7 +333,7 @@ where
     pub fn subscription(&self) -> Subscription<WM::Message> {
         fn external_subscription(
             data: &NamedSubscriptionData<Rc<KeyboardMessageReceiver>>,
-        ) -> impl Stream<Item = Message> {
+        ) -> UnboundedReceiver<Message> {
             if let Some(rx) = data.data().borrow_mut().take() {
                 rx
             } else {

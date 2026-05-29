@@ -1,4 +1,4 @@
-use iced::{window::Id, Point, Size, Task};
+use iced::{Point, Size, Task, window::Id};
 
 use crate::config::Placement;
 

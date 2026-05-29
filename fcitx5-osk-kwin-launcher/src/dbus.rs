@@ -1,7 +1,7 @@
 pub mod client {
     use anyhow::Result;
     use getset::Getters;
-    use zbus::{zvariant::OwnedFd, Connection, Result as ZbusResult};
+    use zbus::{Connection, Result as ZbusResult, zvariant::OwnedFd};
 
     #[zbus::proxy(
         default_service = "org.fcitx.Fcitx5",

@@ -121,15 +121,14 @@ where
 
     pub fn cur_value(&self, field: &Field, state: &dyn StateExtractor) -> T {
         let init_value = (self.init_value)(state);
-        if let Some((last_init_value, value)) = state.config_temp_text(field.id()) {
-            if last_init_value
+        if let Some((last_init_value, value)) = state.config_temp_text(field.id())
+            && last_init_value
                 .parse::<T>()
                 .ok()
                 .filter(|l| *l == init_value)
                 .is_some()
-            {
-                return value.parse::<T>().unwrap_or(init_value);
-            }
+        {
+            return value.parse::<T>().unwrap_or(init_value);
         }
         init_value
     }
@@ -669,13 +668,13 @@ fn preferred_output_name_field() -> Field {
                     }
                     variants.push(output_name(name, description));
                 }
-                if selected.is_none() {
-                    if let Some(name) = preferred_output_name {
-                        selected = Some(ValueAndDescription {
-                            value: name.clone(),
-                            desc: format!("{name} (Not Connected)"),
-                        })
-                    }
+                if selected.is_none()
+                    && let Some(name) = preferred_output_name
+                {
+                    selected = Some(ValueAndDescription {
+                        value: name.clone(),
+                        desc: format!("{name} (Not Connected)"),
+                    })
                 }
                 (variants, selected)
             },
