@@ -224,10 +224,12 @@ mod toggler {
     }
 }
 
-pub use button::{BORDER_RADIUS, ExtButton, button_container};
+pub use button::{
+    BORDER_RADIUS, DummyCb as ButtonDummyCb, ExtButton, button_container, button_text_class,
+    key::{Key, KeyEvent, PopupKey},
+};
 #[allow(unused)]
 pub use debugger::LayoutDebugger;
-pub use key::{Key, KeyEvent, PopupKey};
 pub use movable::Movable;
 pub use pick_list::ExtPickList;
 pub use scrollable::scrollable_style;

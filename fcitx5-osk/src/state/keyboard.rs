@@ -40,7 +40,7 @@ use crate::{
     layout::{KLength, KeyAreaLayout},
     state::ImEvent,
     store::Store,
-    widget::{BORDER_RADIUS, Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
+    widget::{Key as KeyWidget, KeyEvent as KeyWidgetEvent, PopupKey},
 };
 
 const TEXT_PADDING_LENGTH: u32 = 3;
@@ -82,6 +82,7 @@ struct HoldingKeyState {
     // keysym.
     flags: Vec<KeyValue>,
     pressed_time: u128,
+    secondary_shown: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -278,6 +279,9 @@ impl KeyboardState {
             KeyEventInner::Holding(key_widget_event, pressed_time) => {
                 return self.hold_key(common, key_widget_event, pressed_time);
             }
+            KeyEventInner::Holded(pressed_time) => {
+                self.set_holded(common, pressed_time);
+            }
             KeyEventInner::Released(key_widget_event) => {
                 return self.release_key(common, key_widget_event);
             }
@@ -310,7 +314,6 @@ impl KeyboardState {
         )
         .width(self.popup_key_width_u * unit)
         .height(self.popup_key_height_u * unit)
-        .border_radius(BORDER_RADIUS)
         .on_enter(KeyEvent::new(common.clone(), KeyEventInner::SelectSecondary).into())
         .on_exit(KeyEvent::new(common, KeyEventInner::UnselectSecondary).into())
     }
@@ -472,7 +475,6 @@ impl KeyboardState {
         KeyWidget::new(content)
             .on_press_with(press_cb)
             .on_release_with(release_cb)
-            .border_radius(BORDER_RADIUS)
             .padding(Padding::new(TEXT_PADDING_LENGTH as f32))
             .width(width)
             .height(height)
@@ -495,7 +497,7 @@ impl KeyboardState {
         let key = &holding_key_state.key;
         let mut row = Row::new();
         let mut popup_key_area_width = KLength::default();
-        if holding_key_state.pressed_time + self.holding_timeout.as_millis() <= now() {
+        if holding_key_state.secondary_shown {
             for secondary in key.secondaries().iter() {
                 row = row.push(self.new_popup_key(holding_key_state, secondary, unit));
                 popup_key_area_width += self.popup_key_width_u * unit;
@@ -829,20 +831,49 @@ impl KeyboardState {
 
         if let Some(key) = self.keys.get(&*common.key_name) {
             self.holding_key_state = Some(HoldingKeyState {
-                name: common.key_name,
+                name: common.key_name.clone(),
                 key_widget_event,
                 key: key.clone(),
                 flags: Vec::with_capacity(key.secondaries().len()),
                 pressed_time,
+                secondary_shown: false,
             });
             // Trigger a redraw after holding timeout
             let timeout = self.holding_timeout;
             task = Task::future(async move {
                 time::sleep(timeout).await;
-                Message::Nothing
+                KeyEvent::new(common, KeyEventInner::Holded(pressed_time)).into()
             });
         }
         task
+    }
+
+    fn set_holded(&mut self, common: KeyEventCommon, pressed_time: u128) {
+        if let Some(holding_key_state) = &mut self.holding_key_state
+            && holding_key_state.name == common.key_name
+        {
+            // check if the pressed time is the same
+            if holding_key_state.pressed_time != pressed_time {
+                tracing::debug!(
+                    "pressed_time is not equal: {}/{}, skip holded event.",
+                    pressed_time,
+                    holding_key_state.pressed_time
+                );
+                return;
+            }
+            holding_key_state.secondary_shown = true;
+            if !holding_key_state.flags.is_empty()
+                && let Some(first) = holding_key_state.key.secondaries().first()
+            {
+                // the popup key is selected, replace it with the first secondary
+                if let Some(key_state) = self.pressed_keys.get_mut(&common.key_name) {
+                    holding_key_state.flags[0] = first.clone();
+                    key_state.selected_key_value = first.clone();
+                }
+            }
+        } else {
+            tracing::debug!("[{}] is not holding", common.key_name,);
+        }
     }
 
     pub fn clear_fcitx5_hidden(&mut self) -> Task<Message> {
@@ -914,6 +945,7 @@ impl KeyEventCommon {
 enum KeyEventInner {
     Pressed(KeyWidgetEvent),
     Holding(KeyWidgetEvent, u128),
+    Holded(u128),
     Released(KeyWidgetEvent),
     SelectSecondary,
     UnselectSecondary,

@@ -45,7 +45,7 @@ use crate::{
         TextDesc, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
     },
     store::IdAndConfigPath,
-    widget::{self, BORDER_RADIUS, ExtButton, ExtPickList as _, Movable, Toggle, ToggleCondition},
+    widget::{self, ButtonDummyCb, ExtButton, ExtPickList as _, Movable, Toggle, ToggleCondition},
     window::WindowManagerMode,
 };
 
@@ -650,11 +650,8 @@ impl ToolbarLayout {
         font: Font,
         font_size: KLength,
     ) -> Element<'b, Message> {
-        let theme = params.state.theme();
         let state = params.state.im().candidate_area_state();
         let spacing = 2 * unit;
-        let color = theme.extended_palette().background.weak.text;
-        let disabled_color = theme.extended_palette().background.weak.color;
 
         let mut available_candidate_width = params.state.available_candidate_width();
         // minus the size of < and > and their spacing
@@ -704,17 +701,18 @@ impl ToolbarLayout {
             index += 1;
         }
 
-        let prev_message = if state.cursor() > 0 || state.has_prev_in_fcitx5() {
+        let prev_message: Option<Message> = if state.cursor() > 0 || state.has_prev_in_fcitx5() {
             Some(ImEvent::PrevCandidates.into())
         } else {
             None
         };
 
-        let next_message = if consumed < candidate_list.len() || state.has_next_in_fcitx5() {
-            Some(ImEvent::NextCandidates(consumed + state.cursor()).into())
-        } else {
-            None
-        };
+        let next_message: Option<Message> =
+            if consumed < candidate_list.len() || state.has_next_in_fcitx5() {
+                Some(ImEvent::NextCandidates(consumed + state.cursor()).into())
+            } else {
+                None
+            };
         let candidate_element: Element<_> = if state.is_paged() || consumed == 1 {
             Scrollable::with_direction(
                 candidate_row,
@@ -727,36 +725,22 @@ impl ToolbarLayout {
         };
 
         let mut row = Row::new().height(Length::Fill).align_y(Vertical::Center);
-        row = row.push(
-            nerd_btn(
-                '󰒮',
-                font_size,
-                if prev_message.is_some() {
-                    color
-                } else {
-                    disabled_color
-                },
-                unit,
-            )
-            .on_press_maybe(prev_message),
-        );
+        row = row.push(nerd_btn_container(
+            nerd_btn('󰒮', font_size, unit)
+                .on_release_with(prev_message.map(|message| move || message.clone())),
+            font_size,
+            unit,
+        ));
         row = row.push(
             // make it scrollable if there are too many items
             Container::new(candidate_element).center(Length::Fill),
         );
-        row = row.push(
-            nerd_btn(
-                '󰒭',
-                font_size,
-                if next_message.is_some() {
-                    color
-                } else {
-                    disabled_color
-                },
-                unit,
-            )
-            .on_press_maybe(next_message),
-        );
+        row = row.push(nerd_btn_container(
+            nerd_btn('󰒭', font_size, unit)
+                .on_release_with(next_message.map(|message| move || message.clone())),
+            font_size,
+            unit,
+        ));
 
         Container::new(row)
             .width(Length::Fill)
@@ -772,14 +756,12 @@ impl ToolbarLayout {
         font_size: KLength,
     ) -> Element<'b, Message> {
         let state = params.state;
-        let theme = state.theme();
-        let color = theme.extended_palette().background.weak.text;
         let mut row = Row::new()
             .height(Length::Fill)
             .align_y(Vertical::Center)
             .spacing(unit * 2);
 
-        let indicator_message = match state.indicator_display() {
+        let indicator_message: Option<Message> = match state.indicator_display() {
             IndicatorDisplay::Auto => Some(WindowManagerEvent::OpenIndicator.into()),
             IndicatorDisplay::AlwaysOn => {
                 Some(WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction).into())
@@ -793,7 +775,11 @@ impl ToolbarLayout {
             }
         };
         if let Some(message) = indicator_message {
-            row = row.push(nerd_btn('󰁄', font_size, color, unit).on_press(message));
+            row = row.push(nerd_btn_container(
+                nerd_btn('󰁄', font_size, unit).on_release_with(Some(move || message.clone())),
+                font_size,
+                unit,
+            ));
         }
 
         // padding
@@ -823,7 +809,7 @@ impl ToolbarLayout {
             Row::new()
                 .align_y(Vertical::Center)
                 .spacing(unit)
-                .push(nerd_icon('󰏪', font_size, color))
+                .push(nerd_icon('󰏪', font_size))
                 .push(
                     PickList::new(state.im().im_names(), state.im().im_name(), |im| {
                         ImEvent::SelectIm(im).into()
@@ -835,7 +821,7 @@ impl ToolbarLayout {
             Row::new()
                 .align_y(Vertical::Center)
                 .spacing(unit)
-                .push(nerd_icon('󰏘', font_size, color))
+                .push(nerd_icon('󰏘', font_size))
                 .push(
                     PickList::new(
                         state.store().theme_names(),
@@ -850,11 +836,12 @@ impl ToolbarLayout {
         if self.quick_action_bar_state == QuickActionBarState::Toggle {
             let shown = self.quick_action_bar_shown;
             tray = tray.push(
-                Container::new(
-                    nerd_btn('', font_size, color, unit)
-                        .on_press(LayoutEvent::ToggleQuickActionBar.into()),
+                nerd_btn_container(
+                    nerd_btn('', font_size, unit)
+                        .on_release_with(Some(|| LayoutEvent::ToggleQuickActionBar.into())),
+                    font_size,
+                    unit,
                 )
-                .align_x(Horizontal::Center)
                 .style(move |theme: &Theme| {
                     let mut style = ContainerStyle::default();
                     if shown {
@@ -865,9 +852,12 @@ impl ToolbarLayout {
                 }),
             );
         }
-        tray = tray.push(
-            nerd_btn('󰘮', font_size, color, unit).on_press(LayoutEvent::ToggleSetting.into()),
-        );
+        tray = tray.push(nerd_btn_container(
+            nerd_btn('󰘮', font_size, unit)
+                .on_release_with(Some(|| LayoutEvent::ToggleSetting.into())),
+            font_size,
+            unit,
+        ));
         row = row.push(tray);
         Container::new(row)
             .width(Length::Fill)
@@ -889,7 +879,6 @@ impl ToolbarLayout {
             .align_y(Vertical::Center);
         row = row.push(
             ExtButton::new(Text::new("Reload").size(font_size))
-                .border_radius(BORDER_RADIUS)
                 .padding(DEFAULT_PADDING)
                 .on_release_with(Some(|| StoreEvent::Load(true).into())),
         );
@@ -943,7 +932,6 @@ impl ToolbarLayout {
                             .font(font)
                             .shaping(Shaping::Advanced),
                     )
-                    .border_radius(BORDER_RADIUS)
                     .padding(DEFAULT_PADDING)
                     .on_release_with(Some(|| KeyboardEvent::InsertComboKeyRelease.into())),
                 )
@@ -954,7 +942,6 @@ impl ToolbarLayout {
                             .font(font)
                             .shaping(Shaping::Advanced),
                     )
-                    .border_radius(BORDER_RADIUS)
                     .padding(DEFAULT_PADDING)
                     .on_release_with(Some(|| KeyboardEvent::InsertComboKeyReleaseAll.into())),
                 )
@@ -1015,7 +1002,6 @@ impl ToolbarLayout {
                 .push(widget::button_container(content))
                 .push(
                     ExtButton::new(texts)
-                        .border_radius(BORDER_RADIUS)
                         .padding(DEFAULT_PADDING)
                         .on_release_with(Some(|| KeyboardEvent::StopRepeating.into()))
                         .on_press_with(Some(move || {
@@ -1043,7 +1029,6 @@ impl ToolbarLayout {
                 .size(font_size)
                 .shaping(Shaping::Advanced),
         )
-        .border_radius(BORDER_RADIUS)
         .padding(DEFAULT_PADDING)
         .on_release_with(Some(move || {
             KeyboardEvent::ClickCustomAction(cloned_name.clone()).into()
@@ -1216,13 +1201,17 @@ where
             .align_y(Vertical::Center)
             .spacing(text_size)
             .push(
-                Button::new(Text::new("-").size(text_size))
-                    .on_press_maybe(self.on_decreased(state)),
+                ExtButton::new(Text::new("-").size(text_size)).on_release_with(
+                    self.on_decreased(state)
+                        .map(|message| move || message.clone()),
+                ),
             )
             .push(Text::new(cur_value.to_string()).size(text_size))
             .push(
-                Button::new(Text::new("+").size(text_size))
-                    .on_press_maybe(self.on_increased(state)),
+                ExtButton::new(Text::new("+").size(text_size)).on_release_with(
+                    self.on_increased(state)
+                        .map(|message| move || message.clone()),
+                ),
             )
             .into()
     }
@@ -1347,32 +1336,40 @@ impl ToElementFieldType for BoolDesc {
     }
 }
 
-fn nerd_icon<'a, Message: 'a>(icon: char, size: KLength, color: Color) -> Element<'a, Message> {
+fn nerd_icon<'a, Message: 'a>(icon: char, size: KLength) -> Element<'a, Message> {
     Text::new(icon)
         .size(size)
         .center()
         .font(font::load("fcitx5 osk nerd"))
         .shaping(Shaping::Advanced)
-        .color(color)
         .into()
 }
 
 fn nerd_btn<'a, Message: 'a>(
     icon: char,
     font_size: KLength,
-    color: Color,
     unit: KLength,
-) -> Button<'a, Message> {
-    Button::new(
-        Container::new(nerd_icon(icon, font_size, color))
-            .height(Length::Fill)
-            .center_x(font_size + 2 * unit)
-            .align_y(Vertical::Center),
-    )
-    .width(font_size + 2 * unit)
-    .height(Length::Fill)
-    .style(|_, _| ButtonStyle::default().with_background(Color::TRANSPARENT))
-    .padding(0)
+) -> ExtButton<'a, Message, ButtonDummyCb<Message>, ButtonDummyCb<Message>> {
+    ExtButton::new(nerd_icon(icon, font_size))
+        .width(font_size + unit)
+        .height(font_size + unit)
+        .style(widget::button_text_class)
+        .padding(0)
+}
+
+fn nerd_btn_container<'a, Message, PressCb, ReleaseCb>(
+    btn: ExtButton<'a, Message, PressCb, ReleaseCb>,
+    font_size: KLength,
+    unit: KLength,
+) -> Container<'a, Message>
+where
+    Message: 'a + Clone,
+    PressCb: 'static + Fn() -> Message,
+    ReleaseCb: 'static + Fn() -> Message,
+{
+    Container::new(btn)
+        .center_x(font_size + 2 * unit)
+        .center_y(Length::Fill)
 }
 
 fn candidate_btn(

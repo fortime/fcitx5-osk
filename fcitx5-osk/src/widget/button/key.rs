@@ -1,18 +1,21 @@
 use std::collections::HashSet;
 
 use iced::{
-    Border, Color, Element, Event, Length, Padding, Rectangle, Size, Vector,
+    Background, Color, Element, Event, Length, Padding, Rectangle, Size, Vector,
     advanced::{
         Clipboard, Layout, Shell, Widget, layout, overlay, renderer,
         widget::{Operation, Tree, tree},
     },
-    border::Radius,
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
         Interaction as MouseInteraction,
     },
     touch::{Event as TouchEvent, Finger as TouchFinger},
+    widget::button::{Status as ButtonStatus, Style as ButtonStyle, StyleFn as ButtonStyleFn},
+    window::Event as WindowEvent,
 };
+
+use crate::widget::button::ExtButtonCatalog;
 
 /// Local state of the [`Key`].
 #[derive(Default)]
@@ -51,29 +54,24 @@ pub struct KeyEvent {
     pub bounds: Rectangle,
 }
 
-pub trait AsThemeRef {
-    fn as_ref(&self) -> &iced::Theme;
-}
-
-impl AsThemeRef for iced::Theme {
-    fn as_ref(&self) -> &iced::Theme {
-        self
-    }
-}
-
 /// A widget works like MouseArea, Emit messages on mouse press/release events and finger press/lift/lost events.
-pub struct Key<'a, Message, PressCb, ReleaseCb, Theme = iced::Theme, Renderer = iced::Renderer> {
+pub struct Key<'a, Message, PressCb, ReleaseCb, Theme = iced::Theme, Renderer = iced::Renderer>
+where
+    Theme: ExtButtonCatalog,
+{
     content: Element<'a, Message, Theme, Renderer>,
     width: Length,
     height: Length,
     padding: Padding,
     on_press_with: Option<PressCb>,
     on_release_with: Option<ReleaseCb>,
-    border_radius: Radius,
+    class: Theme::Class<'a>,
 }
 
 impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
     Key<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
+where
+    Theme: ExtButtonCatalog,
 {
     /// The callback for getting a message on a press event.
     pub fn on_press_with<NewPressCb>(
@@ -87,7 +85,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with: _on_press_with,
             on_release_with,
-            border_radius,
+            class,
         } = self;
         Key {
             content,
@@ -96,7 +94,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with: cb,
             on_release_with,
-            border_radius,
+            class,
         }
     }
 
@@ -112,7 +110,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with,
             on_release_with: _on_release_with,
-            border_radius,
+            class,
         } = self;
         Key {
             content,
@@ -121,7 +119,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with,
             on_release_with: cb,
-            border_radius,
+            class,
         }
     }
 
@@ -140,8 +138,11 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
         self
     }
 
-    pub fn border_radius(mut self, border_radius: impl Into<Radius>) -> Self {
-        self.border_radius = border_radius.into();
+    pub fn style(mut self, style: impl Fn(&Theme, ButtonStatus) -> ButtonStyle + 'a) -> Self
+    where
+        Theme::Class<'a>: From<ButtonStyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as ButtonStyleFn<'a, Theme>).into();
         self
     }
 }
@@ -151,6 +152,7 @@ pub type DummyCb<Message> = fn(KeyEvent) -> Message;
 impl<'a, Message, Theme, Renderer>
     Key<'a, Message, DummyCb<Message>, DummyCb<Message>, Theme, Renderer>
 where
+    Theme: ExtButtonCatalog,
     Renderer: renderer::Renderer,
 {
     /// Creates a [`Key`] with the given content.
@@ -162,9 +164,9 @@ where
             width: size.width.fluid(),
             height: size.height.fluid(),
             padding: Default::default(),
-            border_radius: Default::default(),
             on_press_with: Default::default(),
             on_release_with: Default::default(),
+            class: Theme::custom_default(),
         }
     }
 }
@@ -175,7 +177,7 @@ where
     Message: Clone,
     PressCb: 'static + Fn(KeyEvent) -> Message,
     ReleaseCb: 'static + Fn(KeyEvent) -> Message,
-    Theme: AsThemeRef,
+    Theme: ExtButtonCatalog,
     Renderer: renderer::Renderer,
 {
     fn tag(&self) -> tree::Tag {
@@ -247,9 +249,6 @@ where
             shell,
             viewport,
         );
-        if shell.is_event_captured() {
-            return;
-        }
 
         update(self, tree, event, layout, cursor, shell);
     }
@@ -282,20 +281,27 @@ where
         viewport: &Rectangle,
     ) {
         let state: &KeyState = tree.state.downcast_ref();
-        let background = if state.has_finger_pressed() {
-            theme.as_ref().extended_palette().primary.strong.color
+        let status = if state.has_finger_pressed() {
+            ButtonStatus::Pressed
         } else if state.is_hovered() {
-            theme.as_ref().extended_palette().primary.weak.color
+            ButtonStatus::Hovered
+        } else if self.on_press_with.is_some() || self.on_release_with.is_some() {
+            ButtonStatus::Active
         } else {
-            theme.as_ref().extended_palette().background.base.color
+            ButtonStatus::Disabled
         };
+        let style = theme.style(&self.class, status);
         renderer.fill_quad(
             renderer::Quad {
                 bounds: layout.bounds(),
-                border: Border::default().rounded(self.border_radius),
+                border: style.border,
+                shadow: style.shadow,
+                snap: style.snap,
                 ..Default::default()
             },
-            background,
+            style
+                .background
+                .unwrap_or(Background::Color(Color::TRANSPARENT)),
         );
         // after padding we should use layout.children[0] instead of layout to draw content
         self.content.as_widget().draw(
@@ -337,7 +343,7 @@ where
     Message: 'a + Clone,
     PressCb: 'static + Fn(KeyEvent) -> Message,
     ReleaseCb: 'static + Fn(KeyEvent) -> Message,
-    Theme: 'a + AsThemeRef,
+    Theme: 'a + ExtButtonCatalog,
     Renderer: 'a + renderer::Renderer,
 {
     fn from(
@@ -360,12 +366,17 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
     Message: Clone,
     PressCb: 'static + Fn(KeyEvent) -> Message,
     ReleaseCb: 'static + Fn(KeyEvent) -> Message,
+    Theme: ExtButtonCatalog,
 {
+    let state: &mut KeyState = tree.state.downcast_mut();
+
     if widget.on_press_with.is_none() && widget.on_release_with.is_none() {
+        if state.hovered {
+            state.hovered = false;
+            shell.request_redraw();
+        }
         return;
     }
-
-    let state: &mut KeyState = tree.state.downcast_mut();
 
     let bounds = layout.bounds();
 
@@ -386,14 +397,27 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             (false, true, Some(id), Some(position))
         }
         Event::Mouse(MouseEvent::CursorMoved { position }) => {
-            if bounds.contains(position) != state.hovered {
-                state.hovered = !state.hovered;
+            if bounds.contains(position) && !state.hovered && !shell.is_event_captured() {
+                state.hovered = true;
                 shell.request_redraw();
+            }
+            return;
+        }
+        Event::Window(WindowEvent::RedrawRequested(_)) => {
+            if state.hovered {
+                if cursor.position_in(bounds).is_none() {
+                    state.hovered = false;
+                }
             }
             return;
         }
         _ => return,
     };
+
+    // Check after clearing stale hovered state
+    if shell.is_event_captured() {
+        return;
+    }
 
     if pressed {
         if let (false, Some(position)) = (state.is_pressed(&finger), position)
@@ -447,7 +471,10 @@ struct PopupKeyState {
 }
 
 /// A widget works like MouseArea, Emit messages on mouse enter/leave events and finger move event.
-pub struct PopupKey<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
+pub struct PopupKey<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
+where
+    Theme: ExtButtonCatalog,
+{
     content: Element<'a, Message, Theme, Renderer>,
     finger: Option<TouchFinger>,
     width: Length,
@@ -455,10 +482,13 @@ pub struct PopupKey<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
     padding: Padding,
     on_enter: Option<Message>,
     on_exit: Option<Message>,
-    border_radius: Radius,
+    class: Theme::Class<'a>,
 }
 
-impl<Message, Theme, Renderer> PopupKey<'_, Message, Theme, Renderer> {
+impl<'a, Message, Theme, Renderer> PopupKey<'a, Message, Theme, Renderer>
+where
+    Theme: ExtButtonCatalog,
+{
     /// The message to emit on a enter event.
     #[must_use]
     pub fn on_enter(mut self, message: Message) -> Self {
@@ -488,14 +518,18 @@ impl<Message, Theme, Renderer> PopupKey<'_, Message, Theme, Renderer> {
         self
     }
 
-    pub fn border_radius(mut self, border_radius: impl Into<Radius>) -> Self {
-        self.border_radius = border_radius.into();
+    pub fn style(mut self, style: impl Fn(&Theme, ButtonStatus) -> ButtonStyle + 'a) -> Self
+    where
+        Theme::Class<'a>: From<ButtonStyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as ButtonStyleFn<'a, Theme>).into();
         self
     }
 }
 
 impl<'a, Message, Theme, Renderer> PopupKey<'a, Message, Theme, Renderer>
 where
+    Theme: ExtButtonCatalog,
     Renderer: renderer::Renderer,
 {
     /// Creates a [`PopupKey`] with the given content.
@@ -511,9 +545,9 @@ where
             width: size.width.fluid(),
             height: size.height.fluid(),
             padding: Default::default(),
-            border_radius: Default::default(),
             on_enter: Default::default(),
             on_exit: Default::default(),
+            class: Theme::custom_default(),
         }
     }
 }
@@ -522,7 +556,7 @@ impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for PopupKey<'_, Message, Theme, Renderer>
 where
     Message: Clone,
-    Theme: AsThemeRef,
+    Theme: ExtButtonCatalog,
     Renderer: renderer::Renderer,
 {
     fn tag(&self) -> tree::Tag {
@@ -584,6 +618,7 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        let captured = shell.is_event_captured();
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -594,11 +629,15 @@ where
             shell,
             viewport,
         );
-        if shell.is_event_captured() {
-            return;
-        }
+        let child_captured = captured != shell.is_event_captured();
+
+        let state: &mut PopupKeyState = tree.state.downcast_mut();
 
         if self.on_enter.is_none() && self.on_exit.is_none() {
+            if state.is_active {
+                state.is_active = false;
+                shell.request_redraw();
+            }
             return;
         }
 
@@ -608,21 +647,33 @@ where
             _ => return,
         };
 
+        // Clear active state even if the event is captured
+        let cur_is_active = state.is_active;
         if finger == self.finger {
-            let state: &mut PopupKeyState = tree.state.downcast_mut();
+            let is_hovered = layout.bounds().contains(position);
+            if state.is_active && !is_hovered {
+                state.is_active = false;
+                shell.request_redraw();
+            }
+        }
+
+        // only return if event is captured by its child, so that the on_exit event can be published
+        if child_captured {
+            return;
+        }
+
+        if finger == self.finger {
             let is_hovered = layout.bounds().contains(position);
             if is_hovered {
                 shell.capture_event();
             }
-            match (is_hovered, state.is_active, &self.on_enter, &self.on_exit) {
+            match (is_hovered, cur_is_active, &self.on_enter, &self.on_exit) {
                 (true, false, Some(on_enter), _) => {
                     state.is_active = true;
                     shell.request_redraw();
                     shell.publish(on_enter.clone());
                 }
                 (false, true, _, Some(on_exit)) => {
-                    state.is_active = false;
-                    shell.request_redraw();
                     shell.publish(on_exit.clone());
                 }
                 _ => {}
@@ -658,20 +709,22 @@ where
         viewport: &Rectangle,
     ) {
         let state: &PopupKeyState = tree.state.downcast_ref();
-        let background = if state.is_active {
-            theme.as_ref().extended_palette().primary.strong.color
-        } else {
+        let mut style = theme.style(&self.class, ButtonStatus::Pressed);
+        if !state.is_active {
             // use the background of outside container, theme.as_ref().extended_palette().primary.weak.color
-            Color::TRANSPARENT
-        };
+            style.background = None;
+        }
         renderer.fill_quad(
             renderer::Quad {
                 bounds: layout.bounds(),
-                // It should be the same as the outside container
-                border: Border::default().rounded(self.border_radius),
+                border: style.border,
+                shadow: style.shadow,
+                snap: style.snap,
                 ..Default::default()
             },
-            background,
+            style
+                .background
+                .unwrap_or(Background::Color(Color::TRANSPARENT)),
         );
         self.content.as_widget().draw(
             &tree.children[0],
@@ -709,7 +762,7 @@ impl<'a, Message, Theme, Renderer> From<PopupKey<'a, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a + Clone,
-    Theme: 'a + AsThemeRef,
+    Theme: 'a + ExtButtonCatalog,
     Renderer: 'a + renderer::Renderer,
 {
     fn from(

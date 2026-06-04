@@ -1,19 +1,30 @@
 use std::collections::HashSet;
 
 use iced::{
-    Border, Element, Event, Length, Padding, Rectangle, Renderer, Size, Theme, Vector,
+    Background, Border, Color, Element, Event, Length, Padding, Rectangle, Renderer, Size, Theme,
+    Vector,
     advanced::{
         Clipboard, Layout, Shell, Widget, layout, overlay, renderer,
         widget::{Operation, Tree, tree},
     },
-    border::{self, Radius},
+    border,
     mouse::{
         Button as MouseButton, Cursor as MouseCursor, Event as MouseEvent,
         Interaction as MouseInteraction,
     },
     touch::{Event as TouchEvent, Finger as TouchFinger},
-    widget::{Container, button::DEFAULT_PADDING, container::Style as ContainerStyle},
+    widget::{
+        Container,
+        button::{
+            Catalog as ButtonCatalog, DEFAULT_PADDING, Status as ButtonStatus,
+            Style as ButtonStyle, StyleFn as ButtonStyleFn,
+        },
+        container::Style as ContainerStyle,
+    },
+    window::Event as WindowEvent,
 };
+
+pub mod key;
 
 pub const BORDER_RADIUS: f32 = 5.;
 
@@ -46,13 +57,13 @@ impl State {
     }
 }
 
-pub trait AsThemeRef {
-    fn as_ref(&self) -> &iced::Theme;
+pub trait ExtButtonCatalog: ButtonCatalog {
+    fn custom_default<'a>() -> Self::Class<'a>;
 }
 
-impl AsThemeRef for iced::Theme {
-    fn as_ref(&self) -> &iced::Theme {
-        self
+impl ExtButtonCatalog for Theme {
+    fn custom_default<'a>() -> Self::Class<'a> {
+        Box::new(button_custom_class)
     }
 }
 
@@ -64,18 +75,22 @@ pub struct ExtButton<
     ReleaseCb,
     Theme = iced::Theme,
     Renderer = iced::Renderer,
-> {
+> where
+    Theme: ExtButtonCatalog,
+{
     content: Element<'a, Message, Theme, Renderer>,
     width: Length,
     height: Length,
     padding: Padding,
     on_press_with: Option<PressCb>,
     on_release_with: Option<ReleaseCb>,
-    border_radius: Radius,
+    class: Theme::Class<'a>,
 }
 
 impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
     ExtButton<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
+where
+    Theme: ExtButtonCatalog,
 {
     /// The callback for getting a message on a press event.
     pub fn on_press_with<NewPressCb>(
@@ -89,7 +104,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with: _on_press_with,
             on_release_with,
-            border_radius,
+            class,
         } = self;
         ExtButton {
             content,
@@ -98,7 +113,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with: cb,
             on_release_with,
-            border_radius,
+            class,
         }
     }
 
@@ -114,7 +129,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with,
             on_release_with: _on_release_with,
-            border_radius,
+            class,
         } = self;
         ExtButton {
             content,
@@ -123,7 +138,7 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
             padding,
             on_press_with,
             on_release_with: cb,
-            border_radius,
+            class,
         }
     }
 
@@ -142,8 +157,11 @@ impl<'a, Message, PressCb, ReleaseCb, Theme, Renderer>
         self
     }
 
-    pub fn border_radius(mut self, border_radius: impl Into<Radius>) -> Self {
-        self.border_radius = border_radius.into();
+    pub fn style(mut self, style: impl Fn(&Theme, ButtonStatus) -> ButtonStyle + 'a) -> Self
+    where
+        Theme::Class<'a>: From<ButtonStyleFn<'a, Theme>>,
+    {
+        self.class = (Box::new(style) as ButtonStyleFn<'a, Theme>).into();
         self
     }
 }
@@ -153,6 +171,7 @@ pub type DummyCb<Message> = fn() -> Message;
 impl<'a, Message, Theme, Renderer>
     ExtButton<'a, Message, DummyCb<Message>, DummyCb<Message>, Theme, Renderer>
 where
+    Theme: ExtButtonCatalog,
     Renderer: renderer::Renderer,
 {
     /// Creates a [`ExtButton`] with the given content.
@@ -166,7 +185,7 @@ where
             on_press_with: Default::default(),
             on_release_with: Default::default(),
             padding: Default::default(),
-            border_radius: Default::default(),
+            class: Theme::custom_default(),
         }
     }
 }
@@ -177,7 +196,7 @@ where
     Message: Clone,
     PressCb: 'static + Fn() -> Message,
     ReleaseCb: 'static + Fn() -> Message,
-    Theme: AsThemeRef,
+    Theme: ExtButtonCatalog,
     Renderer: renderer::Renderer,
 {
     fn tag(&self) -> tree::Tag {
@@ -249,9 +268,6 @@ where
             shell,
             viewport,
         );
-        if shell.is_event_captured() {
-            return;
-        }
 
         update(self, tree, event, layout, cursor, shell);
     }
@@ -266,7 +282,7 @@ where
     ) -> MouseInteraction {
         let is_mouse_over = cursor.is_over(layout.bounds());
 
-        if is_mouse_over && self.on_press_with.is_some() {
+        if is_mouse_over && (self.on_press_with.is_some() || self.on_release_with.is_some()) {
             MouseInteraction::Pointer
         } else {
             MouseInteraction::default()
@@ -278,33 +294,42 @@ where
         tree: &Tree,
         renderer: &mut Renderer,
         theme: &Theme,
-        renderer_style: &renderer::Style,
+        _style: &renderer::Style,
         layout: Layout<'_>,
         cursor: MouseCursor,
         viewport: &Rectangle,
     ) {
         let state: &State = tree.state.downcast_ref();
-        let background = if state.has_finger_pressed() {
-            theme.as_ref().extended_palette().primary.strong.color
+        let status = if state.has_finger_pressed() {
+            ButtonStatus::Pressed
         } else if state.is_hovered() {
-            theme.as_ref().extended_palette().primary.weak.color
+            ButtonStatus::Hovered
+        } else if self.on_press_with.is_some() || self.on_release_with.is_some() {
+            ButtonStatus::Active
         } else {
-            theme.as_ref().extended_palette().background.base.color
+            ButtonStatus::Disabled
         };
+        let style = theme.style(&self.class, status);
         renderer.fill_quad(
             renderer::Quad {
                 bounds: layout.bounds(),
-                border: Border::default().rounded(self.border_radius),
+                border: style.border,
+                shadow: style.shadow,
+                snap: style.snap,
                 ..Default::default()
             },
-            background,
+            style
+                .background
+                .unwrap_or(Background::Color(Color::TRANSPARENT)),
         );
         // after padding we should use layout.children[0] instead of layout to draw content
         self.content.as_widget().draw(
             &tree.children[0],
             renderer,
             theme,
-            renderer_style,
+            &renderer::Style {
+                text_color: style.text_color,
+            },
             layout
                 .children()
                 .next()
@@ -339,7 +364,7 @@ where
     Message: 'a + Clone,
     PressCb: 'static + Fn() -> Message,
     ReleaseCb: 'static + Fn() -> Message,
-    Theme: 'a + AsThemeRef,
+    Theme: 'a + ExtButtonCatalog,
     Renderer: 'a + renderer::Renderer,
 {
     fn from(
@@ -362,12 +387,17 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
     Message: Clone,
     PressCb: 'static + Fn() -> Message,
     ReleaseCb: 'static + Fn() -> Message,
+    Theme: ExtButtonCatalog,
 {
+    let state: &mut State = tree.state.downcast_mut();
+
     if widget.on_press_with.is_none() && widget.on_release_with.is_none() {
+        if state.hovered {
+            state.hovered = false;
+            shell.request_redraw();
+        }
         return;
     }
-
-    let state: &mut State = tree.state.downcast_mut();
 
     let bounds = layout.bounds();
 
@@ -386,14 +416,27 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
         }
         Event::Touch(TouchEvent::FingerLost { id, position }) => (false, Some(id), Some(position)),
         Event::Mouse(MouseEvent::CursorMoved { position }) => {
-            if bounds.contains(position) != state.hovered {
-                state.hovered = !state.hovered;
+            if bounds.contains(position) && !state.hovered && !shell.is_event_captured() {
+                state.hovered = true;
                 shell.request_redraw();
+            }
+            return;
+        }
+        Event::Window(WindowEvent::RedrawRequested(_)) => {
+            if state.hovered {
+                if cursor.position_in(bounds).is_none() {
+                    state.hovered = false;
+                }
             }
             return;
         }
         _ => return,
     };
+
+    // Check after clearing stale hovered state
+    if shell.is_event_captured() {
+        return;
+    }
 
     if pressed {
         if let (false, Some(position)) = (state.is_pressed(&finger), position)
@@ -410,6 +453,9 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             {
                 shell.publish(cb());
                 shell.capture_event();
+            }
+            if widget.on_press_with.is_none() {
+                shell.request_redraw();
             }
             state.finger_pressed(finger);
         }
@@ -442,4 +488,60 @@ pub fn button_container<'a, Message>(
             ..Default::default()
         })
         .padding(DEFAULT_PADDING)
+}
+
+fn button_base_class(theme: &Theme) -> ButtonStyle {
+    let pair = theme.extended_palette().background.base;
+    ButtonStyle {
+        background: Some(Background::Color(pair.color)),
+        text_color: pair.text,
+        border: Border::default().rounded(BORDER_RADIUS),
+        ..Default::default()
+    }
+}
+
+fn button_disabled(style: ButtonStyle) -> ButtonStyle {
+    ButtonStyle {
+        background: style
+            .background
+            .map(|background| background.scale_alpha(0.5)),
+        text_color: style.text_color.scale_alpha(0.5),
+        ..style
+    }
+}
+
+fn button_custom_class(theme: &Theme, status: ButtonStatus) -> ButtonStyle {
+    let base = button_base_class(theme);
+    let palette = theme.extended_palette();
+    match status {
+        ButtonStatus::Active => base,
+        ButtonStatus::Hovered => ButtonStyle {
+            background: Some(Background::Color(palette.primary.weak.color)),
+            ..base
+        },
+        ButtonStatus::Pressed => ButtonStyle {
+            background: Some(Background::Color(palette.primary.strong.color)),
+            ..base
+        },
+        ButtonStatus::Disabled => button_disabled(base),
+    }
+}
+
+/// Highlight the text and make the background transparent
+pub fn button_text_class(theme: &Theme, status: ButtonStatus) -> ButtonStyle {
+    let mut base = button_base_class(theme);
+    base.background = None;
+    let palette = theme.extended_palette();
+    match status {
+        ButtonStatus::Active => base,
+        ButtonStatus::Hovered => ButtonStyle {
+            background: Some(Background::Color(palette.primary.weak.color)),
+            ..base
+        },
+        ButtonStatus::Pressed => ButtonStyle {
+            text_color: palette.primary.strong.color,
+            ..base
+        },
+        ButtonStatus::Disabled => button_disabled(base),
+    }
 }
