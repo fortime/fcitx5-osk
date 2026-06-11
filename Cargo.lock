@@ -1383,6 +1383,7 @@ dependencies = [
  "getset",
  "humantime-serde",
  "iced",
+ "iced_drop",
  "iced_futures",
  "iced_graphics",
  "iced_layershell",
@@ -2210,6 +2211,17 @@ dependencies = [
  "iced_program",
  "iced_widget",
  "log",
+]
+
+[[package]]
+name = "iced_drop"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d4ca26c27eca8ba48fa498a2e5f3319601be07198a10796e6e145a2bd84c43b"
+dependencies = [
+ "iced",
+ "iced_core",
+ "iced_widget",
 ]
 
 [[package]]

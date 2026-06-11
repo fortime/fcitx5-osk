@@ -204,6 +204,10 @@ impl Store {
     pub fn custom_action(&self, name: &str) -> Option<Rc<CustomAction>> {
         self.custom_actions.get(name).cloned()
     }
+
+    pub fn custom_actions(&self) -> Vec<Rc<CustomAction>> {
+        self.custom_actions.values().cloned().collect()
+    }
 }
 
 fn xdg_config_folders_if_empty<'a>(dir_paths: &'a [PathBuf], sub_dir: &str) -> Cow<'a, [PathBuf]> {

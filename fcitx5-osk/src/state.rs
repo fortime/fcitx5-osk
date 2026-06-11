@@ -29,8 +29,8 @@ mod layout;
 mod window;
 
 pub use config::{
-    BoolDesc, ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, OwnedEnumDesc, RangeDesc,
-    StepDesc, TextDesc, UpdateConfigEvent,
+    BoolDesc, ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, MultiSelectionDesc,
+    OwnedEnumDesc, RangeDesc, StepDesc, TextDesc, UpdateConfigEvent, ValueAndDescription,
 };
 pub use im::{ImEvent, ImState};
 pub use keyboard::{KeyEvent, KeyboardBackend, KeyboardEvent, KeyboardState};
@@ -269,6 +269,11 @@ where
                     Task::done(error_with_context(e, msg).into())
                 }
             },
+            StoreEvent::UpdateCustomActions(custom_actions) => {
+                self.keyboard
+                    .update_custom_actions(&custom_actions, &self.store);
+                Message::from_nothing()
+            }
         }
     }
 }
@@ -411,6 +416,7 @@ impl From<ThemeEvent> for Message {
 #[derive(Clone, Debug)]
 pub enum StoreEvent {
     Load(bool),
+    UpdateCustomActions(Arc<Vec<String>>),
 }
 
 impl From<StoreEvent> for Message {

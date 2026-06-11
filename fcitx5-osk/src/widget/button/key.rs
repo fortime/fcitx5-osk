@@ -380,33 +380,32 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
 
     let bounds = layout.bounds();
 
-    let (pressed, cancelled, finger, position) = match *event {
-        Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
-            (true, false, None, cursor.position())
-        }
-        Event::Mouse(MouseEvent::ButtonReleased(MouseButton::Left)) => {
-            (false, false, None, cursor.position())
-        }
-        Event::Touch(TouchEvent::FingerPressed { id, position }) => {
-            (true, false, Some(id), Some(position))
-        }
-        Event::Touch(TouchEvent::FingerLifted { id, position }) => {
-            (false, false, Some(id), Some(position))
-        }
-        Event::Touch(TouchEvent::FingerLost { id, position }) => {
-            (false, true, Some(id), Some(position))
-        }
-        Event::Mouse(MouseEvent::CursorMoved { position }) => {
-            if bounds.contains(position) && !state.hovered && !shell.is_event_captured() {
-                state.hovered = true;
-                shell.request_redraw();
+    // NOTE the position won't be in the bounds if the button is inside a scrollable, use the
+    // position from `cursor`
+    let position = cursor.position();
+    let (pressed, cancelled, finger) = match *event {
+        Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => (true, false, None),
+        Event::Mouse(MouseEvent::ButtonReleased(MouseButton::Left)) => (false, false, None),
+        Event::Touch(TouchEvent::FingerPressed { id, .. }) => (true, false, Some(id)),
+        Event::Touch(TouchEvent::FingerLifted { id, .. }) => (false, false, Some(id)),
+        Event::Touch(TouchEvent::FingerLost { id, .. }) => (false, true, Some(id)),
+        Event::Mouse(MouseEvent::CursorMoved { .. }) => {
+            if !shell.is_event_captured() {
+                if cursor.is_over(bounds) && !state.hovered {
+                    state.hovered = true;
+                    shell.request_redraw();
+                } else if !cursor.is_over(bounds) && state.hovered {
+                    state.hovered = false;
+                    shell.request_redraw();
+                }
             }
             return;
         }
         Event::Window(WindowEvent::RedrawRequested(_)) => {
             if state.hovered {
-                if cursor.position_in(bounds).is_none() {
+                if !cursor.is_over(bounds) {
                     state.hovered = false;
+                    shell.request_redraw();
                 }
             }
             return;
@@ -459,8 +458,8 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
                 finger,
                 bounds,
             }));
-            shell.capture_event();
         }
+        shell.capture_event();
     }
 }
 
@@ -641,16 +640,18 @@ where
             return;
         }
 
-        let (finger, position) = match *event {
-            Event::Mouse(MouseEvent::CursorMoved { position }) => (None, position),
-            Event::Touch(TouchEvent::FingerMoved { id, position }) => (Some(id), position),
+        // NOTE the position won't be in the bounds if the button is inside a scrollable, use the
+        // position from `cursor`
+        let finger = match *event {
+            Event::Mouse(MouseEvent::CursorMoved { .. }) => None,
+            Event::Touch(TouchEvent::FingerMoved { id, .. }) => Some(id),
             _ => return,
         };
 
         // Clear active state even if the event is captured
         let cur_is_active = state.is_active;
         if finger == self.finger {
-            let is_hovered = layout.bounds().contains(position);
+            let is_hovered = cursor.is_over(layout.bounds());
             if state.is_active && !is_hovered {
                 state.is_active = false;
                 shell.request_redraw();
@@ -663,7 +664,7 @@ where
         }
 
         if finger == self.finger {
-            let is_hovered = layout.bounds().contains(position);
+            let is_hovered = cursor.is_over(layout.bounds());
             if is_hovered {
                 shell.capture_event();
             }

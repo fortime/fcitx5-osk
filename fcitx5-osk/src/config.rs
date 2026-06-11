@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future, path::PathBuf, time::Duration};
+use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use figment::{
@@ -137,7 +137,7 @@ pub struct Config {
     quick_action_bar_state: QuickActionBarState,
 
     /// Enabled custom actions
-    #[getset(get = "pub", set = "pub")]
+    #[getset(get = "pub")]
     #[serde(default)]
     custom_actions: Vec<String>,
 }
@@ -165,6 +165,10 @@ impl Config {
 
     pub fn set_preferred_output_name(&mut self, name: String) {
         self.preferred_output_name = Some(name);
+    }
+
+    pub fn set_custom_actions(&mut self, custom_actions: Arc<Vec<String>>) {
+        self.custom_actions = custom_actions.to_vec();
     }
 }
 

@@ -25,7 +25,7 @@ use serde::{
 
 use std::{
     collections::HashMap,
-    fmt::{Display, Formatter, Result as FmtResult},
+    fmt::{Debug, Display, Formatter, Result as FmtResult},
     ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
     path::PathBuf,
     result::Result as StdResult,
@@ -41,11 +41,15 @@ use crate::{
     font,
     state::{
         BoolDesc, CloseOpSource, DynamicEnumDesc, EnumDesc, Field, FieldType, ImEvent,
-        KeyboardEvent, LayoutEvent, OwnedEnumDesc, RangeDesc, StateExtractor, StepDesc, StoreEvent,
-        TextDesc, UpdateConfigEvent, WindowEvent, WindowManagerEvent,
+        KeyboardEvent, LayoutEvent, MultiSelectionDesc, OwnedEnumDesc, RangeDesc, StateExtractor,
+        StepDesc, StoreEvent, TextDesc, UpdateConfigEvent, ValueAndDescription, WindowEvent,
+        WindowManagerEvent,
     },
     store::IdAndConfigPath,
-    widget::{self, ButtonDummyCb, ExtButton, ExtPickList as _, Movable, Toggle, ToggleCondition},
+    widget::{
+        self, ButtonDummyCb, ExtButton, ExtPickList as _, Movable, MovableList, Toggle,
+        ToggleCondition,
+    },
     window::WindowManagerMode,
 };
 
@@ -70,7 +74,7 @@ impl Display for KLength {
     }
 }
 
-impl std::fmt::Debug for KLength {
+impl Debug for KLength {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         Display::fmt(&self, f)
     }
@@ -1063,7 +1067,7 @@ impl SettingLayout {
                 .center_y(height * row_num),
             );
             value_column = value_column.push(
-                Container::new(field_value_element(state, field, text_size))
+                Container::new(field_value_element(state, field, text_size, unit))
                     .center_y(height * row_num),
             );
         }
@@ -1095,6 +1099,7 @@ trait ToElementFieldType {
         field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: KLength,
+        unit: KLength,
     ) -> Element<'a, Message>;
 
     fn row_num(&self, _state: &dyn StateExtractor) -> u32 {
@@ -1111,6 +1116,7 @@ where
         _field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: KLength,
+        _unit: KLength,
     ) -> Element<'a, Message> {
         if self.is_enabled(state) {
             PickList::new(self.variants(), self.cur_value(state), |selected| {
@@ -1140,6 +1146,7 @@ where
         _field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: KLength,
+        _unit: KLength,
     ) -> Element<'a, Message> {
         if self.is_enabled(state) {
             PickList::new(self.variants(), self.cur_value(state), |selected| {
@@ -1169,6 +1176,7 @@ where
         _field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: KLength,
+        _unit: KLength,
     ) -> Element<'a, Message> {
         let (variants, selected) = self.variants_and_selected(state);
         if self.is_enabled(state) {
@@ -1195,6 +1203,7 @@ where
         _field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: KLength,
+        _unit: KLength,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(state);
         Row::new()
@@ -1226,6 +1235,7 @@ where
         field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: KLength,
+        _unit: KLength,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(field, state);
         let padding = DEFAULT_PADDING;
@@ -1304,6 +1314,7 @@ impl ToElementFieldType for TextDesc {
         field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: KLength,
+        _unit: KLength,
     ) -> Element<'a, Message> {
         TextInput::new(
             &self.placeholder(field, state).unwrap_or_default(),
@@ -1324,6 +1335,7 @@ impl ToElementFieldType for BoolDesc {
         _field: &'a Field,
         state: &'a dyn StateExtractor,
         text_size: KLength,
+        _unit: KLength,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(state);
         let mut toggler = Toggler::new(cur_value)
@@ -1333,6 +1345,70 @@ impl ToElementFieldType for BoolDesc {
             toggler = toggler.on_toggle(|value| self.on_changed(state, value))
         }
         toggler.into()
+    }
+}
+
+impl<T> ToElementFieldType for MultiSelectionDesc<T>
+where
+    T: Eq + Debug,
+{
+    fn to_element<'a>(
+        &'a self,
+        _field: &'a Field,
+        state: &'a dyn StateExtractor,
+        text_size: KLength,
+        unit: KLength,
+    ) -> Element<'a, Message> {
+        let variants = self.variants(state);
+        let selecteds = self.selecteds(state);
+        let mut movable_list = MovableList::new()
+            .spacing(text_size / 2.)
+            .item_padding(Padding::new(unit.0).horizontal(text_size))
+            .remove_button_size(((text_size + unit).0, (text_size + unit).0))
+            .remove_button_text_size(text_size);
+        for selected in selecteds {
+            let ValueAndDescription { value, desc } = selected;
+            movable_list = movable_list.push(value, Text::new(desc).size(text_size));
+        }
+        movable_list
+            .on_drop(|ids| {
+                let mut selections = self.selecteds(state);
+                tracing::debug!("New order: {ids:?}, current selections: {selections:?}");
+                let mut len = 0;
+                // reorder selections by ids
+                for idx in 0..ids.len() {
+                    if len >= selections.len() {
+                        break;
+                    }
+                    let id = ids[idx];
+                    if selections[len].value == *id {
+                        len += 1;
+                        continue;
+                    }
+                    let Some(pos) = selections[len + 1..].iter().position(|v| v.value == *id)
+                    else {
+                        tracing::warn!("[MultiSelectionDesc] {id:?} not found");
+                        continue;
+                    };
+                    selections.swap(len, pos + len + 1);
+                    len += 1;
+                }
+                selections.truncate(len);
+                self.on_changed(state, &selections)
+            })
+            .on_remove(|remove| {
+                let selections: Vec<_> = self
+                    .selecteds(state)
+                    .into_iter()
+                    .filter(|v| v.value != *remove)
+                    .collect();
+                self.on_changed(state, &selections)
+            })
+            .into()
+    }
+
+    fn row_num(&self, state: &dyn StateExtractor) -> u32 {
+        if self.is_enabled(state) { 2 } else { 1 }
     }
 }
 
@@ -1411,17 +1487,23 @@ fn field_value_element<'a>(
     state: &'a dyn StateExtractor,
     field: &'a Field,
     text_size: KLength,
+    unit: KLength,
 ) -> Element<'a, Message> {
     match field.typ() {
-        FieldType::StepU32(desc) => desc.to_element(field, state, text_size),
-        FieldType::RangeF32(desc) => desc.to_element(field, state, text_size),
-        FieldType::OwnedEnumPlacement(desc) => desc.to_element(field, state, text_size),
-        FieldType::OwnedEnumIndicatorDisplay(desc) => desc.to_element(field, state, text_size),
-        FieldType::OwnedEnumQuickActionBarState(desc) => desc.to_element(field, state, text_size),
-        FieldType::EnumString(desc) => desc.to_element(field, state, text_size),
-        FieldType::DynamicEnumString(desc) => desc.to_element(field, state, text_size),
-        FieldType::Text(desc) => desc.to_element(field, state, text_size),
-        FieldType::Bool(desc) => desc.to_element(field, state, text_size),
+        FieldType::StepU32(desc) => desc.to_element(field, state, text_size, unit),
+        FieldType::RangeF32(desc) => desc.to_element(field, state, text_size, unit),
+        FieldType::OwnedEnumPlacement(desc) => desc.to_element(field, state, text_size, unit),
+        FieldType::OwnedEnumIndicatorDisplay(desc) => {
+            desc.to_element(field, state, text_size, unit)
+        }
+        FieldType::OwnedEnumQuickActionBarState(desc) => {
+            desc.to_element(field, state, text_size, unit)
+        }
+        FieldType::EnumString(desc) => desc.to_element(field, state, text_size, unit),
+        FieldType::DynamicEnumString(desc) => desc.to_element(field, state, text_size, unit),
+        FieldType::Text(desc) => desc.to_element(field, state, text_size, unit),
+        FieldType::Bool(desc) => desc.to_element(field, state, text_size, unit),
+        FieldType::MultiSelectionString(desc) => desc.to_element(field, state, text_size, unit),
     }
 }
 
@@ -1436,5 +1518,6 @@ fn field_row_num<'a>(state: &'a dyn StateExtractor, field: &'a Field) -> u32 {
         FieldType::DynamicEnumString(desc) => desc.row_num(state),
         FieldType::Text(desc) => desc.row_num(state),
         FieldType::Bool(desc) => desc.row_num(state),
+        FieldType::MultiSelectionString(desc) => desc.row_num(state),
     }
 }

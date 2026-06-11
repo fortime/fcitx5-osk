@@ -150,19 +150,18 @@ where
 
             let state: &mut ToggleState = tree.state.downcast_mut();
 
+            // NOTE the position won't be in the bounds if the button is inside a scrollable, use
+            // the position from `cursor`
+            let position = cursor.position();
             let params = match *event {
-                Event::Mouse(MouseEvent::ButtonPressed(btn)) => {
-                    Some((true, Pointer::Mouse(btn), cursor.position()))
+                Event::Mouse(MouseEvent::ButtonPressed(btn)) => Some((true, Pointer::Mouse(btn))),
+                Event::Mouse(MouseEvent::ButtonReleased(btn)) => Some((false, Pointer::Mouse(btn))),
+                Event::Touch(TouchEvent::FingerPressed { id, .. }) => {
+                    Some((true, Pointer::Finger(id)))
                 }
-                Event::Mouse(MouseEvent::ButtonReleased(btn)) => {
-                    Some((false, Pointer::Mouse(btn), cursor.position()))
-                }
-                Event::Touch(TouchEvent::FingerPressed { id, position }) => {
-                    Some((true, Pointer::Finger(id), Some(position)))
-                }
-                Event::Touch(TouchEvent::FingerLifted { id, position })
-                | Event::Touch(TouchEvent::FingerLost { id, position }) => {
-                    Some((false, Pointer::Finger(id), Some(position)))
+                Event::Touch(TouchEvent::FingerLifted { id, .. })
+                | Event::Touch(TouchEvent::FingerLost { id, .. }) => {
+                    Some((false, Pointer::Finger(id)))
                 }
                 _ => None,
             };
@@ -186,7 +185,7 @@ where
                 break 'out;
             }
 
-            let Some((pressed, pointer, position)) = params else {
+            let Some((pressed, pointer)) = params else {
                 break 'out;
             };
 

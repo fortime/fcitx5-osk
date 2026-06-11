@@ -13,7 +13,7 @@ use crate::{
     config::{Config, ConfigManager, IndicatorDisplay, Placement, QuickActionBarState},
     dbus::server::ImPanelEvent,
     layout::KLength,
-    state::{ImEvent, LayoutEvent, StateExtractor, ThemeEvent, WindowManagerEvent},
+    state::{ImEvent, LayoutEvent, StateExtractor, StoreEvent, ThemeEvent, WindowManagerEvent},
     window::WindowManagerMode,
 };
 
@@ -48,9 +48,10 @@ macro_rules! option_config_eq {
     };
 }
 
+#[derive(Debug)]
 pub struct ValueAndDescription<T> {
-    value: T,
-    desc: String,
+    pub value: T,
+    pub desc: String,
 }
 
 impl<T> Display for ValueAndDescription<T> {
@@ -333,6 +334,35 @@ impl BoolDesc {
     }
 }
 
+pub struct MultiSelectionDesc<T> {
+    variants: fn(&dyn StateExtractor) -> Vec<ValueAndDescription<T>>,
+    selecteds: fn(&dyn StateExtractor) -> Vec<ValueAndDescription<T>>,
+    on_changed: fn(&dyn StateExtractor, selections: &[ValueAndDescription<T>]) -> Message,
+    is_enabled: fn(&dyn StateExtractor) -> bool,
+}
+
+impl<T> MultiSelectionDesc<T> {
+    pub fn variants(&self, state: &dyn StateExtractor) -> Vec<ValueAndDescription<T>> {
+        (self.variants)(state)
+    }
+
+    pub fn selecteds(&self, state: &dyn StateExtractor) -> Vec<ValueAndDescription<T>> {
+        (self.selecteds)(state)
+    }
+
+    pub fn on_changed(
+        &self,
+        state: &dyn StateExtractor,
+        selections: &[ValueAndDescription<T>],
+    ) -> Message {
+        (self.on_changed)(state, selections)
+    }
+
+    pub fn is_enabled(&self, state: &dyn StateExtractor) -> bool {
+        (self.is_enabled)(state)
+    }
+}
+
 pub enum FieldType {
     StepU32(StepDesc<u32>),
     RangeF32(RangeDesc<f32>),
@@ -343,6 +373,7 @@ pub enum FieldType {
     DynamicEnumString(DynamicEnumDesc<String>),
     Text(TextDesc),
     Bool(BoolDesc),
+    MultiSelectionString(MultiSelectionDesc<String>),
 }
 
 impl From<StepDesc<u32>> for FieldType {
@@ -396,6 +427,12 @@ impl From<TextDesc> for FieldType {
 impl From<BoolDesc> for FieldType {
     fn from(value: BoolDesc) -> Self {
         Self::Bool(value)
+    }
+}
+
+impl From<MultiSelectionDesc<String>> for FieldType {
+    fn from(value: MultiSelectionDesc<String>) -> Self {
+        Self::MultiSelectionString(value)
     }
 }
 
@@ -501,6 +538,45 @@ impl ConfigState {
                         on_selected: |_, s| {
                             Message::from(UpdateConfigEvent::QuickActionBarState(s))
                         },
+                    }
+                    .into(),
+                },
+                Field {
+                    name: "Custom Actions",
+                    id: "custom_actions",
+                    typ: MultiSelectionDesc::<String> {
+                        variants: |state: &dyn StateExtractor| {
+                            let mut variants: Vec<_> = state
+                                .store()
+                                .custom_actions()
+                                .iter()
+                                .map(|ca| ValueAndDescription {
+                                    value: ca.name().clone(),
+                                    desc: ca.name().clone(),
+                                })
+                                .collect();
+                            variants.sort_unstable_by(|v1, v2| v1.value.cmp(&v2.value));
+                            variants
+                        },
+                        selecteds: |state| {
+                            state
+                                .config()
+                                .custom_actions()
+                                .iter()
+                                .map(|s| ValueAndDescription {
+                                    value: s.clone(),
+                                    desc: s.clone(),
+                                })
+                                .collect()
+                        },
+                        on_changed: |_state, selections| {
+                            let custom_actions =
+                                selections.iter().map(|v| v.value.clone()).collect();
+                            Message::from(UpdateConfigEvent::CustomActions(Arc::new(
+                                custom_actions,
+                            )))
+                        },
+                        is_enabled: |_state| true,
                     }
                     .into(),
                 },
@@ -628,6 +704,11 @@ impl ConfigState {
                 set_quick_action_bar_state,
                 |v| Message::from(LayoutEvent::UpdateQuickActionBarState(v))
             },
+            @CustomActions => {
+                |c: &Config, v: &Arc<Vec<String>>| c.custom_actions() == v.as_ref(),
+                set_custom_actions,
+                |v| Message::from(StoreEvent::UpdateCustomActions(v))
+            },
             UpdateConfigEvent::ChangeTempText {key, init_value, value} => {
                 tracing::error!("Update temp_text[{key}] to {value}, init value[{init_value}]");
                 self.temp_texts.insert(key, (init_value, value));
@@ -735,6 +816,7 @@ pub enum UpdateConfigEvent {
     },
     ManualMode(bool),
     QuickActionBarState(QuickActionBarState),
+    CustomActions(Arc<Vec<String>>),
 }
 
 impl From<UpdateConfigEvent> for Message {
