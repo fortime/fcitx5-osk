@@ -1,7 +1,8 @@
 use std::{
     env,
     os::fd::{FromRawFd, OwnedFd},
-    process,
+    path::PathBuf,
+    process::{self, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -27,6 +28,7 @@ use zbus::{
 use crate::dbus::client::{Fcitx5ControllerServiceProxy, FdoServices};
 
 mod dbus;
+mod kwin;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -46,6 +48,22 @@ struct Args {
     /// Start for sddm.
     #[arg(long, default_missing_value = "true")]
     sddm: bool,
+
+    /// Switch to InputMethod before exit.
+    #[arg(long)]
+    next_input_method: Option<PathBuf>,
+
+    /// Switch to next InputMethod only.
+    #[arg(long, default_missing_value = "true")]
+    switch_only: bool,
+
+    /// Path to `kreadconfig`
+    #[arg(long)]
+    kreadconfig: Option<PathBuf>,
+
+    /// Path to `kwriteconfig`
+    #[arg(long)]
+    kwriteconfig: Option<PathBuf>,
 }
 
 async fn owner(
@@ -335,11 +353,22 @@ async fn run(args: &Args) -> Result<()> {
     };
     let wayland_display = env::var("WAYLAND_DISPLAY").unwrap_or_default();
 
+    let cur_input_method = match kwin::cur_input_method(args.kreadconfig.as_ref()).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!(
+                "Unable to get current input method, a empty string will be used: {e:#?}"
+            );
+            "Invalid Path".to_string()
+        }
+    };
+
     // tracing can format argument whose name is display.
     tracing::debug!(
-        "wayland socket: {:?}, wayland display: {}",
+        "wayland socket: {:?}, wayland display: {}, input method: {}",
         socket,
-        wayland_display
+        wayland_display,
+        cur_input_method,
     );
 
     let connection = Connection::session().await?;
@@ -435,14 +464,18 @@ async fn run(args: &Args) -> Result<()> {
         let _ = fcitx5_osk_handler.await;
     }
 
-    // disable and enable virtual keyboard to restart launcher
-    let disable_res = kwin_services.virtual_keyboard().set_enabled(false).await;
-    let enable_res = kwin_services.virtual_keyboard().set_enabled(true).await;
+    // restart InputMethod
+    let restart_res = kwin::restart_input_method(
+        args.kreadconfig.as_ref(),
+        args.kwriteconfig.as_ref(),
+        Some(&cur_input_method),
+        args.next_input_method.as_ref(),
+    )
+    .await;
     tracing::info!(
-        "shutdown fcitx5-osk result: {:?}, disable virtual keyboard result: {:?}, enable virtual keyboard result: {:?}",
+        "shutdown fcitx5-osk result: {:?}, restart InputMethod result: {:?}",
         shutdown_res,
-        disable_res,
-        enable_res
+        restart_res,
     );
 
     // wait a moment for letting fcitx5-osk to shutdown gracefully.
@@ -451,6 +484,8 @@ async fn run(args: &Args) -> Result<()> {
     Ok(())
 }
 
+/// Run in a daemon mode and start a worker process for doing things, so kwin won't be blocked when it's terminating
+/// the `InputMethod` process.
 async fn daemon() -> Result<()> {
     let exec = env::current_exe()?;
     let mut args: Vec<_> = env::args().collect();
@@ -463,16 +498,15 @@ async fn daemon() -> Result<()> {
     let (mut shutdown_flag, signal_handle) = fcitx5_osk_common::signal::shutdown_flag();
     tokio::spawn(signal_handle);
 
-    let mut child = Command::new(exec).args(args).spawn()?;
-    drop(child.stdin.take());
+    let mut child = Command::new(exec).args(args).stdin(Stdio::null()).spawn()?;
     tokio::select! {
         res = child.wait() => {
             match res {
                 Ok(code) => {
-                    tracing::warn!("worker exit with code: {code}");
+                    tracing::warn!("the worker exit with code: {code}");
                 },
                 Err(e) => {
-                    tracing::warn!("failed to worker to exit: {e:#?}");
+                    tracing::warn!("failed waiting the worker to exit: {e:#?}");
                 }
             }
         }
@@ -529,7 +563,7 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
             {
                 tracing::error!("watch_fcitx5_osk exits abnormally: {e:#?}");
             } else {
-                tracing::info!("watch_fcitx5_osk exits");
+                tracing::error!("watch_fcitx5_osk exits");
             }
             // set fcitx5_osk_exited to true before shutting down.
             fcitx5_osk_exited.store(true, Ordering::Relaxed);
@@ -544,7 +578,7 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
             if let Err(e) = res {
                 tracing::error!("watch_kwin_virtual_keyboard exits abnormally: {e:#?}");
             } else {
-                tracing::info!("watch_kwin_virtual_keyboard exits");
+                tracing::error!("watch_kwin_virtual_keyboard exits");
             }
         }
         _ = shutdown_flag.wait_for_shutdown() => {
@@ -559,15 +593,8 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
         let _ = fcitx5_osk_handler.await;
     }
 
-    // disable and enable virtual keyboard to restart launcher
-    let disable_res = kwin_services.virtual_keyboard().set_enabled(false).await;
-    let enable_res = kwin_services.virtual_keyboard().set_enabled(true).await;
-    tracing::info!(
-        "shutdown fcitx5-osk result: {:?}, disable virtual keyboard result: {:?}, enable virtual keyboard result: {:?}",
-        shutdown_res,
-        disable_res,
-        enable_res
-    );
+    // There is no need to restart in sddm
+    tracing::info!("shutdown fcitx5-osk result: {:?}", shutdown_res,);
 
     // wait a moment for letting fcitx5-osk to shutdown gracefully.
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -578,7 +605,19 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
 #[tokio::main]
 pub async fn main() {
     let args = Args::parse();
-    let res = if args.worker {
+    let res = if args.switch_only {
+        if args.next_input_method.is_some() {
+            kwin::restart_input_method(
+                args.kreadconfig.as_ref(),
+                args.kwriteconfig.as_ref(),
+                None,
+                args.next_input_method.as_ref(),
+            )
+            .await
+        } else {
+            Ok(())
+        }
+    } else if args.worker {
         if args.sddm {
             run_in_sddm(&args).await
         } else {

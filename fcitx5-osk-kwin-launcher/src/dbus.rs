@@ -43,11 +43,6 @@ pub mod client {
 
         #[zbus(signal, name = "visibleChanged")]
         fn visible_changed(&self);
-
-        /// don't wait for reply, so it won't freeze kwin.
-        #[tracing::instrument(level = "debug", skip(self), err, ret)]
-        #[zbus(property, name = "enabled")]
-        fn set_enabled(&self, value: bool) -> ZbusResult<()>;
     }
 
     // Path=/org/kde/KWin  Interface=org.kde.KWin.TabletModeManager  Member=tabletModeChanged
