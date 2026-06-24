@@ -174,7 +174,7 @@ impl KeyboardState {
             if let Some(a) = store.custom_action(custom_action) {
                 self.custom_actions.push((custom_action.as_str().into(), a));
             } else {
-                tracing::warn!("No custom action{custom_action} found");
+                tracing::warn!("No custom action[{custom_action}] found");
             }
         }
     }

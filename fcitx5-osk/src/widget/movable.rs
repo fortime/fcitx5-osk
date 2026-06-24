@@ -1,7 +1,12 @@
+#![allow(clippy::type_complexity)]
+
 use std::{
+    collections::HashSet,
+    fmt::{Debug, Formatter, Result as FmtResult},
     mem,
     ops::{Deref, DerefMut},
     rc::Rc,
+    slice,
     time::{Duration, Instant},
 };
 
@@ -9,10 +14,11 @@ use iced::{
     Alignment, Element, Event, Length, Padding, Pixels, Point, Rectangle, Size, Vector,
     advanced::{
         Clipboard, Layout, Shell, Widget, layout,
+        mouse::{Cursor, Interaction},
         overlay::{self, Group},
         renderer,
         text::Renderer as TextRenderer,
-        widget::{Operation, Tree, tree},
+        widget::{Operation, Tree, operation::scrollable, tree},
     },
     alignment::Vertical,
     border,
@@ -22,7 +28,7 @@ use iced::{
     },
     touch::{Event as TouchEvent, Finger as TouchFinger},
     widget::{
-        Container, Row, Space, Text,
+        Container, Id as WidgetId, PickList, Row, Scrollable, Space, Text, TextInput,
         button::{
             Catalog as ButtonCatalog, Status as ButtonStatus, Style as ButtonStyle,
             StyleFn as ButtonStyleFn,
@@ -30,8 +36,19 @@ use iced::{
         container::{
             Catalog as ContainerCatalog, Style as ContainerStyle, StyleFn as ContainerStyleFn,
         },
+        operation::AbsoluteOffset,
+        pick_list::{
+            self, Catalog as PickListCatalog, Status as PickListStatus, Style as PickListStyle,
+            StyleFn as PickListStyleFn,
+        },
+        scrollable::Catalog as ScrollableCatalog,
         text::Catalog as TextCatalog,
+        text_input::{
+            self, Catalog as TextInputCatalog, Status as TextInputStatus, Style as TextInputStyle,
+            StyleFn as TextInputStyleFn,
+        },
     },
+    window::Event as WindowEvent,
 };
 use iced_drop::widget::droppable::Droppable;
 
@@ -113,7 +130,7 @@ where
     }
 
     fn diff(&self, tree: &mut Tree) {
-        tree.diff_children(std::slice::from_ref(&self.content));
+        tree.diff_children(slice::from_ref(&self.content));
     }
 
     fn size(&self) -> Size<Length> {
@@ -492,7 +509,7 @@ impl MovableListCatalog for iced::Theme {
     ) -> <Self as ButtonCatalog>::Class<'a> {
         let f = Rc::clone(&class.remove_button_style_fn);
 
-        (Box::new(move |theme: &Self, status| f(theme, status)) as ButtonStyleFn<'a, Self>).into()
+        Box::new(move |theme: &Self, status| f(theme, status)) as ButtonStyleFn<'a, Self>
     }
 
     fn item_class<'a>(
@@ -500,7 +517,7 @@ impl MovableListCatalog for iced::Theme {
     ) -> <Self as ContainerCatalog>::Class<'a> {
         let f = Rc::clone(&class.item_style_fn);
 
-        (Box::new(move |theme: &Self| f(theme)) as ContainerStyleFn<'a, Self>).into()
+        Box::new(move |theme: &Self| f(theme)) as ContainerStyleFn<'a, Self>
     }
 
     fn dropping_empty_slot_class<'a>(
@@ -508,7 +525,7 @@ impl MovableListCatalog for iced::Theme {
     ) -> <Self as ContainerCatalog>::Class<'a> {
         let f = Rc::clone(&class.dropping_empty_slot_style_fn);
 
-        (Box::new(move |theme: &Self| f(theme)) as ContainerStyleFn<'a, Self>).into()
+        Box::new(move |theme: &Self| f(theme)) as ContainerStyleFn<'a, Self>
     }
 }
 
@@ -519,6 +536,19 @@ enum MovableListInnerMessage<Message> {
     Cancel,
     Remove(usize),
     OuterMessage(Message),
+}
+
+impl<Message> Debug for MovableListInnerMessage<Message> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str("MovableListInnerMessage::")?;
+        match self {
+            Self::Drag(arg0, arg1) => f.debug_tuple("Drag").field(arg0).field(arg1).finish(),
+            Self::Drop(arg0) => f.debug_tuple("Drop").field(arg0).finish(),
+            Self::Cancel => f.write_str("Cancel"),
+            Self::Remove(arg0) => f.debug_tuple("Remove").field(arg0).finish(),
+            Self::OuterMessage(..) => f.write_str("OuterMessage"),
+        }
+    }
 }
 
 struct MovableListElementsGaurd<'a, 'b, Id, Message, Theme, Renderer>
@@ -690,13 +720,12 @@ where
                 MovableListSlot::OccupiedRaw(id, element) => {
                     let mut element = element.map(MovableListInnerMessage::OuterMessage);
                     element = if self.on_remove.is_some() {
-                        let mut delete_text = Text::new("x").center();
-                        if let Some(text_size) = self.remove_button_text_size {
-                            delete_text = delete_text.size(text_size);
-                        }
-                        let mut remove_button = ExtButton::new(delete_text)
-                            .class(Theme::remove_button_class(&self.class))
-                            .on_release_with(Some(move || MovableListInnerMessage::Remove(idx)));
+                        let mut remove_button =
+                            ExtButton::new(text("x", self.remove_button_text_size))
+                                .class(Theme::remove_button_class(&self.class))
+                                .on_release_with(Some(move || {
+                                    MovableListInnerMessage::Remove(idx)
+                                }));
                         if let Some(size) = self.remove_button_size {
                             remove_button = remove_button.width(size.width).height(size.height);
                         }
@@ -719,9 +748,11 @@ where
                             .drag_size(Size::new(0., 0.))
                             .drag_hide(true)
                             .on_drag({
-                                move |point, _rectangle| MovableListInnerMessage::Drag(point, idx)
+                                move |position, _rectangle| {
+                                    MovableListInnerMessage::Drag(position, idx)
+                                }
                             })
-                            .on_drop(|point, _rectangle| MovableListInnerMessage::Drop(point))
+                            .on_drop(|position, _rectangle| MovableListInnerMessage::Drop(position))
                             .on_cancel(MovableListInnerMessage::Cancel)
                             .into()
                     } else {
@@ -753,12 +784,18 @@ where
                         // only one element
                         layout.remove_padding();
                     } else if idx == 0 {
+                        // we are at the first empty slot. don't add padding before it
                         layout.before = 0;
                     } else if dragged_idx == 1 && dragged_idx + 1 == dropping_idx {
+                        // the dragged element is the first one, and it is dropping at the empty
+                        // slot right after it. don't add padding before it
                         layout.before = 0;
                     } else if idx + 1 == len {
+                        // we are at the last empty slot. don't add padding after it
                         layout.after = 0;
                     } else if dropping_idx + 1 == dragged_idx && dragged_idx + 2 == len {
+                        // the dragged element is the last one, and it is dropping at the empty
+                        // slot right before it. don't add padding after it
                         layout.after = 0;
                     }
                 } else {
@@ -860,17 +897,24 @@ where
 
     fn is_dropping(
         &self,
-        layout: Layout<'_>,
-        point: Point,
-        dragged_slot_bounds: Rectangle,
+        layout: &Layout<'_>,
+        position: &Point,
+        dragged_slot_bounds: &Rectangle,
+        viewport: &Rectangle,
     ) -> Option<usize> {
-        let bounds = layout.bounds();
+        let mut bounds = layout.bounds();
+        // use the intersection of viewport to limit the area where we can drop the item.
+        bounds = bounds.intersection(viewport).unwrap_or(bounds);
+        tracing::debug!(
+            "position: {position:?}, widget bounds: {:?}, viewport: {viewport:?}, intersection: {bounds:?}",
+            layout.bounds()
+        );
+        if !bounds.contains(*position) {
+            return None;
+        }
         if self.horizontal {
-            if point.y < bounds.y || point.y > bounds.y + bounds.height {
-                return None;
-            }
             let mut max_idx = 0;
-            let x_bound = point.x - dragged_slot_bounds.width / 2.;
+            let x_bound = position.x - dragged_slot_bounds.width / 2.;
             for idx in 1..self.items.len() {
                 if let MovableListSlot::Occupied(_, _) = &self.items[idx] {
                     let slot_bounds = layout.child(idx).bounds();
@@ -882,11 +926,8 @@ where
             }
             Some(max_idx)
         } else {
-            if point.x < bounds.x || point.x > bounds.x + bounds.width {
-                return None;
-            }
             let mut max_idx = 0;
-            let y_bound = point.y - dragged_slot_bounds.height / 2.;
+            let y_bound = position.y - dragged_slot_bounds.height / 2.;
             for idx in 1..self.items.len() {
                 if let MovableListSlot::Occupied(_, _) = &self.items[idx] {
                     let slot_bounds = layout.child(idx).bounds();
@@ -898,6 +939,25 @@ where
             }
             Some(max_idx)
         }
+    }
+
+    fn drain(&mut self) -> Vec<(Id, Element<'a, Message, Theme, Renderer>)> {
+        let items = self
+            .items
+            .drain(..)
+            .filter_map(|slot| match slot {
+                MovableListSlot::EmptyRaw => None,
+                MovableListSlot::OccupiedRaw(id, element) => Some((id, element)),
+                MovableListSlot::Empty(..) => {
+                    unreachable!("`drain` shouldn't be called after sealed")
+                }
+                MovableListSlot::Occupied(..) => {
+                    unreachable!("`drain` shouldn't be called after sealed")
+                }
+            })
+            .collect();
+        self.items.push(MovableListSlot::EmptyRaw);
+        items
     }
 }
 
@@ -944,8 +1004,8 @@ where
 
     fn size(&self) -> Size<Length> {
         Size {
-            width: Length::Fill,
-            height: Length::Fill,
+            width: Length::Shrink,
+            height: Length::Shrink,
         }
     }
 
@@ -965,8 +1025,8 @@ where
             axis,
             renderer,
             limits,
-            Length::Fill,
-            Length::Fill,
+            Length::Shrink,
+            Length::Shrink,
             Padding::ZERO,
             // spacing will be representing by empty slot
             0.,
@@ -1049,10 +1109,11 @@ where
         drop(local_shell);
         for local_message in local_messages {
             match local_message {
-                MovableListInnerMessage::Drag(_point, idx) => {
-                    // NOTE the `point` is not correct inside a scrollable, use the position from
+                MovableListInnerMessage::Drag(_position, idx) => {
+                    // NOTE the `position` is not correct inside a scrollable, use the position from
                     // `cursor` instead
-                    let Some(point) = cursor.position() else {
+                    // land the cursor to get the position
+                    let Some(position) = cursor.land().position() else {
                         tracing::warn!(
                             "The position of cursor isn't available when there is a drag event"
                         );
@@ -1078,25 +1139,28 @@ where
                         let MovableListSlot::Occupied(id, _) = &self.items[idx] else {
                             unreachable!("the slot[{idx}] isn't a MovableListSlot::Occupied");
                         };
-                        shell.publish(on_drag(id, point));
+                        shell.publish(on_drag(id, position));
                     }
-                    let new_dropping = self.is_dropping(layout, point, dragged_bounds);
+                    let new_dropping =
+                        self.is_dropping(&layout, &position, &dragged_bounds, viewport);
                     if state.dropping != new_dropping {
                         state.dropping = new_dropping;
                         shell.invalidate_layout();
                     }
                 }
-                MovableListInnerMessage::Drop(_point) => {
-                    // NOTE the `point` is not correct inside a scrollable, use the position from
+                MovableListInnerMessage::Drop(_position) => {
+                    // NOTE the `position` is not correct inside a scrollable, use the position from
                     // `cursor` instead
-                    let Some(point) = cursor.position() else {
+                    // land the cursor to get the position
+                    let Some(position) = cursor.land().position() else {
                         tracing::warn!(
                             "The position of cursor isn't available when there is a drag event"
                         );
                         continue;
                     };
                     if let Some((dragged_idx, dragged_bounds)) = state.dragged {
-                        state.dropping = self.is_dropping(layout, point, dragged_bounds);
+                        state.dropping =
+                            self.is_dropping(&layout, &position, &dragged_bounds, viewport);
                         if let Some(on_drop) = &self.on_drop
                             && let Some(dropping_idx) = state.dropping
                         {
@@ -1282,10 +1346,16 @@ where
         (!children.is_empty())
             .then(|| Group::with_children(children).overlay())
             .map(|o| {
-                o.map(&|_| {
-                    unreachable!(
-                        "the implementation of iced_drop has changed, it generates message now"
-                    )
+                o.map(&|m| {
+                    if let MovableListInnerMessage::OuterMessage(m) = m {
+                        m
+                    } else {
+                        // NOTE if it's changed, we should return our overalay struct and translate the
+                        // message inside the update method of the overlay struct
+                        unreachable!(
+                            "the implementation of iced_drop has changed, it generates message now: {m:?}"
+                        )
+                    }
                 })
             })
     }
@@ -1297,11 +1367,1466 @@ where
     Id: 'a,
     Message: 'a + Clone,
     Theme: 'a + MovableListCatalog,
-    <Theme as ButtonCatalog>::Class<'a>: From<ButtonStyleFn<'a, Theme>>,
     Renderer: 'a + renderer::Renderer + TextRenderer,
 {
     fn from(mut widget: MovableList<'a, Id, Message, Theme, Renderer>) -> Self {
         widget.seal();
         Element::new(widget)
+    }
+}
+
+#[derive(Clone)]
+pub struct ScrollableMovableListMessage<Message>(ScrollableMovableListInnerMessage<Message>);
+
+impl<Message> ScrollableMovableListMessage<Message> {
+    pub fn wrap(m: Message) -> Self {
+        Self(ScrollableMovableListInnerMessage::OuterMessage(m))
+    }
+}
+
+impl<Message> Debug for ScrollableMovableListMessage<Message> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str("ScrollableMovableListInnerMessage::")?;
+        match &self.0 {
+            ScrollableMovableListInnerMessage::Drag(..) => f.write_str("Drag"),
+            ScrollableMovableListInnerMessage::Drop(..) => f.write_str("Drop"),
+            ScrollableMovableListInnerMessage::OuterMessage(..) => f.write_str("OuterMessage"),
+        }
+    }
+}
+
+#[derive(Clone)]
+enum ScrollableMovableListInnerMessage<Message> {
+    Drag(Option<Message>),
+    Drop(Message),
+    OuterMessage(Message),
+}
+
+impl<Message> From<ScrollableMovableListInnerMessage<Message>>
+    for ScrollableMovableListMessage<Message>
+{
+    fn from(value: ScrollableMovableListInnerMessage<Message>) -> Self {
+        Self(value)
+    }
+}
+
+/// Local state of the [`MovableList`].
+#[derive(Default)]
+struct ScrollableMovableListState {
+    dragged: bool,
+    last_frame: Option<Instant>,
+    scroll_factor: Option<f32>,
+}
+
+/// A scrollable container of `MovableList`
+pub struct ScrollableMovableList<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
+    content: Element<'a, ScrollableMovableListMessage<Message>, Theme, Renderer>,
+    scrollable_id: Option<WidgetId>,
+    horizontal: bool,
+}
+
+pub type CreateScrollableFn<'a, Message, Theme, Renderer> = dyn Fn(
+        Element<'a, ScrollableMovableListMessage<Message>, Theme, Renderer>,
+        WidgetId,
+        bool,
+    ) -> Result<
+        Scrollable<'a, ScrollableMovableListMessage<Message>, Theme, Renderer>,
+        Element<'a, ScrollableMovableListMessage<Message>, Theme, Renderer>,
+    > + 'a;
+
+impl<'a, Message, Theme, Renderer> ScrollableMovableList<'a, Message, Theme, Renderer>
+where
+    Message: 'a + Clone,
+    Theme: 'a + MovableListCatalog + ScrollableCatalog,
+    Renderer: 'a + renderer::Renderer + TextRenderer,
+{
+    pub fn new<Id: 'a>(
+        movable_list: MovableList<'a, Id, Message, Theme, Renderer>,
+        scrollable: &CreateScrollableFn<'a, Message, Theme, Renderer>,
+    ) -> Self {
+        // convert callback
+        let MovableList {
+            items,
+            remove_button_text_size,
+            remove_button_size,
+            spacing,
+            item_padding,
+            horizontal,
+            class,
+            on_drag,
+            on_drop,
+            on_remove,
+        } = movable_list;
+        let mut movable_list = MovableList {
+            items: items
+                .into_iter()
+                .map(|slot| match slot {
+                    MovableListSlot::EmptyRaw => MovableListSlot::EmptyRaw,
+                    MovableListSlot::OccupiedRaw(id, element) => MovableListSlot::OccupiedRaw(
+                        id,
+                        element.map(ScrollableMovableListMessage::wrap),
+                    ),
+                    MovableListSlot::Empty(..) => unreachable!("it shouldn't exist before seal"),
+                    MovableListSlot::Occupied(..) => {
+                        unreachable!("it shouldn't exist before seal")
+                    }
+                })
+                .collect(),
+            remove_button_text_size,
+            remove_button_size,
+            spacing,
+            item_padding,
+            horizontal,
+            class,
+            on_drag: None,
+            on_drop: None,
+            on_remove: None,
+        };
+        movable_list = movable_list.on_drag(move |id, position| {
+            ScrollableMovableListInnerMessage::Drag(on_drag.as_ref().map(|f| f(id, position)))
+                .into()
+        });
+        if let Some(on_drop) = on_drop {
+            movable_list = movable_list
+                .on_drop(move |ids| ScrollableMovableListInnerMessage::Drop(on_drop(ids)).into());
+        };
+        if let Some(on_remove) = on_remove {
+            movable_list = movable_list.on_remove(move |id| {
+                ScrollableMovableListInnerMessage::OuterMessage(on_remove(id)).into()
+            });
+        };
+        let scrollable_id = WidgetId::unique();
+        match scrollable(
+            Container::new(movable_list).center_x(Length::Fill).into(),
+            scrollable_id.clone(),
+            horizontal,
+        ) {
+            Ok(scrollable) => Self {
+                content: scrollable.id(scrollable_id.clone()).into(),
+                scrollable_id: Some(scrollable_id),
+                horizontal,
+            },
+            Err(content) => Self {
+                content,
+                scrollable_id: None,
+                horizontal,
+            },
+        }
+    }
+
+    fn calculate_scroll_factor(&self, bounds: &Rectangle, position: &Point) -> Option<f32> {
+        if self.horizontal {
+            // don't scroll if the pointer is within the widget's horizontal bounds
+            if position.x >= bounds.x && position.x <= bounds.x + bounds.width {
+                return None;
+            }
+            if position.x < bounds.x {
+                Some(position.x - bounds.x)
+            } else {
+                Some(position.x - bounds.x - bounds.width)
+            }
+        } else {
+            // don't scroll if the pointer is within the widget's vertical bounds
+            if position.y >= bounds.y || position.y <= bounds.y + bounds.height {
+                return None;
+            }
+            if position.y < bounds.y {
+                Some(position.y - bounds.y)
+            } else {
+                Some(position.y - bounds.y - bounds.height)
+            }
+        }
+    }
+}
+
+impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for ScrollableMovableList<'a, Message, Theme, Renderer>
+where
+    Message: 'a + Clone,
+    Theme: 'a + MovableListCatalog + ScrollableCatalog,
+    Renderer: 'a + renderer::Renderer + TextRenderer,
+{
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<ScrollableMovableListState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(ScrollableMovableListState::default())
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(slice::from_ref(&self.content));
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let mut local_messages = vec![];
+        let mut local_shell = shell.local(&mut local_messages);
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            &mut local_shell,
+            viewport,
+        );
+        drop(local_shell);
+
+        let state: &mut ScrollableMovableListState = tree.state.downcast_mut();
+        for local_message in local_messages {
+            match local_message.0 {
+                ScrollableMovableListInnerMessage::Drag(m) => {
+                    tracing::debug!("dragging");
+                    if !state.dragged {
+                        state.dragged = true;
+                        state.last_frame = None;
+                        state.scroll_factor = None;
+                    } else if let Some(position) = cursor.land().position() {
+                        // land the cursor to get the position
+                        state.scroll_factor =
+                            self.calculate_scroll_factor(&layout.bounds(), &position);
+                        if state.scroll_factor.is_none() {
+                            state.last_frame = None;
+                        }
+                    } else {
+                        tracing::warn!("Unable to get the position of the cursor");
+                    }
+                    if let Some(m) = m {
+                        shell.publish(m)
+                    }
+                }
+                ScrollableMovableListInnerMessage::Drop(m) => {
+                    tracing::debug!("dropped");
+                    state.dragged = false;
+                    state.last_frame = None;
+                    state.scroll_factor = None;
+                    shell.publish(m)
+                }
+                ScrollableMovableListInnerMessage::OuterMessage(m) => shell.publish(m),
+            }
+        }
+        if let Some(scroll_factor) = state.scroll_factor
+            && let Some(scrollable_id) = &self.scrollable_id
+            && let Event::Window(WindowEvent::RedrawRequested(now)) = event
+        {
+            const MAX_DELTA: u64 = 8;
+            // like auto scrolling in `Scrollable`, use time as a factor
+            let next = if let Some(last_frame) = state.last_frame {
+                // 120Hz ?
+                if (*now - last_frame).as_millis() >= MAX_DELTA as u128 {
+                    state.last_frame = Some(*now);
+                    // scroll
+                    let offset = scroll_factor * (*now - last_frame).as_secs_f32();
+                    tracing::debug!("Scroll by {offset}");
+                    self.operate(
+                        tree,
+                        layout,
+                        renderer,
+                        &mut scrollable::scroll_by(
+                            scrollable_id.clone(),
+                            AbsoluteOffset {
+                                x: offset,
+                                y: offset,
+                            },
+                        ),
+                    );
+                    now.checked_add(Duration::from_millis(MAX_DELTA))
+                } else {
+                    last_frame.checked_add(Duration::from_millis(MAX_DELTA))
+                }
+            } else {
+                state.last_frame = Some(*now);
+                now.checked_add(Duration::from_millis(MAX_DELTA))
+            };
+            if let Some(next) = next {
+                shell.request_redraw_at(next);
+            } else {
+                tracing::error!("Unable to get the next redraw instant: {now:?}");
+            }
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content
+            .as_widget_mut()
+            .overlay(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                viewport,
+                translation,
+            )
+            .map(|o| {
+                o.map(&|m| {
+                    if let ScrollableMovableListInnerMessage::OuterMessage(m) = m.0 {
+                        m
+                    } else {
+                        // NOTE if it's changed, we should return our overalay struct and translate the
+                        // message inside the update method of the overlay struct
+                        unreachable!(
+                            "the implementation of iced_drop has changed, it generates message now: {m:?}"
+                        )
+                    }
+                })
+            })
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        self.content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits)
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        renderer_style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            renderer_style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+}
+
+impl<'a, Message, Theme, Renderer> From<ScrollableMovableList<'a, Message, Theme, Renderer>>
+    for Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a + Clone,
+    Theme: 'a + MovableListCatalog + ScrollableCatalog,
+    Renderer: 'a + renderer::Renderer + TextRenderer,
+{
+    fn from(widget: ScrollableMovableList<'a, Message, Theme, Renderer>) -> Self {
+        Element::new(widget)
+    }
+}
+
+pub trait AdvancedMovableListCatalog:
+    MovableListCatalog + ScrollableCatalog + TextInputCatalog + PickListCatalog
+{
+    /// The item class of the [`Catalog`].
+    type Class<'a>;
+
+    /// The default class produced by the [`Catalog`].
+    fn default<'a>() -> <Self as AdvancedMovableListCatalog>::Class<'a>;
+
+    /// The class of lv1 buttons.
+    fn lv1_button_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as ButtonCatalog>::Class<'a>;
+
+    /// The class of the lv2 add button.
+    fn lv2_add_button_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as ButtonCatalog>::Class<'a>;
+
+    /// The class of the lv2 done button.
+    fn lv2_done_button_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as ButtonCatalog>::Class<'a>;
+
+    /// The class of the lv2 cancel button.
+    fn lv2_cancel_button_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as ButtonCatalog>::Class<'a>;
+
+    /// The class of the text input.
+    fn text_input_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as TextInputCatalog>::Class<'a>;
+
+    /// The class of the pick list.
+    fn pick_list_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as PickListCatalog>::Class<'a>;
+}
+
+pub type CloneableTextInputStyleFn<'a, Theme> =
+    Rc<dyn Fn(&Theme, TextInputStatus) -> TextInputStyle + 'a>;
+pub type CloneablePickListStyleFn<'a, Theme> =
+    Rc<dyn Fn(&Theme, PickListStatus) -> PickListStyle + 'a>;
+
+pub struct AdvancedMovableListStyleFns<'a, Theme> {
+    lv1_button_style_fn: CloneableButtonStyleFn<'a, Theme>,
+    lv2_add_button_style_fn: CloneableButtonStyleFn<'a, Theme>,
+    lv2_done_button_style_fn: CloneableButtonStyleFn<'a, Theme>,
+    lv2_cancel_button_style_fn: CloneableButtonStyleFn<'a, Theme>,
+    text_input_style_fn: CloneableTextInputStyleFn<'a, Theme>,
+    pick_list_style_fn: CloneablePickListStyleFn<'a, Theme>,
+}
+
+impl Default for AdvancedMovableListStyleFns<'_, iced::Theme> {
+    fn default() -> Self {
+        Self {
+            lv1_button_style_fn: Rc::new(button::button_class),
+            lv2_add_button_style_fn: Rc::new(button::button_class),
+            lv2_done_button_style_fn: Rc::new(button::button_class),
+            lv2_cancel_button_style_fn: Rc::new(button::button_danger_class),
+            text_input_style_fn: Rc::new(text_input::default),
+            pick_list_style_fn: Rc::new(pick_list::default),
+        }
+    }
+}
+
+impl AdvancedMovableListCatalog for iced::Theme {
+    type Class<'a> = AdvancedMovableListStyleFns<'a, Self>;
+
+    fn default<'a>() -> <Self as AdvancedMovableListCatalog>::Class<'a> {
+        Default::default()
+    }
+
+    fn lv1_button_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as ButtonCatalog>::Class<'a> {
+        let f = Rc::clone(&class.lv1_button_style_fn);
+
+        Box::new(move |theme: &Self, status| f(theme, status)) as ButtonStyleFn<'a, Self>
+    }
+
+    fn lv2_add_button_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as ButtonCatalog>::Class<'a> {
+        let f = Rc::clone(&class.lv2_add_button_style_fn);
+
+        Box::new(move |theme: &Self, status| f(theme, status)) as ButtonStyleFn<'a, Self>
+    }
+
+    fn lv2_done_button_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as ButtonCatalog>::Class<'a> {
+        let f = Rc::clone(&class.lv2_done_button_style_fn);
+
+        Box::new(move |theme: &Self, status| f(theme, status)) as ButtonStyleFn<'a, Self>
+    }
+
+    fn lv2_cancel_button_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as ButtonCatalog>::Class<'a> {
+        let f = Rc::clone(&class.lv2_cancel_button_style_fn);
+
+        Box::new(move |theme: &Self, status| f(theme, status)) as ButtonStyleFn<'a, Self>
+    }
+
+    fn text_input_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as TextInputCatalog>::Class<'a> {
+        let f = Rc::clone(&class.text_input_style_fn);
+
+        Box::new(move |theme: &Self, status| f(theme, status)) as TextInputStyleFn<'a, Self>
+    }
+
+    fn pick_list_class<'a>(
+        class: &<Self as AdvancedMovableListCatalog>::Class<'a>,
+    ) -> <Self as PickListCatalog>::Class<'a> {
+        let f = Rc::clone(&class.pick_list_style_fn);
+
+        Box::new(move |theme: &Self, status| f(theme, status)) as PickListStyleFn<'a, Self>
+    }
+}
+
+#[derive(Clone)]
+pub struct AdvancedMovableListMessage<Message>(AdvancedMovableListInnerMessage<Message>);
+
+impl<Message> AdvancedMovableListMessage<Message> {
+    pub fn wrap(m: Message) -> Self {
+        Self(AdvancedMovableListInnerMessage::OuterMessage(m))
+    }
+}
+
+impl<Message> Debug for AdvancedMovableListMessage<Message> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.write_str("AdvancedMovableListInnerMessage::")?;
+        match &self.0 {
+            AdvancedMovableListInnerMessage::OuterMessage(..) => f.write_str("OuterMessage"),
+            AdvancedMovableListInnerMessage::EnableAddMode => f.write_str("EnableAddMode"),
+            AdvancedMovableListInnerMessage::EnableEditMode => f.write_str("EnableEditMode"),
+            AdvancedMovableListInnerMessage::UpdateAddText(s) => {
+                f.debug_tuple("UpdateAddText").field(s).finish()
+            }
+            AdvancedMovableListInnerMessage::AddItem => f.write_str("AddItem"),
+            AdvancedMovableListInnerMessage::Cancel => f.write_str("Cancel"),
+            AdvancedMovableListInnerMessage::Done => f.write_str("Done"),
+            AdvancedMovableListInnerMessage::RemoveItem(s) => {
+                f.debug_tuple("RemoveItem").field(s).finish()
+            }
+            AdvancedMovableListInnerMessage::ReorderItems(items) => {
+                f.debug_tuple("ReorderItems").field(items).finish()
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+enum AdvancedMovableListInnerMessage<Message> {
+    EnableAddMode,
+    EnableEditMode,
+    UpdateAddText(String),
+    AddItem,
+    Cancel,
+    Done,
+    RemoveItem(String),
+    ReorderItems(Vec<String>),
+    OuterMessage(Message),
+}
+
+impl<Message> From<AdvancedMovableListInnerMessage<Message>>
+    for AdvancedMovableListMessage<Message>
+{
+    fn from(value: AdvancedMovableListInnerMessage<Message>) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(Default, Debug)]
+enum AdvancedMovableListState {
+    #[default]
+    Init,
+    Add {
+        new_items: Vec<String>,
+        add_text: Option<String>,
+    },
+    Edit {
+        new_order: Vec<usize>,
+    },
+}
+
+struct AdvancedMovableListShimMut<'a, 'b, Id, Message>
+where
+    'b: 'a,
+{
+    text_to_id: Option<&'a Box<dyn Fn(&String) -> Option<Id> + 'b>>,
+    selections: &'a mut [(Id, String)],
+    children_flag: &'a mut [bool],
+    on_done: Option<&'a Rc<dyn Fn(&[Id]) -> Message + 'b>>,
+}
+
+impl<'a, 'b, Id, Message> AdvancedMovableListShimMut<'a, 'b, Id, Message>
+where
+    'b: 'a,
+    Id: Clone,
+{
+    fn request_build_movable_list(&mut self) {
+        self.children_flag[0] = true;
+    }
+
+    fn request_build_control_row(&mut self) {
+        self.children_flag[1] = true;
+    }
+
+    fn request_redraw(
+        &mut self,
+        shell: &mut Shell<'_, Message>,
+        build_movable_list: bool,
+        build_controll_row: bool,
+    ) {
+        if build_movable_list {
+            self.request_build_movable_list();
+        }
+        if build_controll_row {
+            self.request_build_control_row();
+        }
+        shell.invalidate_layout();
+        shell.request_redraw();
+    }
+
+    fn update(
+        &mut self,
+        shell: &mut Shell<'_, Message>,
+        state: &mut AdvancedMovableListState,
+        message: AdvancedMovableListInnerMessage<Message>,
+    ) {
+        match message {
+            AdvancedMovableListInnerMessage::EnableAddMode => {
+                *state = AdvancedMovableListState::Add {
+                    new_items: vec![],
+                    add_text: None,
+                };
+                self.request_redraw(shell, true, true);
+            }
+            AdvancedMovableListInnerMessage::EnableEditMode => {
+                *state = AdvancedMovableListState::Edit {
+                    new_order: (0..self.selections.len()).collect(),
+                };
+                self.request_redraw(shell, true, true);
+            }
+            AdvancedMovableListInnerMessage::UpdateAddText(s) => {
+                if let AdvancedMovableListState::Add { add_text, .. } = state {
+                    tracing::debug!("Replace {add_text:?} with {s}");
+                    *add_text = Some(s);
+                    self.request_redraw(shell, false, true);
+                } else {
+                    tracing::warn!("It isn't in the add mode, it's {state:?}");
+                }
+            }
+            AdvancedMovableListInnerMessage::AddItem => {
+                if let AdvancedMovableListState::Add {
+                    new_items,
+                    add_text,
+                } = state
+                {
+                    tracing::debug!("Add {add_text:?}");
+                    if let Some(add_text) = add_text.take()
+                        && !add_text.is_empty()
+                    {
+                        new_items.push(add_text);
+                        self.request_redraw(shell, true, true);
+                    }
+                } else {
+                    tracing::warn!("It isn't in the add mode, it's {state:?}");
+                }
+            }
+            AdvancedMovableListInnerMessage::Cancel => {
+                tracing::debug!("Cancel from state[{state:?}]");
+                *state = AdvancedMovableListState::Init;
+                self.request_redraw(shell, true, true);
+            }
+            AdvancedMovableListInnerMessage::Done => {
+                let ids: Vec<Id> = match state {
+                    AdvancedMovableListState::Init => {
+                        return;
+                    }
+                    AdvancedMovableListState::Add { new_items, .. } => {
+                        if let Some(text_to_id) = &self.text_to_id {
+                            self.selections
+                                .iter()
+                                .map(|i| &i.1)
+                                .chain(new_items.iter())
+                                .filter_map(|s| {
+                                    let id = text_to_id(s);
+                                    if id.is_none() {
+                                        tracing::warn!("Unable to get id of text[{s}]");
+                                    }
+                                    id
+                                })
+                                .collect()
+                        } else {
+                            unreachable!("It shouldn't enter add mode if there is no `text_to_id`");
+                        }
+                    }
+                    AdvancedMovableListState::Edit { new_order } => {
+                        let mut ids = Vec::with_capacity(new_order.len());
+                        for idx in new_order {
+                            if let Some(selection) = self.selections.get(*idx) {
+                                ids.push(selection.0.clone());
+                            } else {
+                                tracing::error!("Unable to get the {idx} selection");
+                            }
+                        }
+                        ids
+                    }
+                };
+                if let Some(on_done) = &self.on_done {
+                    shell.publish(on_done(&ids));
+                }
+                *state = AdvancedMovableListState::Init;
+                self.request_redraw(shell, true, true);
+            }
+            AdvancedMovableListInnerMessage::RemoveItem(item) => {
+                if let AdvancedMovableListState::Edit { new_order } = state {
+                    tracing::debug!("Remove {item}");
+                    if let Some(pos) = self.selections.iter().position(|s| s.1 == item) {
+                        if let Some(new_order_pos) = new_order.iter().position(|n| *n == pos) {
+                            new_order.remove(new_order_pos);
+                            self.request_redraw(shell, true, false);
+                        } else {
+                            tracing::warn!(
+                                "The position of item[{item}:{pos}] doesn't exist in `new_order`"
+                            );
+                        }
+                    } else {
+                        tracing::warn!("The item[{item}] isn't found");
+                    }
+                } else {
+                    tracing::warn!("It isn't in the add mode, it's {state:?}");
+                }
+            }
+            AdvancedMovableListInnerMessage::ReorderItems(items) => {
+                if let AdvancedMovableListState::Edit { new_order } = state {
+                    tracing::debug!("Reorder {items:?}");
+                    *new_order = Vec::with_capacity(items.len());
+                    for item in items {
+                        if let Some(pos) = self.selections.iter().position(|s| s.1 == item) {
+                            new_order.push(pos);
+                        } else {
+                            tracing::warn!("The item[{item}] doesn't found");
+                        }
+                    }
+                    self.request_redraw(shell, true, false);
+                } else {
+                    tracing::warn!("It isn't in the add mode, it's {state:?}");
+                }
+            }
+            AdvancedMovableListInnerMessage::OuterMessage(m) => shell.publish(m),
+        }
+    }
+}
+
+/// An advanced version of `MovableList`
+pub struct AdvancedMovableList<'a, Id, Message, Theme = iced::Theme, Renderer = iced::Renderer>
+where
+    Theme: AdvancedMovableListCatalog,
+    Renderer: TextRenderer,
+{
+    create_movable_list: Box<dyn Fn() -> MovableList<'a, Id, Message, Theme, Renderer> + 'a>,
+    create_scrollable:
+        Rc<CreateScrollableFn<'a, AdvancedMovableListMessage<Message>, Theme, Renderer>>,
+    text_to_id: Option<Box<dyn Fn(&String) -> Option<Id> + 'a>>,
+    id_to_element: Option<Box<dyn Fn(&Id) -> Element<'a, Message, Theme, Renderer> + 'a>>,
+    variants: Option<Vec<Id>>,
+    selections: Vec<(Id, String)>,
+    children: Vec<Element<'a, AdvancedMovableListMessage<Message>, Theme, Renderer>>,
+    children_flag: [bool; 2],
+    movable_list_height: Option<f32>,
+    controll_row_spacing: f32,
+    controll_row_text_size: Option<Pixels>,
+    controll_row_button_padding: Padding,
+    controll_row_height: Option<f32>,
+    class: <Theme as AdvancedMovableListCatalog>::Class<'a>,
+    on_done: Option<Rc<dyn Fn(&[Id]) -> Message + 'a>>,
+}
+
+impl<'a, Id, Message, Theme, Renderer> AdvancedMovableList<'a, Id, Message, Theme, Renderer>
+where
+    Id: 'a + ToString + Clone,
+    Message: 'a + Clone,
+    Theme: 'a + AdvancedMovableListCatalog,
+    Renderer: 'a + renderer::Renderer + TextRenderer,
+{
+    /// Creates a [`AdvancedMovableList`].
+    pub fn new(
+        create_movable_list: impl Fn() -> MovableList<'a, Id, Message, Theme, Renderer> + 'a,
+        create_scrollable: Rc<
+            CreateScrollableFn<'a, AdvancedMovableListMessage<Message>, Theme, Renderer>,
+        >,
+    ) -> Self {
+        Self {
+            create_movable_list: Box::new(create_movable_list),
+            create_scrollable,
+            text_to_id: None,
+            id_to_element: None,
+            variants: None,
+            selections: vec![],
+            children: Vec::with_capacity(2),
+            children_flag: [true, true],
+            movable_list_height: None,
+            controll_row_spacing: 0.,
+            controll_row_text_size: None,
+            controll_row_button_padding: Padding::ZERO,
+            controll_row_height: None,
+            class: <Theme as AdvancedMovableListCatalog>::default(),
+            on_done: None,
+        }
+    }
+
+    pub fn text_to_id(mut self, text_to_id: impl Fn(&String) -> Option<Id> + 'a) -> Self {
+        self.text_to_id = Some(Box::new(text_to_id));
+        self
+    }
+
+    pub fn id_to_element(
+        mut self,
+        id_to_element: impl Fn(&Id) -> Element<'a, Message, Theme, Renderer> + 'a,
+    ) -> Self {
+        self.id_to_element = Some(Box::new(id_to_element));
+        self
+    }
+
+    pub fn variants(mut self, variants: Vec<Id>) -> Self {
+        self.variants = Some(variants);
+        self
+    }
+
+    pub fn movable_list_height(mut self, movable_list_height: f32) -> Self {
+        self.movable_list_height = Some(movable_list_height);
+        self
+    }
+
+    pub fn controll_row_spacing(mut self, controll_row_spacing: impl Into<Pixels>) -> Self {
+        self.controll_row_spacing = controll_row_spacing.into().0;
+        self
+    }
+
+    pub fn controll_row_text_size(mut self, controll_row_text_size: impl Into<Pixels>) -> Self {
+        self.controll_row_text_size = Some(controll_row_text_size.into());
+        self
+    }
+
+    pub fn controll_row_button_padding(
+        mut self,
+        controll_row_button_padding: impl Into<Padding>,
+    ) -> Self {
+        self.controll_row_button_padding = controll_row_button_padding.into();
+        self
+    }
+
+    pub fn controll_row_height(mut self, controll_row_height: f32) -> Self {
+        self.controll_row_height = Some(controll_row_height);
+        self
+    }
+
+    pub fn on_done(mut self, on_done: impl Fn(&[Id]) -> Message + 'a) -> Self {
+        self.on_done = Some(Rc::new(on_done));
+        self
+    }
+
+    fn build_movable_list(&mut self, state: &mut AdvancedMovableListState) -> bool {
+        if !self.children_flag[0] {
+            return false;
+        }
+
+        let mut movable_list = (self.create_movable_list)();
+        let mut items = movable_list.drain();
+        let MovableList {
+            items: _,
+            remove_button_text_size,
+            remove_button_size,
+            spacing,
+            item_padding,
+            horizontal,
+            class,
+            on_drag: _,
+            on_drop: _,
+            on_remove: _,
+        } = movable_list;
+
+        self.selections = items
+            .iter()
+            .map(|i| (i.0.clone(), i.0.to_string()))
+            .collect();
+        let mut edit_mode = false;
+        match state {
+            AdvancedMovableListState::Init => {}
+            AdvancedMovableListState::Add { new_items, .. } => {
+                if let Some(text_to_id) = &self.text_to_id
+                    && let Some(id_to_element) = &self.id_to_element
+                {
+                    self.selections.reserve(new_items.len());
+                    for new_item in new_items {
+                        let Some(new_id) = text_to_id(new_item) else {
+                            continue;
+                        };
+                        self.selections.push((new_id.clone(), new_item.clone()));
+                        let new_element = id_to_element(&new_id);
+                        items.push((new_id, new_element));
+                    }
+                }
+            }
+            AdvancedMovableListState::Edit { new_order } => {
+                edit_mode = true;
+                let mut slots: Vec<_> = items.into_iter().map(Some).collect();
+                items = Vec::with_capacity(new_order.len());
+                let mut idx = 0;
+                while idx < new_order.len() {
+                    let slot_idx = new_order[idx];
+                    if slot_idx >= slots.len() {
+                        tracing::error!(
+                            "the slot_idx[{slot_idx}] in `new_order` is out of bound, the length is {}",
+                            slots.len()
+                        );
+                        break;
+                    }
+                    if let Some(item) = slots[slot_idx].take() {
+                        items.push(item);
+                    } else {
+                        tracing::error!("duplicated slot_idx[{slot_idx}] in `new_order`",);
+                        break;
+                    }
+                    idx += 1;
+                }
+                if idx < new_order.len() {
+                    // revert the items
+                    while idx > 0 {
+                        let slot_idx = new_order[idx - 1];
+                        slots[slot_idx] = Some(items.pop().expect("It shouldn't be empty"));
+                        idx -= 1;
+                    }
+                    items = slots.into_iter().flatten().collect();
+                    // revert to AdvancedMovableListState::Init
+                    *state = AdvancedMovableListState::Init;
+                }
+            }
+        }
+
+        let mut movable_list = MovableList::new().spacing(spacing).class(class);
+        if let Some(remove_button_text_size) = remove_button_text_size {
+            movable_list = movable_list.remove_button_text_size(remove_button_text_size);
+        }
+        if let Some(remove_button_size) = remove_button_size {
+            movable_list = movable_list.remove_button_size(remove_button_size);
+        }
+        if let Some(item_padding) = item_padding {
+            movable_list = movable_list.item_padding(item_padding);
+        }
+        if horizontal {
+            movable_list = movable_list.horizontal();
+        } else {
+            movable_list = movable_list.vertical();
+        }
+        for item in items {
+            movable_list = movable_list.push(item.0, item.1.map(AdvancedMovableListMessage::wrap));
+        }
+
+        if edit_mode && self.on_done.is_some() {
+            movable_list = movable_list
+                .on_drop(|ids| {
+                    AdvancedMovableListInnerMessage::ReorderItems(
+                        ids.iter().map(|id| (*id).to_string()).collect(),
+                    )
+                    .into()
+                })
+                .on_remove(|id| AdvancedMovableListInnerMessage::RemoveItem(id.to_string()).into());
+        }
+
+        let content = Container::new(ScrollableMovableList::new(
+            movable_list,
+            self.create_scrollable.clone().as_ref(),
+        ))
+        .center_y(
+            self.movable_list_height
+                .map(Length::Fixed)
+                .unwrap_or(Length::Shrink),
+        )
+        .into();
+        if self.children.is_empty() {
+            self.children.push(content);
+        } else {
+            self.children[0] = content;
+        }
+
+        self.children_flag[0] = false;
+        true
+    }
+
+    fn build_controll_row(&mut self, state: &AdvancedMovableListState) -> bool {
+        if !self.children_flag[1] || self.children.is_empty() {
+            // check if movable_list is built
+            return false;
+        }
+
+        let mut row = Row::new()
+            .spacing(self.controll_row_spacing)
+            .align_y(Vertical::Center);
+        match state {
+            AdvancedMovableListState::Init => {
+                if self.text_to_id.is_some() && self.id_to_element.is_some() {
+                    row = row.push(
+                        ExtButton::new(text("Add", self.controll_row_text_size))
+                            .class(Theme::lv1_button_class(&self.class))
+                            .padding(self.controll_row_button_padding)
+                            .on_release_with(Some(|| {
+                                AdvancedMovableListInnerMessage::EnableAddMode.into()
+                            })),
+                    )
+                }
+                row = row.push(
+                    ExtButton::new(text("Edit", self.controll_row_text_size))
+                        .class(Theme::lv1_button_class(&self.class))
+                        .padding(self.controll_row_button_padding)
+                        .on_release_with(Some(|| {
+                            AdvancedMovableListInnerMessage::EnableEditMode.into()
+                        })),
+                )
+            }
+            AdvancedMovableListState::Add {
+                new_items,
+                add_text,
+            } => {
+                let add_text = if let Some(variants) = &self.variants {
+                    let selections: HashSet<_> = self.selections.iter().map(|i| &i.1).collect();
+                    let variants: Vec<_> = variants
+                        .iter()
+                        .map(ToString::to_string)
+                        .filter(|v| !selections.contains(v) && !new_items.contains(v))
+                        .collect();
+                    Row::new()
+                        .spacing(self.controll_row_spacing / 2.)
+                        .align_y(Vertical::Center)
+                        .push(
+                            PickList::new(variants, add_text.clone(), |s| {
+                                AdvancedMovableListInnerMessage::UpdateAddText(s).into()
+                            })
+                            .class(Theme::pick_list_class(&self.class)),
+                        )
+                        .push(
+                            ExtButton::new(text("Add", self.controll_row_text_size))
+                                .class(Theme::lv2_add_button_class(&self.class))
+                                .padding(self.controll_row_button_padding)
+                                .on_release_with(Some(|| {
+                                    AdvancedMovableListInnerMessage::AddItem.into()
+                                })),
+                        )
+                } else if self.text_to_id.is_some() {
+                    Row::new()
+                        .spacing(self.controll_row_spacing / 2.)
+                        .push(
+                            TextInput::new("", add_text.as_deref().unwrap_or(""))
+                                .class(Theme::text_input_class(&self.class))
+                                .on_input(|s| {
+                                    AdvancedMovableListInnerMessage::UpdateAddText(s).into()
+                                })
+                                .on_paste(|s| {
+                                    AdvancedMovableListInnerMessage::UpdateAddText(s).into()
+                                })
+                                .on_submit(AdvancedMovableListInnerMessage::AddItem.into()),
+                        )
+                        .push(
+                            ExtButton::new(text("Add", self.controll_row_text_size))
+                                .class(Theme::lv2_add_button_class(&self.class))
+                                .padding(self.controll_row_button_padding)
+                                .on_release_with(Some(|| {
+                                    AdvancedMovableListInnerMessage::AddItem.into()
+                                })),
+                        )
+                } else {
+                    unreachable!("There should't be any add mode");
+                };
+                row = row
+                    .push(add_text)
+                    .push(
+                        ExtButton::new(text("Done", self.controll_row_text_size))
+                            .class(Theme::lv2_done_button_class(&self.class))
+                            .padding(self.controll_row_button_padding)
+                            .on_release_with(Some(|| AdvancedMovableListInnerMessage::Done.into())),
+                    )
+                    .push(
+                        ExtButton::new(text("Cancel", self.controll_row_text_size))
+                            .class(Theme::lv2_cancel_button_class(&self.class))
+                            .padding(self.controll_row_button_padding)
+                            .on_release_with(Some(|| {
+                                AdvancedMovableListInnerMessage::Cancel.into()
+                            })),
+                    );
+            }
+            AdvancedMovableListState::Edit { .. } => {
+                row = row
+                    .push(
+                        ExtButton::new(text("Done", self.controll_row_text_size))
+                            .class(Theme::lv2_done_button_class(&self.class))
+                            .padding(self.controll_row_button_padding)
+                            .on_release_with(Some(|| AdvancedMovableListInnerMessage::Done.into())),
+                    )
+                    .push(
+                        ExtButton::new(text("Cancel", self.controll_row_text_size))
+                            .class(Theme::lv2_cancel_button_class(&self.class))
+                            .padding(self.controll_row_button_padding)
+                            .on_release_with(Some(|| {
+                                AdvancedMovableListInnerMessage::Cancel.into()
+                            })),
+                    );
+            }
+        };
+
+        let content = Container::new(row)
+            .center_y(
+                self.controll_row_height
+                    .map(Length::Fixed)
+                    .unwrap_or(Length::Shrink),
+            )
+            .into();
+
+        if self.children.len() == 1 {
+            self.children.push(content);
+        } else {
+            self.children[1] = content;
+        }
+
+        self.children_flag[1] = false;
+        true
+    }
+
+    fn split_mut<'b>(
+        &'b mut self,
+    ) -> (
+        AdvancedMovableListShimMut<'b, 'a, Id, Message>,
+        &'b mut [Element<'a, AdvancedMovableListMessage<Message>, Theme, Renderer>],
+    ) {
+        (
+            AdvancedMovableListShimMut {
+                text_to_id: self.text_to_id.as_ref(),
+                selections: &mut self.selections,
+                children_flag: &mut self.children_flag,
+                on_done: self.on_done.as_ref(),
+            },
+            &mut self.children,
+        )
+    }
+}
+
+impl<'a, Id, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for AdvancedMovableList<'a, Id, Message, Theme, Renderer>
+where
+    Id: 'a + ToString + Clone,
+    Message: 'a + Clone,
+    Theme: 'a + AdvancedMovableListCatalog,
+    Renderer: 'a + renderer::Renderer + TextRenderer,
+{
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<AdvancedMovableListState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(AdvancedMovableListState::default())
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        self.children.iter().map(Tree::new).collect()
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(&self.children);
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        operation.container(None, layout.bounds());
+        operation.traverse(&mut |operation| {
+            self.children
+                .iter_mut()
+                .zip(&mut tree.children)
+                .zip(layout.children())
+                .for_each(|((row, row_state), row_layout)| {
+                    row.as_widget_mut()
+                        .operate(row_state, row_layout, renderer, operation)
+                });
+        });
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let mut local_messages = vec![];
+        let mut local_shell = shell.local(&mut local_messages);
+        self.children
+            .iter_mut()
+            .zip(&mut tree.children)
+            .zip(layout.children())
+            .for_each(|((row, row_state), row_layout)| {
+                row.as_widget_mut().update(
+                    row_state,
+                    event,
+                    row_layout,
+                    cursor,
+                    renderer,
+                    clipboard,
+                    &mut local_shell,
+                    viewport,
+                )
+            });
+        drop(local_shell);
+
+        let state: &mut AdvancedMovableListState = tree.state.downcast_mut();
+        let (mut shim, _) = self.split_mut();
+        for local_message in local_messages {
+            shim.update(shell, state, local_message.0);
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> Interaction {
+        self.children
+            .iter()
+            .zip(&tree.children)
+            .zip(layout.children())
+            .map(|((row, row_state), row_layout)| {
+                row.as_widget()
+                    .mouse_interaction(row_state, row_layout, cursor, viewport, renderer)
+            })
+            .max()
+            .unwrap_or(Interaction::None)
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        let (shim, children) = self.split_mut();
+        let children = children
+            .iter_mut()
+            .zip(&mut tree.children)
+            .zip(layout.children())
+            .filter_map(|((child, state), layout)| {
+                child
+                    .as_widget_mut()
+                    .overlay(state, layout, renderer, viewport, translation)
+            })
+            .collect::<Vec<_>>();
+
+        let state: &mut AdvancedMovableListState = tree.state.downcast_mut();
+        (!children.is_empty()).then(|| {
+            overlay::Element::new(Box::new(AdvancedMovableListOverlay {
+                shim,
+                state,
+                content: Group::with_children(children).overlay(),
+            }))
+        })
+    }
+
+    fn size(&self) -> Size<Length> {
+        Size {
+            width: Length::Shrink,
+            height: Length::Shrink,
+        }
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let state: &mut AdvancedMovableListState = tree.state.downcast_mut();
+        let mut tree_diff = self.build_movable_list(state);
+        if self.on_done.is_some() {
+            // NOTE run `self.build_controll_row` first
+            tree_diff = self.build_controll_row(state) || tree_diff;
+        }
+        if tree_diff {
+            self.diff(tree);
+            tracing::error!("The len of children: {}", self.children.len());
+        }
+        layout::flex::resolve(
+            layout::flex::Axis::Vertical,
+            renderer,
+            limits,
+            Length::Shrink,
+            Length::Shrink,
+            Padding::ZERO,
+            0.,
+            Alignment::Start,
+            &mut self.children,
+            &mut tree.children,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        renderer_style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.children
+            .iter()
+            .zip(&tree.children)
+            .zip(layout.children())
+            .map(|((row, row_state), row_layout)| {
+                row.as_widget().draw(
+                    row_state,
+                    renderer,
+                    theme,
+                    renderer_style,
+                    row_layout,
+                    cursor,
+                    viewport,
+                )
+            })
+            .count();
+    }
+}
+
+impl<'a, Id, Message, Theme, Renderer> From<AdvancedMovableList<'a, Id, Message, Theme, Renderer>>
+    for Element<'a, Message, Theme, Renderer>
+where
+    Id: 'a + ToString + Clone,
+    Message: 'a + Clone,
+    Theme: 'a + AdvancedMovableListCatalog,
+    Renderer: 'a + renderer::Renderer + TextRenderer,
+{
+    fn from(widget: AdvancedMovableList<'a, Id, Message, Theme, Renderer>) -> Self {
+        Element::new(widget)
+    }
+}
+
+struct AdvancedMovableListOverlay<'a, 'b, Id, Message, Theme, Renderer>
+where
+    'b: 'a,
+    Theme: AdvancedMovableListCatalog,
+    Renderer: TextRenderer,
+{
+    shim: AdvancedMovableListShimMut<'a, 'b, Id, Message>,
+    state: &'a mut AdvancedMovableListState,
+    content: overlay::Element<'a, AdvancedMovableListMessage<Message>, Theme, Renderer>,
+}
+
+impl<'a, 'b, Id, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
+    for AdvancedMovableListOverlay<'a, 'b, Id, Message, Theme, Renderer>
+where
+    'b: 'a,
+    Id: Clone,
+    Theme: AdvancedMovableListCatalog,
+    Renderer: TextRenderer,
+{
+    fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
+        self.content.as_overlay_mut().layout(renderer, bounds)
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: iced::advanced::mouse::Cursor,
+    ) {
+        self.content
+            .as_overlay()
+            .draw(renderer, theme, style, layout, cursor);
+    }
+
+    fn operate(
+        &mut self,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn iced_futures::core::widget::Operation,
+    ) {
+        self.content
+            .as_overlay_mut()
+            .operate(layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: iced::advanced::mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let mut local_messages = vec![];
+        let mut local_shell = shell.local(&mut local_messages);
+        self.content.as_overlay_mut().update(
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            &mut local_shell,
+        );
+        drop(local_shell);
+
+        for local_message in local_messages {
+            self.shim.update(shell, self.state, local_message.0);
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor: iced::advanced::mouse::Cursor,
+        renderer: &Renderer,
+    ) -> iced::advanced::mouse::Interaction {
+        self.content
+            .as_overlay()
+            .mouse_interaction(layout, cursor, renderer)
+    }
+}
+
+fn text<'a, Theme, Renderer>(s: &'a str, text_size: Option<Pixels>) -> Text<'a, Theme, Renderer>
+where
+    Theme: 'a + TextCatalog,
+    Renderer: 'a + TextRenderer,
+{
+    let text = Text::new(s).center();
+    if let Some(text_size) = text_size {
+        text.size(text_size)
+    } else {
+        text
     }
 }

@@ -63,7 +63,7 @@ pub trait ExtButtonCatalog: ButtonCatalog {
 
 impl ExtButtonCatalog for Theme {
     fn custom_default<'a>() -> Self::Class<'a> {
-        Box::new(button_custom_class)
+        Box::new(button_class)
     }
 }
 
@@ -321,7 +321,6 @@ where
                 border: style.border,
                 shadow: style.shadow,
                 snap: style.snap,
-                ..Default::default()
             },
             style
                 .background
@@ -439,11 +438,9 @@ fn update<'a, Message, PressCb, ReleaseCb, Theme, Renderer>(
             return;
         }
         Event::Window(WindowEvent::RedrawRequested(_)) => {
-            if state.hovered {
-                if !cursor.is_over(bounds) {
-                    state.hovered = false;
-                    shell.request_redraw();
-                }
+            if state.hovered && !cursor.is_over(bounds) {
+                state.hovered = false;
+                shell.request_redraw();
             }
             return;
         }
@@ -508,6 +505,14 @@ pub fn button_container<'a, Message>(
         .padding(DEFAULT_PADDING)
 }
 
+pub fn center_y_button_container<'a, Message>(
+    content: impl Into<Element<'a, Message, Theme, Renderer>>,
+) -> Container<'a, Message, Theme, Renderer> {
+    button_container(content)
+        .padding(DEFAULT_PADDING.vertical(0))
+        .center_y(Length::Fill)
+}
+
 fn button_base_class(theme: &Theme) -> ButtonStyle {
     let pair = theme.extended_palette().background.base;
     ButtonStyle {
@@ -528,7 +533,7 @@ fn button_disabled(style: ButtonStyle) -> ButtonStyle {
     }
 }
 
-fn button_custom_class(theme: &Theme, status: ButtonStatus) -> ButtonStyle {
+pub fn button_class(theme: &Theme, status: ButtonStatus) -> ButtonStyle {
     let base = button_base_class(theme);
     let palette = theme.extended_palette();
     match status {
@@ -539,6 +544,23 @@ fn button_custom_class(theme: &Theme, status: ButtonStatus) -> ButtonStyle {
         },
         ButtonStatus::Pressed => ButtonStyle {
             background: Some(Background::Color(palette.primary.strong.color)),
+            ..base
+        },
+        ButtonStatus::Disabled => button_disabled(base),
+    }
+}
+
+pub fn button_danger_class(theme: &Theme, status: ButtonStatus) -> ButtonStyle {
+    let base = button_base_class(theme);
+    let palette = theme.extended_palette();
+    match status {
+        ButtonStatus::Active => base,
+        ButtonStatus::Hovered => ButtonStyle {
+            background: Some(Background::Color(palette.danger.weak.color)),
+            ..base
+        },
+        ButtonStatus::Pressed => ButtonStyle {
+            background: Some(Background::Color(palette.danger.strong.color)),
             ..base
         },
         ButtonStatus::Disabled => button_disabled(base),

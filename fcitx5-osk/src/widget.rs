@@ -224,12 +224,13 @@ mod toggler {
 }
 
 pub use button::{
-    DummyCb as ButtonDummyCb, ExtButton, ExtButtonCatalog, button_container, button_text_class,
+    DummyCb as ButtonDummyCb, ExtButton, ExtButtonCatalog, button_text_class,
+    center_y_button_container,
     key::{Key, KeyEvent, PopupKey},
 };
 #[allow(unused)]
 pub use debugger::LayoutDebugger;
-pub use movable::{Movable, MovableList};
+pub use movable::{AdvancedMovableList, Movable, MovableList};
 pub use pick_list::ExtPickList;
 pub use scrollable::scrollable_style;
 pub use slider::slider_style_cb;

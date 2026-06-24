@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use iced::{
     Element, Event, Length, Rectangle, Size, Vector,
     advanced::{
@@ -29,7 +27,7 @@ where
 #[derive(Default)]
 struct LayoutDebuggerState {
     bounds: Rectangle,
-    viewport: RefCell<Rectangle>,
+    viewport: Rectangle,
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -105,6 +103,16 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        let state: &mut LayoutDebuggerState = tree.state.downcast_mut();
+        if *viewport != state.viewport {
+            tracing::debug!(
+                "The viewport of drawing {} is changed from {:?} to {:?}",
+                self.name,
+                state.viewport,
+                viewport
+            );
+            state.viewport = *viewport;
+        }
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -144,17 +152,6 @@ where
         cursor: Cursor,
         viewport: &Rectangle,
     ) {
-        let state: &LayoutDebuggerState = tree.state.downcast_ref();
-        let mut state_viewport = state.viewport.borrow_mut();
-        if *viewport != *state_viewport {
-            tracing::debug!(
-                "The viewport of drawing {} is changed from {:?} to {:?}",
-                self.name,
-                state_viewport,
-                viewport
-            );
-            *state_viewport = *viewport;
-        }
         self.content.as_widget().draw(
             &tree.children[0],
             renderer,

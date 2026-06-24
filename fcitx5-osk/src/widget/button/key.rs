@@ -297,7 +297,6 @@ where
                 border: style.border,
                 shadow: style.shadow,
                 snap: style.snap,
-                ..Default::default()
             },
             style
                 .background
@@ -402,11 +401,9 @@ fn update<Message, PressCb, ReleaseCb, Theme, Renderer>(
             return;
         }
         Event::Window(WindowEvent::RedrawRequested(_)) => {
-            if state.hovered {
-                if !cursor.is_over(bounds) {
-                    state.hovered = false;
-                    shell.request_redraw();
-                }
+            if state.hovered && !cursor.is_over(bounds) {
+                state.hovered = false;
+                shell.request_redraw();
             }
             return;
         }
@@ -721,7 +718,6 @@ where
                 border: style.border,
                 shadow: style.shadow,
                 snap: style.snap,
-                ..Default::default()
             },
             style
                 .background

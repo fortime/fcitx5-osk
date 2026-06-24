@@ -28,6 +28,7 @@ use std::{
     fmt::{Debug, Display, Formatter, Result as FmtResult},
     ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
     path::PathBuf,
+    rc::Rc,
     result::Result as StdResult,
     str::FromStr,
     sync::Arc,
@@ -47,8 +48,8 @@ use crate::{
     },
     store::IdAndConfigPath,
     widget::{
-        self, ButtonDummyCb, ExtButton, ExtPickList as _, Movable, MovableList, Toggle,
-        ToggleCondition,
+        self, AdvancedMovableList, ButtonDummyCb, ExtButton, ExtPickList as _, Movable,
+        MovableList, Toggle, ToggleCondition,
     },
     window::WindowManagerMode,
 };
@@ -637,7 +638,7 @@ impl ToolbarLayout {
         if self.quick_action_bar_shown {
             column = column.push(
                 Container::new(self.quick_action_bar_element(params, unit, font_size))
-                    .height(height + 2 * unit)
+                    .center_y(height + 2 * unit)
                     .style(|theme: &Theme| ContainerStyle {
                         background: Some(theme.extended_palette().background.weak.color.into()),
                         ..Default::default()
@@ -720,7 +721,7 @@ impl ToolbarLayout {
         let candidate_element: Element<_> = if state.is_paged() || consumed == 1 {
             Scrollable::with_direction(
                 candidate_row,
-                Direction::Horizontal(Scrollbar::new().width(1).spacing(unit)),
+                Direction::Horizontal(Scrollbar::new().width(unit).scroller_width(unit).spacing(2)),
             )
             .style(widget::scrollable_style)
             .into()
@@ -882,8 +883,7 @@ impl ToolbarLayout {
             .padding(Padding::new(unit.val()))
             .align_y(Vertical::Center);
         row = row.push(
-            ExtButton::new(Text::new("Reload").size(font_size))
-                .padding(DEFAULT_PADDING)
+            custom_action_button("Reload", None, font_size, None)
                 .on_release_with(Some(|| StoreEvent::Load(true).into())),
         );
         row = row.push(self.combo_action_element(params, unit, font_size));
@@ -894,7 +894,7 @@ impl ToolbarLayout {
         Container::new(
             Scrollable::with_direction(
                 row,
-                Direction::Horizontal(Scrollbar::new().width(1).spacing(unit)),
+                Direction::Horizontal(Scrollbar::new().width(unit).scroller_width(unit).spacing(2)),
             )
             .style(widget::scrollable_style),
         )
@@ -928,30 +928,23 @@ impl ToolbarLayout {
         if is_combo_mode {
             Row::new()
                 .spacing(unit)
-                .push(widget::button_container(content))
+                .push(widget::center_y_button_container(content))
                 .push(
-                    ExtButton::new(
-                        Text::new("Release")
-                            .size(font_size)
-                            .font(font)
-                            .shaping(Shaping::Advanced),
-                    )
-                    .padding(DEFAULT_PADDING)
-                    .on_release_with(Some(|| KeyboardEvent::InsertComboKeyRelease.into())),
+                    custom_action_button("Release", Some(font), font_size, Some(Shaping::Advanced))
+                        .on_release_with(Some(|| KeyboardEvent::InsertComboKeyRelease.into())),
                 )
                 .push(
-                    ExtButton::new(
-                        Text::new("ReleaseAll")
-                            .size(font_size)
-                            .font(font)
-                            .shaping(Shaping::Advanced),
+                    custom_action_button(
+                        "ReleaseAll",
+                        Some(font),
+                        font_size,
+                        Some(Shaping::Advanced),
                     )
-                    .padding(DEFAULT_PADDING)
                     .on_release_with(Some(|| KeyboardEvent::InsertComboKeyReleaseAll.into())),
                 )
                 .into()
         } else {
-            widget::button_container(content).into()
+            widget::center_y_button_container(content).into()
         }
     }
 
@@ -1003,10 +996,11 @@ impl ToolbarLayout {
             }
             Row::new()
                 .spacing(unit)
-                .push(widget::button_container(content))
+                .align_y(Vertical::Center)
+                .push(widget::center_y_button_container(content))
                 .push(
-                    ExtButton::new(texts)
-                        .padding(DEFAULT_PADDING)
+                    ExtButton::new(Container::new(texts).center_y(Length::Fill))
+                        .padding(DEFAULT_PADDING.vertical(0))
                         .on_release_with(Some(|| KeyboardEvent::StopRepeating.into()))
                         .on_press_with(Some(move || {
                             KeyboardEvent::RepeatComboKeys((
@@ -1018,7 +1012,7 @@ impl ToolbarLayout {
                 )
                 .into()
         } else {
-            widget::button_container(content).into()
+            widget::center_y_button_container(content).into()
         }
     }
 
@@ -1028,16 +1022,11 @@ impl ToolbarLayout {
         custom_action_name: &'b Arc<str>,
     ) -> Element<'b, Message> {
         let cloned_name = custom_action_name.clone();
-        ExtButton::new(
-            Text::new(&**custom_action_name)
-                .size(font_size)
-                .shaping(Shaping::Advanced),
-        )
-        .padding(DEFAULT_PADDING)
-        .on_release_with(Some(move || {
-            KeyboardEvent::ClickCustomAction(cloned_name.clone()).into()
-        }))
-        .into()
+        custom_action_button(custom_action_name, None, font_size, Some(Shaping::Advanced))
+            .on_release_with(Some(move || {
+                KeyboardEvent::ClickCustomAction(cloned_name.clone()).into()
+            }))
+            .into()
     }
 }
 
@@ -1052,11 +1041,11 @@ impl SettingLayout {
     ) -> Element<'b, Message> {
         let state = params.state;
         let text_size = font_size_u * unit;
-        let height = text_size + 4 * unit;
-        let mut name_column = Column::new();
-        let mut value_column = Column::new().width(Length::Fill);
+        let mut name_column = Column::new().spacing(2 * unit);
+        let mut value_column = Column::new().spacing(2 * unit).width(Length::Fill);
         for field in state.updatable_fields() {
             let row_num = field_row_num(state, field);
+            let height = (text_size + 5 * unit) * row_num;
             name_column = name_column.push(
                 Container::new(
                     Text::new(field.name())
@@ -1064,11 +1053,11 @@ impl SettingLayout {
                         .shaping(Shaping::Advanced)
                         .align_x(Horizontal::Left),
                 )
-                .center_y(height * row_num),
+                .center_y(height),
             );
             value_column = value_column.push(
-                Container::new(field_value_element(state, field, text_size, unit))
-                    .center_y(height * row_num),
+                Container::new(field_value_element(state, field, unit, text_size, height))
+                    .center_y(height),
             );
         }
         Container::new(
@@ -1079,7 +1068,7 @@ impl SettingLayout {
                     .push(value_column)
                     // don't overlap with the scrollbar
                     .push(Column::new().width(2 * unit)),
-                Direction::Vertical(Scrollbar::new().width(unit).scroller_width(unit)),
+                Direction::Vertical(Scrollbar::new().width(unit).scroller_width(unit).spacing(2)),
             )
             .style(widget::scrollable_style),
         )
@@ -1098,8 +1087,9 @@ trait ToElementFieldType {
         &'a self,
         field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: KLength,
         unit: KLength,
+        text_size: KLength,
+        height: KLength,
     ) -> Element<'a, Message>;
 
     fn row_num(&self, _state: &dyn StateExtractor) -> u32 {
@@ -1115,8 +1105,9 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: KLength,
         _unit: KLength,
+        text_size: KLength,
+        _height: KLength,
     ) -> Element<'a, Message> {
         if self.is_enabled(state) {
             PickList::new(self.variants(), self.cur_value(state), |selected| {
@@ -1145,8 +1136,9 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: KLength,
         _unit: KLength,
+        text_size: KLength,
+        _height: KLength,
     ) -> Element<'a, Message> {
         if self.is_enabled(state) {
             PickList::new(self.variants(), self.cur_value(state), |selected| {
@@ -1175,8 +1167,9 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: KLength,
         _unit: KLength,
+        text_size: KLength,
+        _height: KLength,
     ) -> Element<'a, Message> {
         let (variants, selected) = self.variants_and_selected(state);
         if self.is_enabled(state) {
@@ -1202,8 +1195,9 @@ where
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: KLength,
         _unit: KLength,
+        text_size: KLength,
+        _height: KLength,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(state);
         Row::new()
@@ -1234,8 +1228,9 @@ where
         &'a self,
         field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: KLength,
         _unit: KLength,
+        text_size: KLength,
+        _height: KLength,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(field, state);
         let padding = DEFAULT_PADDING;
@@ -1313,8 +1308,9 @@ impl ToElementFieldType for TextDesc {
         &'a self,
         field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: KLength,
         _unit: KLength,
+        text_size: KLength,
+        _height: KLength,
     ) -> Element<'a, Message> {
         TextInput::new(
             &self.placeholder(field, state).unwrap_or_default(),
@@ -1334,8 +1330,9 @@ impl ToElementFieldType for BoolDesc {
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: KLength,
         _unit: KLength,
+        text_size: KLength,
+        _height: KLength,
     ) -> Element<'a, Message> {
         let cur_value = self.cur_value(state);
         let mut toggler = Toggler::new(cur_value)
@@ -1350,61 +1347,89 @@ impl ToElementFieldType for BoolDesc {
 
 impl<T> ToElementFieldType for MultiSelectionDesc<T>
 where
-    T: Eq + Debug,
+    T: ToString + Debug + Clone + Eq,
 {
     fn to_element<'a>(
         &'a self,
         _field: &'a Field,
         state: &'a dyn StateExtractor,
-        text_size: KLength,
         unit: KLength,
+        text_size: KLength,
+        height: KLength,
     ) -> Element<'a, Message> {
         let variants = self.variants(state);
         let selecteds = self.selecteds(state);
-        let mut movable_list = MovableList::new()
-            .spacing(text_size / 2.)
-            .item_padding(Padding::new(unit.0).horizontal(text_size))
-            .remove_button_size(((text_size + unit).0, (text_size + unit).0))
-            .remove_button_text_size(text_size);
-        for selected in selecteds {
-            let ValueAndDescription { value, desc } = selected;
-            movable_list = movable_list.push(value, Text::new(desc).size(text_size));
-        }
-        movable_list
-            .on_drop(|ids| {
-                let mut selections = self.selecteds(state);
-                tracing::debug!("New order: {ids:?}, current selections: {selections:?}");
+        let create_movable_list = move || {
+            let mut movable_list = MovableList::new()
+                .spacing(text_size / 2.)
+                .item_padding(Padding::new(unit.0).horizontal(text_size))
+                .remove_button_size(((text_size + unit).0, (text_size + unit).0))
+                .remove_button_text_size(text_size);
+            for selected in selecteds.clone() {
+                let ValueAndDescription { value, .. } = selected;
+                movable_list =
+                    movable_list.push(value.clone(), Text::new(value.to_string()).size(text_size));
+            }
+            movable_list
+        };
+        let height = height / self.row_num(state);
+        let mut list = AdvancedMovableList::new(
+            create_movable_list,
+            Rc::new(move |movable_list, _scrollable_id, horizontal| {
+                let direction = if horizontal {
+                    Direction::Horizontal(
+                        Scrollbar::new().width(unit).scroller_width(unit).spacing(2),
+                    )
+                } else {
+                    Direction::Vertical(
+                        Scrollbar::new().width(unit).scroller_width(unit).spacing(2),
+                    )
+                };
+                Ok(Scrollable::with_direction(movable_list, direction)
+                    .style(widget::scrollable_style))
+            }),
+        )
+        .movable_list_height(height.0)
+        .controll_row_spacing(unit)
+        .controll_row_text_size(text_size)
+        .controll_row_button_padding(Padding::new(unit.0))
+        .controll_row_height(height.0)
+        .variants(variants.clone().into_iter().map(|v| v.value).collect())
+        .id_to_element(move |id| Text::new(id.to_string()).size(text_size).into())
+        .text_to_id(move |s| {
+            for variant in &variants {
+                if variant.value.to_string() == *s {
+                    return Some(variant.value.clone());
+                }
+            }
+            None
+        });
+        if self.is_enabled(state) {
+            list = list.on_done(|ids| {
+                let mut variants = self.variants(state);
+                tracing::debug!("New order: {ids:?}");
                 let mut len = 0;
                 // reorder selections by ids
-                for idx in 0..ids.len() {
-                    if len >= selections.len() {
+                for id in ids {
+                    if len >= variants.len() {
                         break;
                     }
-                    let id = ids[idx];
-                    if selections[len].value == *id {
+                    if variants[len].value == *id {
                         len += 1;
                         continue;
                     }
-                    let Some(pos) = selections[len + 1..].iter().position(|v| v.value == *id)
-                    else {
+                    let Some(pos) = variants[len + 1..].iter().position(|v| v.value == *id) else {
                         tracing::warn!("[MultiSelectionDesc] {id:?} not found");
                         continue;
                     };
-                    selections.swap(len, pos + len + 1);
+                    variants.swap(len, pos + len + 1);
                     len += 1;
                 }
-                selections.truncate(len);
-                self.on_changed(state, &selections)
-            })
-            .on_remove(|remove| {
-                let selections: Vec<_> = self
-                    .selecteds(state)
-                    .into_iter()
-                    .filter(|v| v.value != *remove)
-                    .collect();
-                self.on_changed(state, &selections)
-            })
-            .into()
+                variants.truncate(len);
+                self.on_changed(state, &variants)
+            });
+        }
+        list.into()
     }
 
     fn row_num(&self, state: &dyn StateExtractor) -> u32 {
@@ -1486,24 +1511,31 @@ where
 fn field_value_element<'a>(
     state: &'a dyn StateExtractor,
     field: &'a Field,
-    text_size: KLength,
     unit: KLength,
+    text_size: KLength,
+    height: KLength,
 ) -> Element<'a, Message> {
     match field.typ() {
-        FieldType::StepU32(desc) => desc.to_element(field, state, text_size, unit),
-        FieldType::RangeF32(desc) => desc.to_element(field, state, text_size, unit),
-        FieldType::OwnedEnumPlacement(desc) => desc.to_element(field, state, text_size, unit),
+        FieldType::StepU32(desc) => desc.to_element(field, state, unit, text_size, height),
+        FieldType::RangeF32(desc) => desc.to_element(field, state, unit, text_size, height),
+        FieldType::OwnedEnumPlacement(desc) => {
+            desc.to_element(field, state, unit, text_size, height)
+        }
         FieldType::OwnedEnumIndicatorDisplay(desc) => {
-            desc.to_element(field, state, text_size, unit)
+            desc.to_element(field, state, unit, text_size, height)
         }
         FieldType::OwnedEnumQuickActionBarState(desc) => {
-            desc.to_element(field, state, text_size, unit)
+            desc.to_element(field, state, unit, text_size, height)
         }
-        FieldType::EnumString(desc) => desc.to_element(field, state, text_size, unit),
-        FieldType::DynamicEnumString(desc) => desc.to_element(field, state, text_size, unit),
-        FieldType::Text(desc) => desc.to_element(field, state, text_size, unit),
-        FieldType::Bool(desc) => desc.to_element(field, state, text_size, unit),
-        FieldType::MultiSelectionString(desc) => desc.to_element(field, state, text_size, unit),
+        FieldType::EnumString(desc) => desc.to_element(field, state, unit, text_size, height),
+        FieldType::DynamicEnumString(desc) => {
+            desc.to_element(field, state, unit, text_size, height)
+        }
+        FieldType::Text(desc) => desc.to_element(field, state, unit, text_size, height),
+        FieldType::Bool(desc) => desc.to_element(field, state, unit, text_size, height),
+        FieldType::MultiSelectionString(desc) => {
+            desc.to_element(field, state, unit, text_size, height)
+        }
     }
 }
 
@@ -1520,4 +1552,22 @@ fn field_row_num<'a>(state: &'a dyn StateExtractor, field: &'a Field) -> u32 {
         FieldType::Bool(desc) => desc.row_num(state),
         FieldType::MultiSelectionString(desc) => desc.row_num(state),
     }
+}
+
+fn custom_action_button<'a, Message: 'a>(
+    text: &'a str,
+    font: Option<Font>,
+    font_size: KLength,
+    shaping: Option<Shaping>,
+) -> ExtButton<'a, Message, ButtonDummyCb<Message>, ButtonDummyCb<Message>> {
+    ExtButton::new(
+        Container::new(
+            Text::new(text)
+                .font_maybe(font)
+                .size(font_size)
+                .shaping(shaping.unwrap_or_default()),
+        )
+        .center_y(Length::Fill),
+    )
+    .padding(DEFAULT_PADDING.vertical(0))
 }
