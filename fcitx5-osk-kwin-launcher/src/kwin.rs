@@ -104,6 +104,7 @@ pub async fn restart_input_method(
                 cur_input_method,
                 input_method,
             );
+            return Ok(());
         }
         input_method
     } else {
