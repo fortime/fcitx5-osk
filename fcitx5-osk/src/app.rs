@@ -32,8 +32,9 @@ use crate::{
     dbus::{
         client::FdoPortalSettingsServiceProxy,
         server::{
-            Fcitx5OskService, Fcitx5OskServiceClient, Fcitx5VirtualkeyboardImPanelEvent,
-            Fcitx5VirtualkeyboardImPanelService, ImPanelEvent, SocketEnv,
+            CandidateAreaState, Fcitx5OskService, Fcitx5OskServiceClient,
+            Fcitx5VirtualkeyboardImPanelEvent, Fcitx5VirtualkeyboardImPanelService, ImPanelEvent,
+            SocketEnv,
         },
     },
     misc::NamedSubscriptionData,
@@ -395,6 +396,10 @@ where
             Message::Nothing => unreachable!("Nothing should be return before here"),
             Message::Notification(e) => self.handle_notification(e),
             Message::AfterError => {
+                // clear candidates
+                self.state
+                    .im_mut()
+                    .update_candidate_area_state(Arc::new(CandidateAreaState::empty()));
                 if let Some(KeyboardNotification::Fatal(_)) = self.notification.take() {
                     task = task.chain(self.state.window_manager_mut().shutdown());
                 }

@@ -211,6 +211,16 @@ impl CandidateAreaState {
             global_cursor_index,
         }
     }
+
+    pub fn empty() -> Self {
+        Self {
+            candidate_text_list: vec![],
+            has_prev: false,
+            has_next: false,
+            page_index: 0,
+            global_cursor_index: 0,
+        }
+    }
 }
 
 pub enum SocketEnv {
