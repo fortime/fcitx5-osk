@@ -15,7 +15,10 @@ source=("git+https://github.com/fortime/fcitx5-osk")
 arch=('x86_64')
 license=('MIT')
 makedepends=('cargo' 'git' 'cmake')
+# Disable lto in `makepkg`, otherwise, aws_lc can't be built
+options=(!lto)
 depends=('fcitx5' 'ttf-font-nerd')
+optdepends=('kwin: needed by kwin launcher')
 sha256sums=(SKIP)
 
 pkgver() {
