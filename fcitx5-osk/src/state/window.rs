@@ -502,7 +502,7 @@ where
                 // same level. Otherwise, the state will be clear if the level is changed.
                 let mut stack = Stack::new()
                     .push(Container::new(self.layout.to_element(&params)).center_x(size.width));
-                // overlay should be caculated with the window size
+                // overlay should be calculated with the window size
                 if let Some(overlay) = params
                     .state
                     .keyboard()

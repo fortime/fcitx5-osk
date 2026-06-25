@@ -184,7 +184,7 @@ impl KeyValue {
             '~' => (-49, "~"),
             '\n' => (36, "󰌑"),
             _ => {
-                tracing::warn!("Unsupport char[{c}]");
+                tracing::warn!("Unsupported char[{c}]");
                 return None;
             }
         };

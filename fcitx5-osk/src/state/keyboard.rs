@@ -279,8 +279,8 @@ impl KeyboardState {
             KeyEventInner::Holding(key_widget_event, pressed_time) => {
                 return self.hold_key(common, key_widget_event, pressed_time);
             }
-            KeyEventInner::Holded(pressed_time) => {
-                self.set_holded(common, pressed_time);
+            KeyEventInner::Held(pressed_time) => {
+                self.set_held(common, pressed_time);
             }
             KeyEventInner::Released(key_widget_event) => {
                 return self.release_key(common, key_widget_event);
@@ -842,20 +842,20 @@ impl KeyboardState {
             let timeout = self.holding_timeout;
             task = Task::future(async move {
                 time::sleep(timeout).await;
-                KeyEvent::new(common, KeyEventInner::Holded(pressed_time)).into()
+                KeyEvent::new(common, KeyEventInner::Held(pressed_time)).into()
             });
         }
         task
     }
 
-    fn set_holded(&mut self, common: KeyEventCommon, pressed_time: u128) {
+    fn set_held(&mut self, common: KeyEventCommon, pressed_time: u128) {
         if let Some(holding_key_state) = &mut self.holding_key_state
             && holding_key_state.name == common.key_name
         {
             // check if the pressed time is the same
             if holding_key_state.pressed_time != pressed_time {
                 tracing::debug!(
-                    "pressed_time is not equal: {}/{}, skip holded event.",
+                    "pressed_time is not equal: {}/{}, skip held event.",
                     pressed_time,
                     holding_key_state.pressed_time
                 );
@@ -945,7 +945,7 @@ impl KeyEventCommon {
 enum KeyEventInner {
     Pressed(KeyWidgetEvent),
     Holding(KeyWidgetEvent, u128),
-    Holded(u128),
+    Held(u128),
     Released(KeyWidgetEvent),
     SelectSecondary,
     UnselectSecondary,

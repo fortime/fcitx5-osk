@@ -1390,10 +1390,10 @@ where
             }),
         )
         .movable_list_height(height.0)
-        .controll_row_spacing(unit)
-        .controll_row_text_size(text_size)
-        .controll_row_button_padding(Padding::new(unit.0))
-        .controll_row_height(height.0)
+        .control_row_spacing(unit)
+        .control_row_text_size(text_size)
+        .control_row_button_padding(Padding::new(unit.0))
+        .control_row_height(height.0)
         .variants(variants.clone().into_iter().map(|v| v.value).collect())
         .id_to_element(move |id| Text::new(id.to_string()).size(text_size).into())
         .text_to_id(move |s| {

@@ -586,7 +586,7 @@ pub fn button_text_class(theme: &Theme, status: ButtonStatus) -> ButtonStyle {
     }
 }
 
-/// Highlight the text wiht danger class and make the background transparent
+/// Highlight the text with danger class and make the background transparent
 pub fn button_text_danger_class(theme: &Theme, status: ButtonStatus) -> ButtonStyle {
     let mut base = button_base_class(theme);
     base.background = None;

@@ -301,7 +301,7 @@ pub trait StateExtractor {
 
     fn movable(&self, window_id: Id) -> bool;
 
-    /// It is used to calculate a logical size which contains no fraction after tranforming to a
+    /// It is used to calculate a logical size which contains no fraction after transforming to a
     /// physical size
     #[allow(unused)]
     fn scale_factor(&self) -> f32;

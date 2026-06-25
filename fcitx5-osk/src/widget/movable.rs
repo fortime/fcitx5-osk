@@ -571,7 +571,7 @@ impl<'a, 'b, Id, Message> MovableListShimMut<'a, 'b, Id, Message> {
             }
             MovableListInnerMessage::Drop(_position) => {
                 let Some((layout, viewport)) = layout_viewport else {
-                    unreachable!("A drag event is happend on a overlay");
+                    unreachable!("A drag event is happened on a overlay");
                 };
                 // NOTE the `position` is not correct inside a scrollable, use the position from
                 // `cursor` instead
@@ -1929,12 +1929,12 @@ where
         &mut self,
         shell: &mut Shell<'_, Message>,
         build_movable_list: bool,
-        build_controll_row: bool,
+        build_control_row: bool,
     ) {
         if build_movable_list {
             self.request_build_movable_list();
         }
-        if build_controll_row {
+        if build_control_row {
             self.request_build_control_row();
         }
         shell.invalidate_layout();
@@ -2111,10 +2111,10 @@ where
     children: Vec<Element<'a, AdvancedMovableListMessage<Message>, Theme, Renderer>>,
     children_flag: [bool; 2],
     movable_list_height: Option<f32>,
-    controll_row_spacing: f32,
-    controll_row_text_size: Option<Pixels>,
-    controll_row_button_padding: Padding,
-    controll_row_height: Option<f32>,
+    control_row_spacing: f32,
+    control_row_text_size: Option<Pixels>,
+    control_row_button_padding: Padding,
+    control_row_height: Option<f32>,
     class: <Theme as AdvancedMovableListCatalog>::Class<'a>,
     on_done: Option<Rc<dyn Fn(&[Id]) -> Message + 'a>>,
 }
@@ -2143,10 +2143,10 @@ where
             children: Vec::with_capacity(2),
             children_flag: [true, true],
             movable_list_height: None,
-            controll_row_spacing: 0.,
-            controll_row_text_size: None,
-            controll_row_button_padding: Padding::ZERO,
-            controll_row_height: None,
+            control_row_spacing: 0.,
+            control_row_text_size: None,
+            control_row_button_padding: Padding::ZERO,
+            control_row_height: None,
             class: <Theme as AdvancedMovableListCatalog>::default(),
             on_done: None,
         }
@@ -2175,26 +2175,26 @@ where
         self
     }
 
-    pub fn controll_row_spacing(mut self, controll_row_spacing: impl Into<Pixels>) -> Self {
-        self.controll_row_spacing = controll_row_spacing.into().0;
+    pub fn control_row_spacing(mut self, control_row_spacing: impl Into<Pixels>) -> Self {
+        self.control_row_spacing = control_row_spacing.into().0;
         self
     }
 
-    pub fn controll_row_text_size(mut self, controll_row_text_size: impl Into<Pixels>) -> Self {
-        self.controll_row_text_size = Some(controll_row_text_size.into());
+    pub fn control_row_text_size(mut self, control_row_text_size: impl Into<Pixels>) -> Self {
+        self.control_row_text_size = Some(control_row_text_size.into());
         self
     }
 
-    pub fn controll_row_button_padding(
+    pub fn control_row_button_padding(
         mut self,
-        controll_row_button_padding: impl Into<Padding>,
+        control_row_button_padding: impl Into<Padding>,
     ) -> Self {
-        self.controll_row_button_padding = controll_row_button_padding.into();
+        self.control_row_button_padding = control_row_button_padding.into();
         self
     }
 
-    pub fn controll_row_height(mut self, controll_row_height: f32) -> Self {
-        self.controll_row_height = Some(controll_row_height);
+    pub fn control_row_height(mut self, control_row_height: f32) -> Self {
+        self.control_row_height = Some(control_row_height);
         self
     }
 
@@ -2336,31 +2336,31 @@ where
         true
     }
 
-    fn build_controll_row(&mut self, state: &AdvancedMovableListState) -> bool {
+    fn build_control_row(&mut self, state: &AdvancedMovableListState) -> bool {
         if !self.children_flag[1] || self.children.is_empty() {
             // check if movable_list is built
             return false;
         }
 
         let mut row = Row::new()
-            .spacing(self.controll_row_spacing)
+            .spacing(self.control_row_spacing)
             .align_y(Vertical::Center);
         match state {
             AdvancedMovableListState::Init => {
                 if self.text_to_id.is_some() && self.id_to_element.is_some() {
                     row = row.push(
-                        ExtButton::new(text("Add", self.controll_row_text_size))
+                        ExtButton::new(text("Add", self.control_row_text_size))
                             .class(Theme::lv1_button_class(&self.class))
-                            .padding(self.controll_row_button_padding)
+                            .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| {
                                 AdvancedMovableListInnerMessage::EnableAddMode.into()
                             })),
                     )
                 }
                 row = row.push(
-                    ExtButton::new(text("Edit", self.controll_row_text_size))
+                    ExtButton::new(text("Edit", self.control_row_text_size))
                         .class(Theme::lv1_button_class(&self.class))
-                        .padding(self.controll_row_button_padding)
+                        .padding(self.control_row_button_padding)
                         .on_release_with(Some(|| {
                             AdvancedMovableListInnerMessage::EnableEditMode.into()
                         })),
@@ -2378,7 +2378,7 @@ where
                         .filter(|v| !selections.contains(v) && !new_items.contains(v))
                         .collect();
                     Row::new()
-                        .spacing(self.controll_row_spacing / 2.)
+                        .spacing(self.control_row_spacing / 2.)
                         .align_y(Vertical::Center)
                         .push(
                             PickList::new(variants, add_text.clone(), |s| {
@@ -2387,16 +2387,16 @@ where
                             .class(Theme::pick_list_class(&self.class)),
                         )
                         .push(
-                            ExtButton::new(text("Add", self.controll_row_text_size))
+                            ExtButton::new(text("Add", self.control_row_text_size))
                                 .class(Theme::lv2_add_button_class(&self.class))
-                                .padding(self.controll_row_button_padding)
+                                .padding(self.control_row_button_padding)
                                 .on_release_with(Some(|| {
                                     AdvancedMovableListInnerMessage::AddItem.into()
                                 })),
                         )
                 } else if self.text_to_id.is_some() {
                     Row::new()
-                        .spacing(self.controll_row_spacing / 2.)
+                        .spacing(self.control_row_spacing / 2.)
                         .push(
                             TextInput::new("", add_text.as_deref().unwrap_or(""))
                                 .class(Theme::text_input_class(&self.class))
@@ -2409,9 +2409,9 @@ where
                                 .on_submit(AdvancedMovableListInnerMessage::AddItem.into()),
                         )
                         .push(
-                            ExtButton::new(text("Add", self.controll_row_text_size))
+                            ExtButton::new(text("Add", self.control_row_text_size))
                                 .class(Theme::lv2_add_button_class(&self.class))
-                                .padding(self.controll_row_button_padding)
+                                .padding(self.control_row_button_padding)
                                 .on_release_with(Some(|| {
                                     AdvancedMovableListInnerMessage::AddItem.into()
                                 })),
@@ -2422,15 +2422,15 @@ where
                 row = row
                     .push(add_text)
                     .push(
-                        ExtButton::new(text("Done", self.controll_row_text_size))
+                        ExtButton::new(text("Done", self.control_row_text_size))
                             .class(Theme::lv2_done_button_class(&self.class))
-                            .padding(self.controll_row_button_padding)
+                            .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| AdvancedMovableListInnerMessage::Done.into())),
                     )
                     .push(
-                        ExtButton::new(text("Cancel", self.controll_row_text_size))
+                        ExtButton::new(text("Cancel", self.control_row_text_size))
                             .class(Theme::lv2_cancel_button_class(&self.class))
-                            .padding(self.controll_row_button_padding)
+                            .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| {
                                 AdvancedMovableListInnerMessage::Cancel.into()
                             })),
@@ -2439,15 +2439,15 @@ where
             AdvancedMovableListState::Edit { .. } => {
                 row = row
                     .push(
-                        ExtButton::new(text("Done", self.controll_row_text_size))
+                        ExtButton::new(text("Done", self.control_row_text_size))
                             .class(Theme::lv2_done_button_class(&self.class))
-                            .padding(self.controll_row_button_padding)
+                            .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| AdvancedMovableListInnerMessage::Done.into())),
                     )
                     .push(
-                        ExtButton::new(text("Cancel", self.controll_row_text_size))
+                        ExtButton::new(text("Cancel", self.control_row_text_size))
                             .class(Theme::lv2_cancel_button_class(&self.class))
-                            .padding(self.controll_row_button_padding)
+                            .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| {
                                 AdvancedMovableListInnerMessage::Cancel.into()
                             })),
@@ -2457,7 +2457,7 @@ where
 
         let content = Container::new(row)
             .center_y(
-                self.controll_row_height
+                self.control_row_height
                     .map(Length::Fixed)
                     .unwrap_or(Length::Shrink),
             )
@@ -2635,8 +2635,8 @@ where
         let state: &mut AdvancedMovableListState = tree.state.downcast_mut();
         let mut tree_diff = self.build_movable_list(state);
         if self.on_done.is_some() {
-            // NOTE run `self.build_controll_row` first
-            tree_diff = self.build_controll_row(state) || tree_diff;
+            // NOTE run `self.build_control_row` first
+            tree_diff = self.build_control_row(state) || tree_diff;
         }
         if tree_diff {
             self.diff(tree);
