@@ -588,21 +588,27 @@ impl KeyboardState {
                 let custom_action_serial = self.keyboard_backend_state.custom_action_serial.clone();
                 let tx = self.tx.clone();
                 let params = params.clone();
-                Task::future(async move {
-                    crate::custom_action::http_api::execute(tx, serial, params, move |s| {
-                        s != custom_action_serial.load(Ordering::Relaxed)
+                Task::done(KeyboardBackend::candidate_area_state_message(vec![vec![(
+                    format!("Calling HttpApi Action[{custom_action_name}]"),
+                    None,
+                )]]))
+                .chain(
+                    Task::future(async move {
+                        crate::custom_action::http_api::execute(tx, serial, params, move |s| {
+                            s != custom_action_serial.load(Ordering::Relaxed)
+                        })
+                        .await
                     })
-                    .await
-                })
-                .map(move |r| match r {
-                    Ok(_) => Message::Nothing,
-                    Err(e) => app::error_with_context(
-                        e,
-                        format!(
-                            "Failed to execute the http api custom action: {custom_action_name}"
+                    .map(move |r| match r {
+                        Ok(_) => Message::Nothing,
+                        Err(e) => app::error_with_context(
+                            e,
+                            format!(
+                                "Failed to execute the http api custom action: {custom_action_name}"
+                            ),
                         ),
-                    ),
-                })
+                    }),
+                )
             }
         }
     }
