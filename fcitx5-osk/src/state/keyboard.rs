@@ -121,7 +121,6 @@ impl KeyboardState {
         key_area_layout: &KeyAreaLayout,
         store: &Store,
         keyboard_backend: KeyboardBackend,
-        custom_actions: &[String],
         tx: UnboundedSender<Message>,
     ) -> Self {
         let mut res = Self {
@@ -143,7 +142,8 @@ impl KeyboardState {
             tx,
         };
         res.update_key_area_layout(key_area_layout, store);
-        res.update_custom_actions(custom_actions, store);
+        // assets aren't loaded yet, don't load custom actions
+        // res.update_custom_actions(custom_actions, store);
         res
     }
 

@@ -72,7 +72,6 @@ impl<WM> State<WM> {
                 &key_area_layout,
                 &store,
                 keyboard_backend.clone(),
-                config.custom_actions().as_ref(),
                 tx,
             ),
             im: ImState::new(keyboard_backend.clone()),
