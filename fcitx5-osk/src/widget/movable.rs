@@ -3,8 +3,7 @@
 use std::{
     collections::HashSet,
     fmt::{Debug, Formatter, Result as FmtResult},
-    mem,
-    ops::{Deref, DerefMut},
+    marker::PhantomData,
     rc::Rc,
     slice,
     time::{Duration, Instant},
@@ -57,6 +56,7 @@ use crate::{
     widget::{
         ExtButton, ExtButtonCatalog,
         button::{self},
+        overlay::{Composer, ComposerOverlay},
     },
 };
 
@@ -380,46 +380,6 @@ impl MovableListEmptySlotLayout {
     }
 }
 
-#[derive(Default)]
-enum MovableListSlot<'a, Id, Message, Theme, Renderer> {
-    // before sealed
-    #[default]
-    EmptyRaw,
-    OccupiedRaw(Id, Element<'a, Message, Theme, Renderer>),
-    // it is used to cache empty space element
-    Empty(
-        MovableListEmptySlotLayout,
-        Element<'a, MovableListInnerMessage<Message>, Theme, Renderer>,
-    ),
-    Occupied(
-        Id,
-        Element<'a, MovableListInnerMessage<Message>, Theme, Renderer>,
-    ),
-}
-
-impl<Id, Message, Theme, Renderer> MovableListSlot<'_, Id, Message, Theme, Renderer>
-where
-    Renderer: renderer::Renderer,
-{
-    fn tree(&self) -> Tree {
-        match self {
-            MovableListSlot::EmptyRaw => unreachable!("it shouldn't exist after sealed"),
-            MovableListSlot::OccupiedRaw(_, _) => unreachable!("it shouldn't exist after sealed"),
-            MovableListSlot::Empty(_, i) => Tree::new(i),
-            MovableListSlot::Occupied(_, i) => Tree::new(i),
-        }
-    }
-
-    fn diff_by(&self, tree: &mut Tree) {
-        match self {
-            MovableListSlot::EmptyRaw => unreachable!("it shouldn't exist after sealed"),
-            MovableListSlot::OccupiedRaw(_, _) => unreachable!("it shouldn't exist after sealed"),
-            MovableListSlot::Empty(_, i) => tree.diff(i),
-            MovableListSlot::Occupied(_, i) => tree.diff(i),
-        }
-    }
-}
-
 /// Local state of the [`MovableList`].
 struct MovableListState {
     dragged: Option<(usize, Rectangle)>,
@@ -551,57 +511,196 @@ impl<Message> Debug for MovableListInnerMessage<Message> {
     }
 }
 
-struct MovableListElementsGaurd<'a, 'b, Id, Message, Theme, Renderer>
-where
-    Theme: MovableListCatalog,
-{
-    list: &'a mut MovableList<'b, Id, Message, Theme, Renderer>,
-    id_or_layouts: Vec<Result<Id, MovableListEmptySlotLayout>>,
-    elements: Vec<Element<'b, MovableListInnerMessage<Message>, Theme, Renderer>>,
+struct MovableListShimMut<'a, 'b, Id, Message> {
+    ids: &'a [Option<Id>],
+    horizontal: bool,
+    on_drag: Option<&'a Box<dyn Fn(&Id, Point) -> Message + 'b>>,
+    on_drop: Option<&'a Box<dyn Fn(&[&Id]) -> Message + 'b>>,
+    on_remove: Option<&'a Box<dyn Fn(&Id) -> Message + 'b>>,
 }
 
-impl<'b, Id, Message, Theme, Renderer> Drop
-    for MovableListElementsGaurd<'_, 'b, Id, Message, Theme, Renderer>
-where
-    Theme: MovableListCatalog,
-{
-    fn drop(&mut self) {
-        assert_eq!(
-            self.id_or_layouts.len(),
-            self.elements.len(),
-            "the length of `id_or_layouts` and the length of elements are not equal"
+impl<'a, 'b, Id, Message> MovableListShimMut<'a, 'b, Id, Message> {
+    fn update(
+        &mut self,
+        shell: &mut Shell<'_, Message>,
+        layout_viewport: Option<(&Layout<'_>, &Rectangle)>,
+        cursor: Cursor,
+        state: &mut MovableListState,
+        message: MovableListInnerMessage<Message>,
+    ) {
+        match message {
+            MovableListInnerMessage::Drag(_position, idx) => {
+                let Some((layout, viewport)) = layout_viewport else {
+                    unreachable!("A drag event is happened on a overlay");
+                };
+                // NOTE the `position` is not correct inside a scrollable, use the position from
+                // `cursor` instead
+                // land the cursor to get the position
+                let Some(position) = cursor.land().position() else {
+                    tracing::warn!(
+                        "The position of cursor isn't available when there is a drag event"
+                    );
+                    return;
+                };
+                let dragged_bounds = if let Some((dragged_idx, dragged_bounds)) = state.dragged {
+                    if dragged_idx != idx {
+                        let bounds = layout.child(idx).bounds();
+                        state.dragged = Some((idx, layout.child(idx).bounds()));
+                        shell.invalidate_layout();
+                        bounds
+                    } else {
+                        dragged_bounds
+                    }
+                } else {
+                    let bounds = layout.child(idx).bounds();
+                    state.dragged = Some((idx, bounds));
+                    shell.invalidate_layout();
+                    bounds
+                };
+                if let Some(on_drag) = &self.on_drag {
+                    let Some(id) = &self.ids[idx] else {
+                        unreachable!("the slot[{idx}] isn't a MovableListSlot::Occupied");
+                    };
+                    shell.publish(on_drag(id, position));
+                }
+                let new_dropping = self.is_dropping(layout, &position, &dragged_bounds, viewport);
+                if state.dropping != new_dropping {
+                    state.dropping = new_dropping;
+                    shell.invalidate_layout();
+                }
+            }
+            MovableListInnerMessage::Drop(_position) => {
+                let Some((layout, viewport)) = layout_viewport else {
+                    unreachable!("A drag event is happend on a overlay");
+                };
+                // NOTE the `position` is not correct inside a scrollable, use the position from
+                // `cursor` instead
+                // land the cursor to get the position
+                let Some(position) = cursor.land().position() else {
+                    tracing::warn!(
+                        "The position of cursor isn't available when there is a drag event"
+                    );
+                    return;
+                };
+                if let Some((dragged_idx, dragged_bounds)) = state.dragged {
+                    state.dropping = self.is_dropping(layout, &position, &dragged_bounds, viewport);
+                    if let Some(on_drop) = &self.on_drop
+                        && let Some(dropping_idx) = state.dropping
+                    {
+                        shell.publish(on_drop(
+                                &self
+                                    .ids
+                                    .iter()
+                                    .enumerate()
+                                    .filter_map(|(idx, id)| {
+                                        if idx == dropping_idx {
+                                            let Some(id) = &self.ids[dragged_idx] else {
+                                                unreachable!("the slot[{dragged_idx}] isn't a MovableListSlot::Occupied");
+                                            };
+                                            Some(id)
+                                        } else if idx == dragged_idx {
+                                            None
+                                        } else {
+                                            id.as_ref()
+                                        }
+                                    })
+                                    .collect::<Vec<_>>(),
+                            ));
+                    }
+                }
+                if state.dragged.take().is_some() {
+                    shell.invalidate_layout();
+                }
+                state.dropping.take();
+            }
+            MovableListInnerMessage::Cancel => {
+                if let Some(on_drop) = &self.on_drop {
+                    shell.publish(on_drop(&self.ids.iter().flatten().collect::<Vec<_>>()));
+                }
+                if state.dragged.take().is_some() {
+                    shell.invalidate_layout();
+                }
+                state.dropping.take();
+            }
+            MovableListInnerMessage::Remove(idx) => {
+                tracing::debug!("Remove slot[{idx}]");
+                if let Some(on_remove) = &self.on_remove {
+                    if let Some(id) = &self.ids[idx] {
+                        shell.publish(on_remove(id));
+                        shell.request_redraw();
+                    } else {
+                        unreachable!("the slot[{idx}] isn't a MovableListSlot::Occupied");
+                    }
+                }
+            }
+            MovableListInnerMessage::OuterMessage(message) => shell.publish(message),
+        }
+    }
+
+    fn is_dropping(
+        &self,
+        layout: &Layout<'_>,
+        position: &Point,
+        dragged_slot_bounds: &Rectangle,
+        viewport: &Rectangle,
+    ) -> Option<usize> {
+        let mut bounds = layout.bounds();
+        // use the intersection of viewport to limit the area where we can drop the item.
+        bounds = bounds.intersection(viewport).unwrap_or(bounds);
+        tracing::debug!(
+            "position: {position:?}, widget bounds: {:?}, viewport: {viewport:?}, intersection: {bounds:?}",
+            layout.bounds()
         );
-        self.list.items = self
-            .id_or_layouts
-            .drain(..)
-            .zip(self.elements.drain(..))
-            .map(|(id_or_layout, element)| match id_or_layout {
-                Ok(id) => MovableListSlot::Occupied(id, element),
-                Err(layout) => MovableListSlot::Empty(layout, element),
-            })
-            .collect();
+        if !bounds.contains(*position) {
+            return None;
+        }
+        if self.horizontal {
+            let mut max_idx = 0;
+            let x_bound = position.x - dragged_slot_bounds.width / 2.;
+            for idx in 1..self.ids.len() {
+                if self.ids[idx].is_some() {
+                    let slot_bounds = layout.child(idx).bounds();
+                    if x_bound < slot_bounds.x {
+                        return Some(idx - 1);
+                    }
+                    max_idx = max_idx.max(idx + 1);
+                }
+            }
+            Some(max_idx)
+        } else {
+            let mut max_idx = 0;
+            let y_bound = position.y - dragged_slot_bounds.height / 2.;
+            for idx in 1..self.ids.len() {
+                if self.ids[idx].is_some() {
+                    let slot_bounds = layout.child(idx).bounds();
+                    if y_bound < slot_bounds.y {
+                        return Some(idx - 1);
+                    }
+                    max_idx = max_idx.max(idx + 1);
+                }
+            }
+            Some(max_idx)
+        }
     }
 }
 
-impl<'b, Id, Message, Theme, Renderer> Deref
-    for MovableListElementsGaurd<'_, 'b, Id, Message, Theme, Renderer>
-where
-    Theme: MovableListCatalog,
+impl<'a, 'b, Id, Message, Renderer> Composer<Message, MovableListInnerMessage<Message>, Renderer>
+    for (
+        MovableListShimMut<'a, 'b, Id, Message>,
+        &'a mut MovableListState,
+    )
 {
-    type Target = [Element<'b, MovableListInnerMessage<Message>, Theme, Renderer>];
-
-    fn deref(&self) -> &Self::Target {
-        &self.elements
-    }
-}
-
-impl<'b, Id, Message, Theme, Renderer> DerefMut
-    for MovableListElementsGaurd<'_, 'b, Id, Message, Theme, Renderer>
-where
-    Theme: MovableListCatalog,
-{
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.elements
+    fn compose(
+        &mut self,
+        _event: &Event,
+        _layout: Layout<'_>,
+        cursor: Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        message: MovableListInnerMessage<Message>,
+    ) {
+        self.0.update(shell, None, cursor, self.1, message);
     }
 }
 
@@ -610,7 +709,10 @@ pub struct MovableList<'a, Id, Message, Theme = iced::Theme, Renderer = iced::Re
 where
     Theme: MovableListCatalog,
 {
-    items: Vec<MovableListSlot<'a, Id, Message, Theme, Renderer>>,
+    raw_children: Vec<Option<(Id, Element<'a, Message, Theme, Renderer>)>>,
+    children: Vec<Element<'a, MovableListInnerMessage<Message>, Theme, Renderer>>,
+    ids: Vec<Option<Id>>,
+    empty_slot_layouts: Vec<Option<MovableListEmptySlotLayout>>,
     remove_button_text_size: Option<Pixels>,
     remove_button_size: Option<Size>,
     spacing: f32,
@@ -632,7 +734,10 @@ where
     /// Creates a [`MovableList`].
     pub fn new() -> Self {
         Self {
-            items: vec![MovableListSlot::EmptyRaw],
+            raw_children: vec![None],
+            children: vec![],
+            ids: vec![],
+            empty_slot_layouts: vec![],
             remove_button_text_size: None,
             remove_button_size: None,
             spacing: 0.,
@@ -703,66 +808,65 @@ where
 
     /// Push a item
     pub fn push(mut self, id: Id, item: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
-        self.items
-            .push(MovableListSlot::OccupiedRaw(id, item.into()));
-        self.items.push(MovableListSlot::EmptyRaw);
+        self.raw_children.push(Some((id, item.into())));
+        self.raw_children.push(None);
         self
     }
 
     fn seal(&mut self) {
-        for idx in 0..self.items.len() {
-            let mut slot = mem::take(&mut self.items[idx]);
-            match slot {
-                MovableListSlot::EmptyRaw => {
-                    let layout = Self::empty_slot_layout(idx, self.items.len(), None, None);
-                    slot = MovableListSlot::Empty(layout, self.empty_slot_element(layout))
-                }
-                MovableListSlot::OccupiedRaw(id, element) => {
-                    let mut element = element.map(MovableListInnerMessage::OuterMessage);
-                    element = if self.on_remove.is_some() {
-                        let mut remove_button =
-                            ExtButton::new(text("x", self.remove_button_text_size))
-                                .class(Theme::remove_button_class(&self.class))
-                                .on_release_with(Some(move || {
-                                    MovableListInnerMessage::Remove(idx)
-                                }));
-                        if let Some(size) = self.remove_button_size {
-                            remove_button = remove_button.width(size.width).height(size.height);
-                        }
-                        Row::new()
-                            .align_y(Vertical::Center)
-                            .push(element)
-                            .push(remove_button)
-                            .into()
-                    } else {
-                        element
-                    };
-                    let mut container =
-                        Container::new(element).class(Theme::item_class(&self.class));
-                    if let Some(padding) = self.item_padding {
-                        container = container.padding(padding);
+        let mut idx = self.children.len();
+        let len = self.children.len() + self.raw_children.len();
+        for raw_child in self.raw_children.drain(..) {
+            if let Some((id, element)) = raw_child {
+                let mut element = element.map(MovableListInnerMessage::OuterMessage);
+                element = if self.on_remove.is_some() {
+                    let mut remove_button = ExtButton::new(text("x", self.remove_button_text_size))
+                        .class(Theme::remove_button_class(&self.class))
+                        .on_release_with(Some(move || MovableListInnerMessage::Remove(idx)));
+                    if let Some(size) = self.remove_button_size {
+                        remove_button = remove_button.width(size.width).height(size.height);
                     }
-                    element = if self.on_drop.is_some() {
-                        Droppable::new(container)
-                            .drag_center(true)
-                            .drag_size(Size::new(0., 0.))
-                            .drag_hide(true)
-                            .on_drag({
-                                move |position, _rectangle| {
-                                    MovableListInnerMessage::Drag(position, idx)
-                                }
-                            })
-                            .on_drop(|position, _rectangle| MovableListInnerMessage::Drop(position))
-                            .on_cancel(MovableListInnerMessage::Cancel)
-                            .into()
-                    } else {
-                        container.into()
-                    };
-                    slot = MovableListSlot::Occupied(id, element)
+                    Row::new()
+                        .align_y(Vertical::Center)
+                        .push(element)
+                        .push(remove_button)
+                        .into()
+                } else {
+                    element
+                };
+                let mut container = Container::new(element).class(Theme::item_class(&self.class));
+                if let Some(padding) = self.item_padding {
+                    container = container.padding(padding);
                 }
-                _ => {}
+                element = if self.on_drop.is_some() {
+                    Droppable::new(container)
+                        .drag_center(true)
+                        .drag_size(Size::new(0., 0.))
+                        .drag_hide(true)
+                        .on_drag({
+                            move |position, _rectangle| MovableListInnerMessage::Drag(position, idx)
+                        })
+                        .on_drop(|position, _rectangle| MovableListInnerMessage::Drop(position))
+                        .on_cancel(MovableListInnerMessage::Cancel)
+                        .into()
+                } else {
+                    container.into()
+                };
+                self.children.push(element);
+                self.empty_slot_layouts.push(None);
+                self.ids.push(Some(id));
+            } else {
+                let layout = Self::empty_slot_layout(idx, len, None, None);
+                self.children.push(Self::empty_slot_element(
+                    self.horizontal,
+                    self.spacing,
+                    &self.class,
+                    layout,
+                ));
+                self.empty_slot_layouts.push(Some(layout));
+                self.ids.push(None);
             }
-            self.items[idx] = slot;
+            idx += 1;
         }
     }
 
@@ -832,132 +936,44 @@ where
     }
 
     fn empty_slot_element(
-        &self,
+        horizontal: bool,
+        spacing: f32,
+        class: &<Theme as MovableListCatalog>::Class<'a>,
         layout: MovableListEmptySlotLayout,
     ) -> Element<'a, MovableListInnerMessage<Message>, Theme, Renderer> {
         let mut padding = Padding::ZERO;
-        if self.horizontal {
-            padding.left = self.spacing / 2. * layout.before as f32;
-            padding.right = self.spacing / 2. * layout.after as f32;
+        if horizontal {
+            padding.left = spacing / 2. * layout.before as f32;
+            padding.right = spacing / 2. * layout.after as f32;
         } else {
-            padding.top = self.spacing / 2. * layout.before as f32;
-            padding.bottom = self.spacing / 2. * layout.after as f32;
+            padding.top = spacing / 2. * layout.before as f32;
+            padding.bottom = spacing / 2. * layout.after as f32;
         }
         let middle = if let Some(middle) = layout.middle {
             Container::new(Space::new().width(middle.width).height(middle.height))
-                .class(Theme::dropping_empty_slot_class(&self.class))
+                .class(Theme::dropping_empty_slot_class(class))
         } else {
             Container::new(Space::new())
         };
         Container::new(middle).padding(padding).into()
     }
 
-    fn as_layout_elements<'b>(
+    fn split_mut<'b>(
         &'b mut self,
-        state: &'b MovableListState,
-    ) -> MovableListElementsGaurd<'b, 'a, Id, Message, Theme, Renderer> {
-        let mut id_or_layouts = Vec::with_capacity(self.items.len());
-        let mut elements = Vec::with_capacity(self.items.len());
-        let items: Vec<_> = self.items.drain(..).enumerate().collect();
-        let len = items.len();
-        for (idx, item) in items {
-            match item {
-                MovableListSlot::EmptyRaw => {
-                    unreachable!("`as_layout_elements` shouldn't be called before `seal`")
-                }
-                MovableListSlot::OccupiedRaw(_, _) => {
-                    unreachable!("`as_layout_elements` shouldn't be called before `seal`")
-                }
-                MovableListSlot::Empty(layout, element) => {
-                    let new_layout =
-                        Self::empty_slot_layout(idx, len, state.dragged, state.dropping);
-                    if new_layout != layout {
-                        tracing::debug!(
-                            "New empty slot layout at {idx}, from [{layout:?}] to [{new_layout:?}]"
-                        );
-                        id_or_layouts.push(Err(new_layout));
-                        elements.push(self.empty_slot_element(new_layout));
-                    } else {
-                        id_or_layouts.push(Err(layout));
-                        elements.push(element);
-                    }
-                }
-                MovableListSlot::Occupied(id, element) => {
-                    id_or_layouts.push(Ok(id));
-                    elements.push(element);
-                }
-            }
-        }
-        MovableListElementsGaurd {
-            list: self,
-            id_or_layouts,
-            elements,
-        }
-    }
-
-    fn is_dropping(
-        &self,
-        layout: &Layout<'_>,
-        position: &Point,
-        dragged_slot_bounds: &Rectangle,
-        viewport: &Rectangle,
-    ) -> Option<usize> {
-        let mut bounds = layout.bounds();
-        // use the intersection of viewport to limit the area where we can drop the item.
-        bounds = bounds.intersection(viewport).unwrap_or(bounds);
-        tracing::debug!(
-            "position: {position:?}, widget bounds: {:?}, viewport: {viewport:?}, intersection: {bounds:?}",
-            layout.bounds()
-        );
-        if !bounds.contains(*position) {
-            return None;
-        }
-        if self.horizontal {
-            let mut max_idx = 0;
-            let x_bound = position.x - dragged_slot_bounds.width / 2.;
-            for idx in 1..self.items.len() {
-                if let MovableListSlot::Occupied(_, _) = &self.items[idx] {
-                    let slot_bounds = layout.child(idx).bounds();
-                    if x_bound < slot_bounds.x {
-                        return Some(idx - 1);
-                    }
-                    max_idx = max_idx.max(idx + 1);
-                }
-            }
-            Some(max_idx)
-        } else {
-            let mut max_idx = 0;
-            let y_bound = position.y - dragged_slot_bounds.height / 2.;
-            for idx in 1..self.items.len() {
-                if let MovableListSlot::Occupied(_, _) = &self.items[idx] {
-                    let slot_bounds = layout.child(idx).bounds();
-                    if y_bound < slot_bounds.y {
-                        return Some(idx - 1);
-                    }
-                    max_idx = max_idx.max(idx + 1);
-                }
-            }
-            Some(max_idx)
-        }
-    }
-
-    fn drain(&mut self) -> Vec<(Id, Element<'a, Message, Theme, Renderer>)> {
-        let items = self
-            .items
-            .drain(..)
-            .filter_map(|slot| match slot {
-                MovableListSlot::EmptyRaw => None,
-                MovableListSlot::OccupiedRaw(id, element) => Some((id, element)),
-                MovableListSlot::Empty(..) => {
-                    unreachable!("`drain` shouldn't be called after sealed")
-                }
-                MovableListSlot::Occupied(..) => {
-                    unreachable!("`drain` shouldn't be called after sealed")
-                }
-            })
-            .collect();
-        self.items.push(MovableListSlot::EmptyRaw);
-        items
+    ) -> (
+        MovableListShimMut<'b, 'a, Id, Message>,
+        &'b mut [Element<'a, MovableListInnerMessage<Message>, Theme, Renderer>],
+    ) {
+        (
+            MovableListShimMut {
+                ids: &self.ids,
+                horizontal: self.horizontal,
+                on_drag: self.on_drag.as_ref(),
+                on_drop: self.on_drop.as_ref(),
+                on_remove: self.on_remove.as_ref(),
+            },
+            &mut self.children,
+        )
     }
 }
 
@@ -981,25 +997,11 @@ where
     }
 
     fn children(&self) -> Vec<Tree> {
-        self.items.iter().map(MovableListSlot::tree).collect()
+        self.children.iter().map(Tree::new).collect()
     }
 
     fn diff(&self, tree: &mut Tree) {
-        if tree.children.len() > self.items.len() {
-            tree.children.truncate(self.items.len());
-        }
-
-        for (slot_state, slot) in tree.children.iter_mut().zip(self.items.iter()) {
-            slot.diff_by(slot_state);
-        }
-
-        if tree.children.len() < self.items.len() {
-            tree.children.extend(
-                self.items[tree.children.len()..]
-                    .iter()
-                    .map(MovableListSlot::tree),
-            );
-        }
+        tree.diff_children(&self.children);
     }
 
     fn size(&self) -> Size<Length> {
@@ -1016,6 +1018,29 @@ where
         limits: &layout::Limits,
     ) -> layout::Node {
         let state: &MovableListState = tree.state.downcast_ref();
+        // update empty slot layouts
+        for idx in 0..self.children.len() {
+            if let Some(layout) = self.empty_slot_layouts[idx] {
+                let new_layout = Self::empty_slot_layout(
+                    idx,
+                    self.children.len(),
+                    state.dragged,
+                    state.dropping,
+                );
+                if new_layout != layout {
+                    tracing::debug!(
+                        "New empty slot layout at {idx}, from [{layout:?}] to [{new_layout:?}]"
+                    );
+                    self.empty_slot_layouts[idx] = Some(new_layout);
+                    self.children[idx] = Self::empty_slot_element(
+                        self.horizontal,
+                        self.spacing,
+                        &self.class,
+                        new_layout,
+                    );
+                }
+            }
+        }
         let axis = if self.horizontal {
             layout::flex::Axis::Horizontal
         } else {
@@ -1031,7 +1056,7 @@ where
             // spacing will be representing by empty slot
             0.,
             Alignment::Start,
-            &mut self.as_layout_elements(state),
+            &mut self.children,
             &mut tree.children,
         )
     }
@@ -1046,19 +1071,16 @@ where
         let state: &MovableListState = tree.state.downcast_ref();
         operation.container(None, layout.bounds());
         operation.traverse(&mut |operation| {
-            self.items
+            self.children
                 .iter_mut()
                 .enumerate()
                 .zip(&mut tree.children)
                 .zip(layout.children())
-                .for_each(|(((idx, slot), slot_state), slot_layout)| {
-                    if !state.is_dragged(idx)
-                        && let MovableListSlot::Occupied(_, element) = slot
-                    {
-                        // only operates on non-dragged item
-                        element.as_widget_mut().operate(
-                            slot_state,
-                            slot_layout,
+                .for_each(|(((idx, child), child_state), child_layout)| {
+                    if !state.is_dragged(idx) && self.ids[idx].is_some() {
+                        child.as_widget_mut().operate(
+                            child_state,
+                            child_layout,
                             renderer,
                             operation,
                         );
@@ -1080,19 +1102,19 @@ where
     ) {
         let mut local_messages = vec![];
         let mut local_shell = shell.local(&mut local_messages);
-        for (((idx, slot), slot_state), slot_layout) in self
-            .items
+        for (((idx, child), child_state), child_layout) in self
+            .children
             .iter_mut()
             .enumerate()
             .zip(&mut tree.children)
             .zip(layout.children())
         {
-            if let MovableListSlot::Occupied(_, element) = slot {
+            if self.ids[idx].is_some() {
                 let is_captured = local_shell.is_event_captured();
-                element.as_widget_mut().update(
-                    slot_state,
+                child.as_widget_mut().update(
+                    child_state,
                     event,
-                    slot_layout,
+                    child_layout,
                     cursor,
                     renderer,
                     clipboard,
@@ -1107,125 +1129,15 @@ where
         let state: &mut MovableListState = tree.state.downcast_mut();
 
         drop(local_shell);
+        let (mut shim, _) = self.split_mut();
         for local_message in local_messages {
-            match local_message {
-                MovableListInnerMessage::Drag(_position, idx) => {
-                    // NOTE the `position` is not correct inside a scrollable, use the position from
-                    // `cursor` instead
-                    // land the cursor to get the position
-                    let Some(position) = cursor.land().position() else {
-                        tracing::warn!(
-                            "The position of cursor isn't available when there is a drag event"
-                        );
-                        continue;
-                    };
-                    let dragged_bounds = if let Some((dragged_idx, dragged_bounds)) = state.dragged
-                    {
-                        if dragged_idx != idx {
-                            let bounds = layout.child(idx).bounds();
-                            state.dragged = Some((idx, layout.child(idx).bounds()));
-                            shell.invalidate_layout();
-                            bounds
-                        } else {
-                            dragged_bounds
-                        }
-                    } else {
-                        let bounds = layout.child(idx).bounds();
-                        state.dragged = Some((idx, bounds));
-                        shell.invalidate_layout();
-                        bounds
-                    };
-                    if let Some(on_drag) = &self.on_drag {
-                        let MovableListSlot::Occupied(id, _) = &self.items[idx] else {
-                            unreachable!("the slot[{idx}] isn't a MovableListSlot::Occupied");
-                        };
-                        shell.publish(on_drag(id, position));
-                    }
-                    let new_dropping =
-                        self.is_dropping(&layout, &position, &dragged_bounds, viewport);
-                    if state.dropping != new_dropping {
-                        state.dropping = new_dropping;
-                        shell.invalidate_layout();
-                    }
-                }
-                MovableListInnerMessage::Drop(_position) => {
-                    // NOTE the `position` is not correct inside a scrollable, use the position from
-                    // `cursor` instead
-                    // land the cursor to get the position
-                    let Some(position) = cursor.land().position() else {
-                        tracing::warn!(
-                            "The position of cursor isn't available when there is a drag event"
-                        );
-                        continue;
-                    };
-                    if let Some((dragged_idx, dragged_bounds)) = state.dragged {
-                        state.dropping =
-                            self.is_dropping(&layout, &position, &dragged_bounds, viewport);
-                        if let Some(on_drop) = &self.on_drop
-                            && let Some(dropping_idx) = state.dropping
-                        {
-                            shell.publish(on_drop(
-                                &self
-                                    .items
-                                    .iter()
-                                    .enumerate()
-                                    .filter_map(|(idx, slot)| {
-                                        if idx == dropping_idx {
-                                            let MovableListSlot::Occupied(id, _) = &self.items[dragged_idx] else {
-                                                unreachable!("the slot[{dragged_idx}] isn't a MovableListSlot::Occupied");
-                                            };
-                                            Some(id)
-                                        } else if idx == dragged_idx {
-                                            None
-                                        } else if let MovableListSlot::Occupied(id, _) = slot {
-                                            Some(id)
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .collect::<Vec<_>>(),
-                            ));
-                        }
-                    }
-                    if state.dragged.take().is_some() {
-                        shell.invalidate_layout();
-                    }
-                    state.dropping.take();
-                }
-                MovableListInnerMessage::Cancel => {
-                    if let Some(on_drop) = &self.on_drop {
-                        shell.publish(on_drop(
-                            &self
-                                .items
-                                .iter()
-                                .filter_map(|slot| {
-                                    if let MovableListSlot::Occupied(id, _) = slot {
-                                        Some(id)
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect::<Vec<_>>(),
-                        ));
-                    }
-                    if state.dragged.take().is_some() {
-                        shell.invalidate_layout();
-                    }
-                    state.dropping.take();
-                }
-                MovableListInnerMessage::Remove(idx) => {
-                    tracing::debug!("Remove slot[{idx}]");
-                    if let Some(on_remove) = &self.on_remove {
-                        if let MovableListSlot::Occupied(id, _) = &self.items[idx] {
-                            shell.publish(on_remove(id));
-                            shell.request_redraw();
-                        } else {
-                            unreachable!("the slot[{idx}] isn't a MovableListSlot::Occupied");
-                        }
-                    }
-                }
-                MovableListInnerMessage::OuterMessage(message) => shell.publish(message),
-            }
+            shim.update(
+                shell,
+                Some((&layout, viewport)),
+                cursor,
+                state,
+                local_message,
+            );
         }
     }
 
@@ -1243,19 +1155,17 @@ where
         } else if state.dragged.is_some() {
             MouseInteraction::Grabbing
         } else {
-            self.items
+            self.children
                 .iter()
                 .enumerate()
                 .zip(&tree.children)
                 .zip(layout.children())
-                .map(|(((idx, slot), slot_state), slot_layout)| {
-                    if !state.is_dragged(idx)
-                        && let MovableListSlot::Occupied(_, element) = slot
-                    {
+                .map(|(((idx, child), child_state), child_layout)| {
+                    if !state.is_dragged(idx) && self.ids[idx].is_some() {
                         // only operates on non-dragged item
-                        return element.as_widget().mouse_interaction(
-                            slot_state,
-                            slot_layout,
+                        return child.as_widget().mouse_interaction(
+                            child_state,
+                            child_layout,
                             cursor,
                             viewport,
                             renderer,
@@ -1280,8 +1190,8 @@ where
     ) {
         let state: &MovableListState = tree.state.downcast_ref();
 
-        for (((idx, slot), slot_state), slot_layout) in self
-            .items
+        for (((idx, child), child_state), child_layout) in self
+            .children
             .iter()
             .enumerate()
             .zip(&tree.children)
@@ -1289,27 +1199,15 @@ where
             .filter(|(_, layout)| layout.bounds().intersects(viewport))
         {
             if !state.is_dragged(idx) {
-                match slot {
-                    MovableListSlot::Empty(_, element) => element.as_widget().draw(
-                        slot_state,
-                        renderer,
-                        theme,
-                        renderer_style,
-                        slot_layout,
-                        cursor,
-                        viewport,
-                    ),
-                    MovableListSlot::Occupied(_, element) => element.as_widget().draw(
-                        slot_state,
-                        renderer,
-                        theme,
-                        renderer_style,
-                        slot_layout,
-                        cursor,
-                        viewport,
-                    ),
-                    _ => {}
-                }
+                child.as_widget().draw(
+                    child_state,
+                    renderer,
+                    theme,
+                    renderer_style,
+                    child_layout,
+                    cursor,
+                    viewport,
+                );
             }
         }
     }
@@ -1322,42 +1220,26 @@ where
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
-        let children = self
-            .items
+        let (shim, children) = self.split_mut();
+        let children = children
             .iter_mut()
             .zip(&mut tree.children)
             .zip(layout.children())
-            .filter_map(|((slot, slot_state), slot_layout)| match slot {
-                MovableListSlot::EmptyRaw => unreachable!("it shouldn't exist after sealed"),
-                MovableListSlot::OccupiedRaw(_, _) => {
-                    unreachable!("it shouldn't exist after sealed")
-                }
-                MovableListSlot::Empty(_, _) => None,
-                MovableListSlot::Occupied(_, element) => element.as_widget_mut().overlay(
-                    slot_state,
-                    slot_layout,
+            .filter_map(|((child, child_state), child_layout)| {
+                child.as_widget_mut().overlay(
+                    child_state,
+                    child_layout,
                     renderer,
                     viewport,
                     translation,
-                ),
+                )
             })
             .collect::<Vec<_>>();
 
-        (!children.is_empty())
-            .then(|| Group::with_children(children).overlay())
-            .map(|o| {
-                o.map(&|m| {
-                    if let MovableListInnerMessage::OuterMessage(m) = m {
-                        m
-                    } else {
-                        // NOTE if it's changed, we should return our overalay struct and translate the
-                        // message inside the update method of the overlay struct
-                        unreachable!(
-                            "the implementation of iced_drop has changed, it generates message now: {m:?}"
-                        )
-                    }
-                })
-            })
+        let state: &mut MovableListState = tree.state.downcast_mut();
+        (!children.is_empty()).then(|| {
+            ComposerOverlay::overlay((shim, state), Group::with_children(children).overlay())
+        })
     }
 }
 
@@ -1418,6 +1300,43 @@ struct ScrollableMovableListState {
     scroll_factor: Option<f32>,
 }
 
+struct ScrollableMovableListShimMut<Theme> {
+    horizontal: bool,
+    phantom: PhantomData<Theme>,
+}
+
+impl<'a, Message, Theme, Renderer>
+    Composer<Message, ScrollableMovableListMessage<Message>, Renderer>
+    for (
+        ScrollableMovableListShimMut<Theme>,
+        &mut ScrollableMovableListState,
+    )
+where
+    Message: 'a + Clone,
+    Theme: 'a + MovableListCatalog + ScrollableCatalog,
+    Renderer: 'a + renderer::Renderer + TextRenderer,
+{
+    fn compose(
+        &mut self,
+        _event: &Event,
+        _layout: Layout<'_>,
+        cursor: Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        message: ScrollableMovableListMessage<Message>,
+    ) {
+        ScrollableMovableList::<'a, Message, Theme, Renderer>::inner_update(
+            shell,
+            None,
+            cursor,
+            self.0.horizontal,
+            self.1,
+            message,
+        );
+    }
+}
+
 /// A scrollable container of `MovableList`
 pub struct ScrollableMovableList<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
     content: Element<'a, ScrollableMovableListMessage<Message>, Theme, Renderer>,
@@ -1440,13 +1359,16 @@ where
     Theme: 'a + MovableListCatalog + ScrollableCatalog,
     Renderer: 'a + renderer::Renderer + TextRenderer,
 {
-    pub fn new<Id: 'a>(
+    pub fn new<Id: 'a + Clone>(
         movable_list: MovableList<'a, Id, Message, Theme, Renderer>,
         scrollable: &CreateScrollableFn<'a, Message, Theme, Renderer>,
     ) -> Self {
         // convert callback
         let MovableList {
-            items,
+            raw_children,
+            children: _children,
+            ids: _ids,
+            empty_slot_layouts: _empty_slot_layouts,
             remove_button_text_size,
             remove_button_size,
             spacing,
@@ -1458,20 +1380,15 @@ where
             on_remove,
         } = movable_list;
         let mut movable_list = MovableList {
-            items: items
+            raw_children: raw_children
                 .into_iter()
-                .map(|slot| match slot {
-                    MovableListSlot::EmptyRaw => MovableListSlot::EmptyRaw,
-                    MovableListSlot::OccupiedRaw(id, element) => MovableListSlot::OccupiedRaw(
-                        id,
-                        element.map(ScrollableMovableListMessage::wrap),
-                    ),
-                    MovableListSlot::Empty(..) => unreachable!("it shouldn't exist before seal"),
-                    MovableListSlot::Occupied(..) => {
-                        unreachable!("it shouldn't exist before seal")
-                    }
+                .map(|child| {
+                    child.map(|(id, element)| (id, element.map(ScrollableMovableListMessage::wrap)))
                 })
                 .collect(),
+            children: vec![],
+            ids: vec![],
+            empty_slot_layouts: vec![],
             remove_button_text_size,
             remove_button_size,
             spacing,
@@ -1514,8 +1431,12 @@ where
         }
     }
 
-    fn calculate_scroll_factor(&self, bounds: &Rectangle, position: &Point) -> Option<f32> {
-        if self.horizontal {
+    fn calculate_scroll_factor(
+        horizontal: bool,
+        bounds: &Rectangle,
+        position: &Point,
+    ) -> Option<f32> {
+        if horizontal {
             // don't scroll if the pointer is within the widget's horizontal bounds
             if position.x >= bounds.x && position.x <= bounds.x + bounds.width {
                 return None;
@@ -1535,6 +1456,49 @@ where
             } else {
                 Some(position.y - bounds.y - bounds.height)
             }
+        }
+    }
+
+    fn inner_update(
+        shell: &mut Shell<'_, Message>,
+        layout: Option<&Layout<'_>>,
+        cursor: Cursor,
+        horizontal: bool,
+        state: &mut ScrollableMovableListState,
+        message: ScrollableMovableListMessage<Message>,
+    ) {
+        match message.0 {
+            ScrollableMovableListInnerMessage::Drag(m) => {
+                tracing::debug!("dragging");
+                let Some(layout) = layout else {
+                    unreachable!("A drag event is happened on a overlay");
+                };
+                if !state.dragged {
+                    state.dragged = true;
+                    state.last_frame = None;
+                    state.scroll_factor = None;
+                } else if let Some(position) = cursor.land().position() {
+                    // land the cursor to get the position
+                    state.scroll_factor =
+                        Self::calculate_scroll_factor(horizontal, &layout.bounds(), &position);
+                    if state.scroll_factor.is_none() {
+                        state.last_frame = None;
+                    }
+                } else {
+                    tracing::warn!("Unable to get the position of the cursor");
+                }
+                if let Some(m) = m {
+                    shell.publish(m)
+                }
+            }
+            ScrollableMovableListInnerMessage::Drop(m) => {
+                tracing::debug!("dropped");
+                state.dragged = false;
+                state.last_frame = None;
+                state.scroll_factor = None;
+                shell.publish(m)
+            }
+            ScrollableMovableListInnerMessage::OuterMessage(m) => shell.publish(m),
         }
     }
 }
@@ -1601,36 +1565,14 @@ where
 
         let state: &mut ScrollableMovableListState = tree.state.downcast_mut();
         for local_message in local_messages {
-            match local_message.0 {
-                ScrollableMovableListInnerMessage::Drag(m) => {
-                    tracing::debug!("dragging");
-                    if !state.dragged {
-                        state.dragged = true;
-                        state.last_frame = None;
-                        state.scroll_factor = None;
-                    } else if let Some(position) = cursor.land().position() {
-                        // land the cursor to get the position
-                        state.scroll_factor =
-                            self.calculate_scroll_factor(&layout.bounds(), &position);
-                        if state.scroll_factor.is_none() {
-                            state.last_frame = None;
-                        }
-                    } else {
-                        tracing::warn!("Unable to get the position of the cursor");
-                    }
-                    if let Some(m) = m {
-                        shell.publish(m)
-                    }
-                }
-                ScrollableMovableListInnerMessage::Drop(m) => {
-                    tracing::debug!("dropped");
-                    state.dragged = false;
-                    state.last_frame = None;
-                    state.scroll_factor = None;
-                    shell.publish(m)
-                }
-                ScrollableMovableListInnerMessage::OuterMessage(m) => shell.publish(m),
-            }
+            Self::inner_update(
+                shell,
+                Some(&layout),
+                cursor,
+                self.horizontal,
+                state,
+                local_message,
+            );
         }
         if let Some(scroll_factor) = state.scroll_factor
             && let Some(scrollable_id) = &self.scrollable_id
@@ -1698,6 +1640,7 @@ where
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        let state: &mut ScrollableMovableListState = tree.state.downcast_mut();
         self.content
             .as_widget_mut()
             .overlay(
@@ -1708,17 +1651,16 @@ where
                 translation,
             )
             .map(|o| {
-                o.map(&|m| {
-                    if let ScrollableMovableListInnerMessage::OuterMessage(m) = m.0 {
-                        m
-                    } else {
-                        // NOTE if it's changed, we should return our overalay struct and translate the
-                        // message inside the update method of the overlay struct
-                        unreachable!(
-                            "the implementation of iced_drop has changed, it generates message now: {m:?}"
-                        )
-                    }
-                })
+                ComposerOverlay::overlay(
+                    (
+                        ScrollableMovableListShimMut::<Theme> {
+                            horizontal: self.horizontal,
+                            phantom: Default::default(),
+                        },
+                        state,
+                    ),
+                    o,
+                )
             })
     }
 
@@ -2131,6 +2073,28 @@ where
     }
 }
 
+impl<'a, 'b, Id, Message, Renderer> Composer<Message, AdvancedMovableListMessage<Message>, Renderer>
+    for (
+        AdvancedMovableListShimMut<'a, 'b, Id, Message>,
+        &'a mut AdvancedMovableListState,
+    )
+where
+    Id: Clone,
+{
+    fn compose(
+        &mut self,
+        _event: &Event,
+        _layout: Layout<'_>,
+        _cursor: Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        message: AdvancedMovableListMessage<Message>,
+    ) {
+        self.0.update(shell, self.1, message.0);
+    }
+}
+
 /// An advanced version of `MovableList`
 pub struct AdvancedMovableList<'a, Id, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
@@ -2244,10 +2208,11 @@ where
             return false;
         }
 
-        let mut movable_list = (self.create_movable_list)();
-        let mut items = movable_list.drain();
         let MovableList {
-            items: _,
+            raw_children,
+            children: _children,
+            ids: _ids,
+            empty_slot_layouts: _empty_slot_layouts,
             remove_button_text_size,
             remove_button_size,
             spacing,
@@ -2257,9 +2222,10 @@ where
             on_drag: _,
             on_drop: _,
             on_remove: _,
-        } = movable_list;
+        } = (self.create_movable_list)();
 
-        self.selections = items
+        let mut raw_children: Vec<_> = raw_children.into_iter().flatten().collect();
+        self.selections = raw_children
             .iter()
             .map(|i| (i.0.clone(), i.0.to_string()))
             .collect();
@@ -2277,14 +2243,14 @@ where
                         };
                         self.selections.push((new_id.clone(), new_item.clone()));
                         let new_element = id_to_element(&new_id);
-                        items.push((new_id, new_element));
+                        raw_children.push((new_id, new_element));
                     }
                 }
             }
             AdvancedMovableListState::Edit { new_order } => {
                 edit_mode = true;
-                let mut slots: Vec<_> = items.into_iter().map(Some).collect();
-                items = Vec::with_capacity(new_order.len());
+                let mut slots: Vec<_> = raw_children.into_iter().map(Some).collect();
+                raw_children = Vec::with_capacity(new_order.len());
                 let mut idx = 0;
                 while idx < new_order.len() {
                     let slot_idx = new_order[idx];
@@ -2296,7 +2262,7 @@ where
                         break;
                     }
                     if let Some(item) = slots[slot_idx].take() {
-                        items.push(item);
+                        raw_children.push(item);
                     } else {
                         tracing::error!("duplicated slot_idx[{slot_idx}] in `new_order`",);
                         break;
@@ -2307,10 +2273,10 @@ where
                     // revert the items
                     while idx > 0 {
                         let slot_idx = new_order[idx - 1];
-                        slots[slot_idx] = Some(items.pop().expect("It shouldn't be empty"));
+                        slots[slot_idx] = Some(raw_children.pop().expect("It shouldn't be empty"));
                         idx -= 1;
                     }
-                    items = slots.into_iter().flatten().collect();
+                    raw_children = slots.into_iter().flatten().collect();
                     // revert to AdvancedMovableListState::Init
                     *state = AdvancedMovableListState::Init;
                 }
@@ -2332,8 +2298,11 @@ where
         } else {
             movable_list = movable_list.vertical();
         }
-        for item in items {
-            movable_list = movable_list.push(item.0, item.1.map(AdvancedMovableListMessage::wrap));
+        for raw_child in raw_children {
+            movable_list = movable_list.push(
+                raw_child.0,
+                raw_child.1.map(AdvancedMovableListMessage::wrap),
+            );
         }
 
         if edit_mode && self.on_done.is_some() {
@@ -2646,11 +2615,7 @@ where
 
         let state: &mut AdvancedMovableListState = tree.state.downcast_mut();
         (!children.is_empty()).then(|| {
-            overlay::Element::new(Box::new(AdvancedMovableListOverlay {
-                shim,
-                state,
-                content: Group::with_children(children).overlay(),
-            }))
+            ComposerOverlay::overlay((shim, state), Group::with_children(children).overlay())
         })
     }
 
@@ -2730,91 +2695,6 @@ where
 {
     fn from(widget: AdvancedMovableList<'a, Id, Message, Theme, Renderer>) -> Self {
         Element::new(widget)
-    }
-}
-
-struct AdvancedMovableListOverlay<'a, 'b, Id, Message, Theme, Renderer>
-where
-    'b: 'a,
-    Theme: AdvancedMovableListCatalog,
-    Renderer: TextRenderer,
-{
-    shim: AdvancedMovableListShimMut<'a, 'b, Id, Message>,
-    state: &'a mut AdvancedMovableListState,
-    content: overlay::Element<'a, AdvancedMovableListMessage<Message>, Theme, Renderer>,
-}
-
-impl<'a, 'b, Id, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
-    for AdvancedMovableListOverlay<'a, 'b, Id, Message, Theme, Renderer>
-where
-    'b: 'a,
-    Id: Clone,
-    Theme: AdvancedMovableListCatalog,
-    Renderer: TextRenderer,
-{
-    fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        self.content.as_overlay_mut().layout(renderer, bounds)
-    }
-
-    fn draw(
-        &self,
-        renderer: &mut Renderer,
-        theme: &Theme,
-        style: &renderer::Style,
-        layout: Layout<'_>,
-        cursor: iced::advanced::mouse::Cursor,
-    ) {
-        self.content
-            .as_overlay()
-            .draw(renderer, theme, style, layout, cursor);
-    }
-
-    fn operate(
-        &mut self,
-        layout: Layout<'_>,
-        renderer: &Renderer,
-        operation: &mut dyn iced_futures::core::widget::Operation,
-    ) {
-        self.content
-            .as_overlay_mut()
-            .operate(layout, renderer, operation);
-    }
-
-    fn update(
-        &mut self,
-        event: &Event,
-        layout: Layout<'_>,
-        cursor: iced::advanced::mouse::Cursor,
-        renderer: &Renderer,
-        clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, Message>,
-    ) {
-        let mut local_messages = vec![];
-        let mut local_shell = shell.local(&mut local_messages);
-        self.content.as_overlay_mut().update(
-            event,
-            layout,
-            cursor,
-            renderer,
-            clipboard,
-            &mut local_shell,
-        );
-        drop(local_shell);
-
-        for local_message in local_messages {
-            self.shim.update(shell, self.state, local_message.0);
-        }
-    }
-
-    fn mouse_interaction(
-        &self,
-        layout: Layout<'_>,
-        cursor: iced::advanced::mouse::Cursor,
-        renderer: &Renderer,
-    ) -> iced::advanced::mouse::Interaction {
-        self.content
-            .as_overlay()
-            .mouse_interaction(layout, cursor, renderer)
     }
 }
 
