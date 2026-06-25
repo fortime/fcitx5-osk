@@ -20,7 +20,7 @@ use iced::{
         oneshot::{self, Sender},
     },
     theme::{self, Base as _, Style},
-    widget::{self, Button, Column, Container, MouseArea, Space, Stack},
+    widget::{self, Button, Column, Container, MouseArea, Stack},
     window::{Event as IcedWindowEvent, Id},
 };
 use iced_futures::event;
@@ -268,7 +268,7 @@ impl<WM> Keyboard<WM> {
         )
     }
 
-    pub fn handle_error_message(&mut self, e: KeyboardNotification) {
+    pub fn handle_notification(&mut self, e: KeyboardNotification) {
         match &e {
             KeyboardNotification::Info(_) => {}
             KeyboardNotification::Error(e) => tracing::error!("Error: {e:#}"),
@@ -301,7 +301,10 @@ where
         Container::new(
             Column::new()
                 .push(Text::new(msg).size(font_size))
-                .push(Button::new(Text::new(button_text).size(font_size)))
+                .push(
+                    Button::new(Text::new(button_text).size(font_size))
+                        .on_press(Message::AfterError),
+                )
                 .spacing(10)
                 .padding(10),
         )
@@ -390,7 +393,7 @@ where
         let mut task = Task::done(Message::Nothing.into());
         match message {
             Message::Nothing => unreachable!("Nothing should be return before here"),
-            Message::Notification(e) => self.handle_error_message(e),
+            Message::Notification(e) => self.handle_notification(e),
             Message::AfterError => {
                 if let Some(KeyboardNotification::Fatal(_)) = self.notification.take() {
                     task = task.chain(self.state.window_manager_mut().shutdown());
@@ -530,30 +533,29 @@ fn modal<'a>(
     content: Element<'a, Message>,
     on_blur_clicked: Message,
 ) -> Element<'a, Message> {
-    // TODO stack will clip the viewport, this will lead to a pixel on the right or bottom not
-    // covered by the mask. In iced 0.14, there is a clip option to disable this behavior
     let mut stack = Stack::new();
     stack = stack
         .clip(false)
         .push(base)
-        // Create a mask
-        .push(
-            Container::new(widget::opaque(
-                MouseArea::new(Space::new().width(Length::Fill).height(Length::Fill))
-                    .on_press(on_blur_clicked),
-            ))
-            .style(|_| widget::container::Style {
-                background: Some(
-                    Color {
-                        a: 0.8,
-                        ..Color::BLACK
-                    }
-                    .into(),
-                ),
-                ..widget::container::Style::default()
-            }),
-        )
-        .push(Container::new(content).center(Length::Fill));
+        // opaque doesn't catch touch event
+        .push(widget::opaque(
+            MouseArea::new(
+                // Catch the press event inside content
+                Container::new(MouseArea::new(content).on_press(Message::Nothing))
+                    .center(Length::Fill)
+                    .style(|_| widget::container::Style {
+                        background: Some(
+                            Color {
+                                a: 0.8,
+                                ..Color::BLACK
+                            }
+                            .into(),
+                        ),
+                        ..widget::container::Style::default()
+                    }),
+            )
+            .on_press(on_blur_clicked),
+        ));
     stack.into()
 }
 
