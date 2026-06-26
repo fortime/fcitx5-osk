@@ -7,6 +7,9 @@ include(GNUInstallDirs)
 # Where are binaries installed
 set(INSTALL_BIN_DIR "${CMAKE_INSTALL_FULL_BINDIR}")
 
+# Where is data installed
+set(INSTALL_DATA_DIR "${CMAKE_INSTALL_FULL_DATADIR}")
+
 # Where to install dbus config
 set(DBUS_CONFIG_PARENT_DIR "/etc" CACHE PATH "The parent directory of dbus config directory")
 
@@ -39,6 +42,10 @@ configure_file(${CMAKE_SOURCE_DIR}/pkg/lib/systemd/system/fcitx5-osk-key-helper.
 )
 configure_file(${CMAKE_SOURCE_DIR}/pkg/share/applications/fyi.fortime.Fcitx5Osk.KwinLauncher.desktop.in
     ${CMAKE_BINARY_DIR}/share/applications/fyi.fortime.Fcitx5Osk.KwinLauncher.desktop
+    @ONLY
+)
+configure_file(${CMAKE_SOURCE_DIR}/pkg/share/applications/fyi.fortime.Fcitx5Osk.KwinRestarter.desktop.in
+    ${CMAKE_BINARY_DIR}/share/applications/fyi.fortime.Fcitx5Osk.KwinRestarter.desktop
     @ONLY
 )
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/etc/xdg/fcitx5-osk/themes")
@@ -124,6 +131,7 @@ install(PROGRAMS
 # Install fcitx5-osk-kwin-launcher's data files
 install(FILES
         ${CMAKE_BINARY_DIR}/share/applications/fyi.fortime.Fcitx5Osk.KwinLauncher.desktop
+        ${CMAKE_BINARY_DIR}/share/applications/fyi.fortime.Fcitx5Osk.KwinRestarter.desktop
     DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
     COMPONENT Fcitx5OskKwinLauncher
 )
