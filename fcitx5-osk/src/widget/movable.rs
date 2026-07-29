@@ -2640,7 +2640,6 @@ where
         }
         if tree_diff {
             self.diff(tree);
-            tracing::error!("The len of children: {}", self.children.len());
         }
         layout::flex::resolve(
             layout::flex::Axis::Vertical,
