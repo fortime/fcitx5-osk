@@ -1,0 +1,10 @@
+{
+    "KPlugin": {
+        "Category": "Accessibility",
+        "Description": "Show Fcitx5 Osk only when a touch event and kwin virtual keyboard active signal occur within the interval. It simulates the behavior of other osk which communicates with kwin via wayland input-method-v1 directly.",
+        "EnabledByDefault": true,
+        "License": "MIT",
+        "Name": "Fcitx5 Osk"
+    },
+    "X-KDE-ConfigModule": "kwin_fcitx5osk_config"
+}

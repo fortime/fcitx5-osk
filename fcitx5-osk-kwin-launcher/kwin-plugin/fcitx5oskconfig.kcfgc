@@ -1,0 +1,5 @@
+File=fcitx5osk.kcfg
+ClassName=Fcitx5OskConfig
+NameSpace=fcitx5osk
+Singleton=true
+Mutators=true

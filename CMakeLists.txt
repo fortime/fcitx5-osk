@@ -16,6 +16,8 @@ set(DBUS_CONFIG_PARENT_DIR "/etc" CACHE PATH "The parent directory of dbus confi
 # Where to run cargo
 set(CARGO_TARGET_DIR ${CMAKE_BINARY_DIR}/cargo_target)
 
+add_subdirectory(fcitx5-osk-kwin-launcher)
+
 # Tell CMake to build Rust binary
 add_custom_target(build_rust ALL
     COMMAND cargo build --release --target-dir ${CARGO_TARGET_DIR}
