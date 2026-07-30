@@ -529,6 +529,16 @@ impl ConfigState {
                     .into(),
                 },
                 Field {
+                    name: "Ignore Fcitx Show",
+                    id: "ignore_fcitx_show",
+                    typ: BoolDesc {
+                        cur_value: |state| state.config().ignore_fcitx_show(),
+                        is_enabled: |_state| true,
+                        on_changed: |_, v| Message::from(UpdateConfigEvent::IgnoreFcitxShow(v)),
+                    }
+                    .into(),
+                },
+                Field {
                     name: "Quick Action Bar",
                     id: "quick_action_bar_state",
                     typ: OwnedEnumDesc::<QuickActionBarState> {
@@ -699,6 +709,11 @@ impl ConfigState {
                 set_manual_mode,
                 |v| Message::from(ImPanelEvent::UpdateManualMode(v))
             },
+            @IgnoreFcitxShow => {
+                config_eq!(ignore_fcitx_show),
+                set_ignore_fcitx_show,
+                |_v| Message::Nothing
+            },
             @QuickActionBarState => {
                 config_eq!(quick_action_bar_state),
                 set_quick_action_bar_state,
@@ -815,6 +830,7 @@ pub enum UpdateConfigEvent {
         producer: fn(String) -> Message,
     },
     ManualMode(bool),
+    IgnoreFcitxShow(bool),
     QuickActionBarState(QuickActionBarState),
     CustomActions(Arc<Vec<String>>),
 }

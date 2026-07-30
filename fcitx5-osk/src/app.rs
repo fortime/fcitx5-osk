@@ -436,7 +436,9 @@ where
             Message::Fcitx5VirtualkeyboardImPanelEvent(event) => {
                 match event {
                     Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
-                        if !self.state.config().manual_mode() {
+                        if !self.state.config().manual_mode()
+                            && !self.state.config().ignore_fcitx_show()
+                        {
                             task = task.chain(self.state.window_manager_mut().open_keyboard());
                         }
                     }

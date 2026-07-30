@@ -121,6 +121,12 @@ pub struct Config {
     #[serde(default)]
     manual_mode: bool,
 
+    /// Ignore `ShowVirtualKeyboard` call from fcitx5, fcitx5 will call the show method no matter
+    /// the `FocusIn` event is triggered by a touch event.
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    ignore_fcitx_show: bool,
+
     /// Override the builtin landscape layout globally.
     #[getset(get = "pub", set = "pub")]
     #[serde(default)]
