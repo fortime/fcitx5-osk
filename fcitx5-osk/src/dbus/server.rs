@@ -18,6 +18,7 @@ use iced::{
         },
     },
 };
+use uuid::Uuid;
 use zbus::{
     Connection,
     fdo::Error,
@@ -232,6 +233,8 @@ pub enum SocketEnv {
 struct InnerFcitx5OskServiceState {
     mode: entity::WindowManagerMode,
     manual_mode: bool,
+    // (id, manual_mode, finished)
+    session_manual_modes: Vec<(String, bool, bool)>,
     visible: bool,
     /// A visible changed request. The first part is the id of the request, the second part is to
     /// be visible or to be invisible.
@@ -254,10 +257,13 @@ impl Fcitx5OskServiceClient {
         }
     }
 
-    pub fn set_manual_mode(&self, manual_mode: bool) {
+    pub fn set_manual_mode(&self, manual_mode: bool, clear_session: bool) {
         let Some(mut state) = self.state() else {
             return;
         };
+        if clear_session {
+            state.session_manual_modes = vec![];
+        }
         state.manual_mode = manual_mode;
         self.send(PropertyChangedSignal::ManualMode);
     }
@@ -324,6 +330,7 @@ impl Fcitx5OskService {
             state: Arc::new(Mutex::new(InnerFcitx5OskServiceState {
                 mode: entity::WindowManagerMode::Normal,
                 manual_mode: false,
+                session_manual_modes: vec![],
                 visible: true,
                 visible_request: (0, true),
             })),
@@ -409,6 +416,50 @@ impl Fcitx5OskService {
     #[tracing::instrument(level = "debug", skip(self), err, ret)]
     async fn change_manual_mode(&self, manual_mode: bool) -> Result<(), Error> {
         self.send(UpdateConfigEvent::ManualMode(manual_mode))
+    }
+
+    /// Start a session with the manual mode.
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
+    async fn start_manual_mode_session(&self, manual_mode: bool) -> Result<String, Error> {
+        let mut state = self.state()?;
+        let session_id = Uuid::new_v4().to_string();
+        state
+            .session_manual_modes
+            .push((session_id.clone(), manual_mode, false));
+        self.send(ImPanelEvent::UpdateSessionManualMode(Some(manual_mode)))?;
+        Ok(session_id)
+    }
+
+    /// End a session, all its nested sessions are clear. And it will reset the session manual mode
+    /// to its parent session or unset it.
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
+    async fn stop_manual_mode_session(&self, session_id: String) -> Result<(), Error> {
+        let mut state = self.state()?;
+        if let Some(session) = state
+            .session_manual_modes
+            .iter_mut()
+            .rfind(|session| session.0 == session_id)
+        {
+            session.2 = true;
+            let _ = session;
+            // remove finished session from the end
+            let mut new_manual_mode = None;
+            while let Some(last) = state.session_manual_modes.last() {
+                if last.2 {
+                    state.session_manual_modes.pop();
+                } else {
+                    new_manual_mode = Some(last.1);
+                    break;
+                }
+            }
+            if let Some(new_manual_mode) = new_manual_mode {
+                self.send(ImPanelEvent::UpdateSessionManualMode(Some(new_manual_mode)))?;
+            } else if state.session_manual_modes.is_empty() {
+                // No session, clear
+                self.send(ImPanelEvent::UpdateSessionManualMode(None))?;
+            }
+        }
+        Ok(())
     }
 
     #[tracing::instrument(level = "debug", skip(self), err, ret)]
@@ -511,6 +562,7 @@ pub enum ImPanelEvent {
     NewVisibleRequest(bool),
     ReopenIfOpened,
     UpdateManualMode(bool),
+    UpdateSessionManualMode(Option<bool>),
 }
 
 impl From<ImPanelEvent> for Message {

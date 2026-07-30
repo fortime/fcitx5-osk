@@ -1044,6 +1044,9 @@ impl SettingLayout {
         let mut name_column = Column::new().spacing(2 * unit);
         let mut value_column = Column::new().spacing(2 * unit).width(Length::Fill);
         for field in state.updatable_fields() {
+            if !field.should_display(state) {
+                continue;
+            }
             let row_num = field_row_num(state, field);
             let height = (text_size + 5 * unit) * row_num;
             name_column = name_column.push(

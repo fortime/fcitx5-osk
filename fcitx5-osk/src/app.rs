@@ -242,7 +242,7 @@ impl<WM> Keyboard<WM> {
             detect_theme_enabled,
         } = async_state;
 
-        fcitx5_osk_service_client.set_manual_mode(config_manager.as_ref().manual_mode());
+        fcitx5_osk_service_client.set_manual_mode(config_manager.as_ref().manual_mode(), true);
         let state = State::new(
             config_manager,
             wm,
@@ -436,7 +436,7 @@ where
             Message::Fcitx5VirtualkeyboardImPanelEvent(event) => {
                 match event {
                     Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
-                        if !self.state.config().manual_mode()
+                        if !self.state.active_manual_mode()
                             && !self.state.config().ignore_fcitx_show()
                         {
                             task = task.chain(self.state.window_manager_mut().open_keyboard());
@@ -445,7 +445,7 @@ where
                     Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard => {
                         // Always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated
                         self.state.keyboard_mut().set_fcitx5_hidden();
-                        if !self.state.config().manual_mode() {
+                        if !self.state.active_manual_mode() {
                             // Close keyboard only when setting isn't shown
                             if !self.state.window_manager().is_setting_shown() {
                                 task = task.chain(
@@ -465,14 +465,14 @@ where
             Message::ImPanelEvent(event) => {
                 match event {
                     ImPanelEvent::Show(force) => {
-                        if force || !self.state.config().manual_mode() {
+                        if force || !self.state.active_manual_mode() {
                             task = task.chain(self.state.window_manager_mut().open_keyboard());
                         }
                     }
                     ImPanelEvent::Hide(force) => {
                         // always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated.
                         self.state.keyboard_mut().set_fcitx5_hidden();
-                        if force || !self.state.config().manual_mode() {
+                        if force || !self.state.active_manual_mode() {
                             // Unlike hiding request from Fcitx5, we always think that request from DbusController should be followed.
                             task = task.chain(
                                 self.state
@@ -485,7 +485,23 @@ where
                         self.fcitx5_osk_service_client.new_visible_request(visible)
                     }
                     ImPanelEvent::UpdateManualMode(manual_mode) => {
-                        self.fcitx5_osk_service_client.set_manual_mode(manual_mode)
+                        self.state.unset_session_manual_mode();
+                        self.fcitx5_osk_service_client
+                            .set_manual_mode(manual_mode, true)
+                    }
+                    ImPanelEvent::UpdateSessionManualMode(session_manual_mode) => {
+                        let manual_mode = match session_manual_mode {
+                            Some(manual_mode) => {
+                                self.state.set_session_manual_mode(manual_mode);
+                                manual_mode
+                            }
+                            None => {
+                                self.state.unset_session_manual_mode();
+                                self.state.config().manual_mode()
+                            }
+                        };
+                        self.fcitx5_osk_service_client
+                            .set_manual_mode(manual_mode, false)
                     }
                     ImPanelEvent::ReopenIfOpened => {
                         if let Some(next_task) =

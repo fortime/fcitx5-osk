@@ -440,6 +440,7 @@ pub struct Field {
     name: &'static str,
     id: &'static str,
     typ: FieldType,
+    should_display: fn(&dyn StateExtractor) -> bool,
 }
 
 impl Field {
@@ -453,6 +454,10 @@ impl Field {
 
     pub fn typ(&self) -> &FieldType {
         &self.typ
+    }
+
+    pub fn should_display(&self, state: &dyn StateExtractor) -> bool {
+        (self.should_display)(state)
     }
 }
 
@@ -489,6 +494,7 @@ impl ConfigState {
                         },
                     }
                     .into(),
+                    should_display: default_should_display,
                 },
                 Field {
                     name: "Placement",
@@ -502,6 +508,7 @@ impl ConfigState {
                         on_selected: |_, p| Message::from(WindowManagerEvent::UpdatePlacement(p)),
                     }
                     .into(),
+                    should_display: default_should_display,
                 },
                 Field {
                     name: "Indicator Display",
@@ -517,6 +524,7 @@ impl ConfigState {
                         },
                     }
                     .into(),
+                    should_display: default_should_display,
                 },
                 Field {
                     name: "Manual Mode",
@@ -527,6 +535,18 @@ impl ConfigState {
                         on_changed: |_, v| Message::from(UpdateConfigEvent::ManualMode(v)),
                     }
                     .into(),
+                    should_display: default_should_display,
+                },
+                Field {
+                    name: "Manual Mode(Session)",
+                    id: "session_manual_mode",
+                    typ: BoolDesc {
+                        cur_value: |state| state.session_manual_mode().unwrap_or(false),
+                        is_enabled: |_| false,
+                        on_changed: |_, _| Message::Nothing,
+                    }
+                    .into(),
+                    should_display: |state| state.session_manual_mode().is_some(),
                 },
                 Field {
                     name: "Ignore Fcitx Show",
@@ -537,6 +557,7 @@ impl ConfigState {
                         on_changed: |_, v| Message::from(UpdateConfigEvent::IgnoreFcitxShow(v)),
                     }
                     .into(),
+                    should_display: default_should_display,
                 },
                 Field {
                     name: "Quick Action Bar",
@@ -550,6 +571,7 @@ impl ConfigState {
                         },
                     }
                     .into(),
+                    should_display: default_should_display,
                 },
                 Field {
                     name: "Custom Actions",
@@ -589,6 +611,7 @@ impl ConfigState {
                         is_enabled: |_state| true,
                     }
                     .into(),
+                    should_display: default_should_display,
                 },
                 Field {
                     name: "Dark Theme",
@@ -619,6 +642,7 @@ impl ConfigState {
                         on_selected: |_, d| Message::from(UpdateConfigEvent::DarkTheme(d.value)),
                     }
                     .into(),
+                    should_display: default_should_display,
                 },
                 Field {
                     name: "Light Theme",
@@ -648,6 +672,7 @@ impl ConfigState {
                         on_selected: |_, d| Message::from(UpdateConfigEvent::LightTheme(d.value)),
                     }
                     .into(),
+                    should_display: default_should_display,
                 },
                 preferred_output_name_field(),
                 preferred_output_name_custom_field(),
@@ -747,6 +772,10 @@ impl ConfigState {
     }
 }
 
+fn default_should_display(_state: &dyn StateExtractor) -> bool {
+    true
+}
+
 fn preferred_output_name_field() -> Field {
     Field {
         name: "Preferred Output",
@@ -778,6 +807,7 @@ fn preferred_output_name_field() -> Field {
             on_selected: |_, d| Message::from(UpdateConfigEvent::PreferredOutputName(d.value)),
         }
         .into(),
+        should_display: default_should_display,
     }
 }
 
@@ -792,6 +822,7 @@ fn preferred_output_name_custom_field() -> Field {
             submit_message: |s| UpdateConfigEvent::PreferredOutputName(s).into(),
         }
         .into(),
+        should_display: default_should_display,
     }
 }
 

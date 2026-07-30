@@ -38,6 +38,7 @@ base64 = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 openssl = { workspace = true, optional = true }
 iced_drop.workspace = true
+uuid.workspace = true
 
 [features]
 default = ["custom-action-http-api"]

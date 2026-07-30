@@ -51,6 +51,7 @@ pub struct State<WM> {
     detect_theme_enabled: Arc<AtomicBool>,
     theme: Theme,
     color_theme: u32,
+    session_manual_mode: Option<bool>,
 }
 
 impl<WM> State<WM> {
@@ -87,6 +88,7 @@ impl<WM> State<WM> {
             color_theme: 0,
             config: ConfigState::new(config_manager),
             store,
+            session_manual_mode: None,
         };
         state
             .detect_theme_enabled
@@ -152,6 +154,19 @@ where
             state: self,
             window_id: id,
         })
+    }
+
+    pub fn active_manual_mode(&self) -> bool {
+        self.session_manual_mode()
+            .unwrap_or_else(|| self.config().manual_mode())
+    }
+
+    pub fn set_session_manual_mode(&mut self, session_manual_mode: bool) {
+        self.session_manual_mode = Some(session_manual_mode);
+    }
+
+    pub fn unset_session_manual_mode(&mut self) {
+        self.session_manual_mode.take();
     }
 }
 
@@ -318,6 +333,8 @@ pub trait StateExtractor {
 
     /// Return the init value and cur value stored by ChangeTempText event
     fn config_temp_text(&self, key: &str) -> Option<(&str, &str)>;
+
+    fn session_manual_mode(&self) -> Option<bool>;
 }
 
 impl<WM> StateExtractor for State<WM>
@@ -397,6 +414,10 @@ where
     /// Return the init value and cur value stored by ChangeTempText event
     fn config_temp_text(&self, key: &str) -> Option<(&str, &str)> {
         self.config.temp_text(key)
+    }
+
+    fn session_manual_mode(&self) -> Option<bool> {
+        self.session_manual_mode
     }
 }
 
