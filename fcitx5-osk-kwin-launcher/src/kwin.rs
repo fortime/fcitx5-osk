@@ -100,7 +100,7 @@ pub async fn restart_input_method(
         let cur_input_method = cur_input_method(kreadconfig).await?;
         if cur_input_method != input_method {
             tracing::info!(
-                "InputMethod has been switch to [{}] from [{}], don't restart",
+                "InputMethod has been switched to [{}] from [{}], don't restart",
                 cur_input_method,
                 input_method,
             );
