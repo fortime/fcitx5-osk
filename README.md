@@ -42,6 +42,18 @@ Fcitx 5 Osk Kwin Launcher is a critical component that enables Fcitx 5 Osk to fu
 * **On the unlock screen:** Starts Fcitx 5 Osk with `WAYLAND_SOCKET` and toggles it based on the KWin virtual keyboard visibility signal. In both the unlock and login screens, only surfaces created with `zwp_input_panel_v1` can be shown. Therefore, Fcitx 5 Osk must be launched with `WAYLAND_SOCKET` and communicate directly with KWin using `zwp_input_method_v1`.
 * **On the login screen (SDDM):** Starts with the `--sddm` option, skipping communication with the FDO service (which is not yet available). Fcitx 5 Osk behaves similarly to how it does on the unlock screen.
 
+This launcher listens for KWin signals and shows the virtual keyboard when KWin's tablet mode is on. You can enable the `Ignore Fcitx Show` option in the settings to prevent the virtual keyboard from appearing when you click an input field with the mouse.
+
+### **Experimental** KWin Effect Plugin
+
+For those people who doesn't want KWin's tablet mode, they can try this plugin which help showing the virtual keyboard with touch event. This plugin isn't built by default. You should add `-D BUILD_KWIN_PLUGIN=YES` to `cmake` to enable building this plugin. Like:
+
+```bash
+cmake -D BUILD_KWIN_PLUGIN=YES -B build -S .
+```
+
+***Important***: This plugin is built into two `so` files. I don't know if it needs to be built again each time KWin is updated. Also, I don't know it will crash a new version of KWin or not.
+
 ## Fcitx 5 Osk Key Helper
 
 Since fcitx5 doesn't forward modifier events correctly on Wayland, uppercase letters cannot be input. I have submitted a [PR fcitx/fcitx5#1292](https://github.com/fcitx/fcitx5/pull/1292), but it looks like it won't be merged. So, I came up a workaround: create a keyboard with evdev and use this keyboard to handle modifier events. This is what `fcitx5-osk-key-helper` does.
@@ -89,7 +101,7 @@ You can use a patched `fcitx5` and add/set `modifier_workaround_keycodes` in `${
 modifier_workaround_keycodes = []
 ```
 
-### Kwin (Wayland)
+### KWin (Wayland)
 
 To enable Fcitx 5 Osk Kwin Launcher:
 Go to **System Settings** → **Keyboard** → **Virtual Keyboard**, and select **"Fcitx 5 Osk Kwin Launcher"**.
