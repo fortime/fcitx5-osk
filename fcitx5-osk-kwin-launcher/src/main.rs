@@ -2,12 +2,12 @@ use std::{
     env,
     os::fd::{FromRawFd, OwnedFd},
     path::PathBuf,
-    process::{self, Stdio},
+    process,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::Result;
@@ -18,14 +18,22 @@ use fcitx5_osk_common::{
     signal::ShutdownFlag,
 };
 use futures_util::{FutureExt as _, StreamExt};
-use tokio::process::Command;
+use tokio::{
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    time,
+};
 use zbus::{
     Connection,
     fdo::{DBusProxy, Result as ZbusFdoResult},
     names::{UniqueName, WellKnownName},
 };
 
-use crate::dbus::client::{Fcitx5ControllerServiceProxy, FdoServices};
+use crate::dbus::{
+    client::{
+        Fcitx5ControllerServiceProxy, Fcitx5OskKwinLauncherControllerServiceProxy, FdoServices,
+    },
+    server::Fcitx5OskKwinLauncherService,
+};
 
 mod dbus;
 mod kwin;
@@ -41,29 +49,19 @@ struct Args {
     #[arg(long, default_missing_value = "true")]
     fcitx5_reopen: bool,
 
-    /// Start as worker.
-    #[arg(long, default_missing_value = "true")]
-    worker: bool,
-
     /// Start for sddm.
     #[arg(long, default_missing_value = "true")]
     sddm: bool,
 
-    /// Switch to InputMethod before exit.
-    #[arg(long)]
-    next_input_method: Option<PathBuf>,
-
-    /// Switch to next InputMethod only.
+    /// Start as dbus server.
     #[arg(long, default_missing_value = "true")]
-    switch_only: bool,
+    dbus_server: bool,
+}
 
-    /// Path to `kreadconfig`
-    #[arg(long)]
-    kreadconfig: Option<PathBuf>,
-
-    /// Path to `kwriteconfig`
-    #[arg(long)]
-    kwriteconfig: Option<PathBuf>,
+enum Message {
+    RegisterKwinInputMethod(String),
+    RestartKwinInputMethod,
+    HealthCheck,
 }
 
 async fn owner(
@@ -217,7 +215,6 @@ async fn watch_kwin_virtual_keyboard(
     fcitx5_osk_services: &Fcitx5OskServices,
     kwin_services: &KwinServices,
     in_lockscreen: bool,
-    tablet_mode_check: bool,
 ) -> Result<()> {
     let expected_mode = if in_lockscreen {
         WindowManagerMode::KwinLockScreen
@@ -237,7 +234,7 @@ async fn watch_kwin_virtual_keyboard(
                 .change_mode(expected_mode)
                 .await?;
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        time::sleep(Duration::from_millis(200)).await;
     }
     if in_lockscreen {
         // The keyboard will be open through activate signal of wayland input-method, there is no
@@ -298,15 +295,9 @@ async fn watch_kwin_virtual_keyboard(
             .await?;
         while stream.next().await.is_some() {
             let active = kwin_services.virtual_keyboard().active().await?;
-            let tablet_mode = if tablet_mode_check {
-                kwin_services.tablet_mode().tablet_mode().await?
-            } else {
-                true
-            };
+            let tablet_mode = kwin_services.tablet_mode().tablet_mode().await?;
             // check tablet mode, show only if it is in tablet mode.
-            tracing::debug!(
-                "kwin virtual keyboard active: {active}, tablet_mode_check: {tablet_mode_check}, tablet mode: {tablet_mode}"
-            );
+            tracing::debug!("kwin virtual keyboard active: {active}, tablet mode: {tablet_mode}");
             if active
                 && tablet_mode
                 && let Err(e) = fcitx5_osk_services.controller().show().await
@@ -319,24 +310,149 @@ async fn watch_kwin_virtual_keyboard(
     Ok(())
 }
 
-async fn watch_lockscreen_state(fdo_services: &FdoServices, in_lockscreen: bool) -> Result<()> {
+async fn watch_lockscreen_state(
+    fdo_services: &FdoServices,
+    tx: UnboundedSender<Message>,
+) -> Result<()> {
     let mut stream = fdo_services.screen_saver().receive_active_changed().await?;
+    let mut last = None;
     while let Some(changed) = stream.next().await {
         let active = changed.args()?.active;
         tracing::debug!("lockscreen active changed, new: {active}");
-        if active != in_lockscreen {
-            // exit
-            break;
+        if last.filter(|l| *l == active).is_none() {
+            // raise the error
+            tx.send(Message::RestartKwinInputMethod)?;
         }
+        last = Some(active);
     }
     Ok(())
 }
 
-async fn run(args: &Args) -> Result<()> {
-    let _log_guard = fcitx5_osk_common::log::init_log(&[], args.log_timestamp)?;
-    let tablet_mode_check = env::var("FCITX5_OSK_KWIN_LAUNCHER_TABLET_MODE_CHECK")
+fn kreadconfig() -> Option<PathBuf> {
+    env::var("FCITX5_OSK_KWIN_LAUNCHER_KREADCONFIG_PATH")
+        .ok()
+        .map(PathBuf::from)
+}
+
+fn kwriteconfig() -> Option<PathBuf> {
+    env::var("FCITX5_OSK_KWIN_LAUNCHER_KWRITECONFIG_PATH")
+        .ok()
+        .map(PathBuf::from)
+}
+
+fn health_check_seconds() -> u64 {
+    env::var("FCITX5_OSK_KWIN_LAUNCHER_HEALTH_CHECK_SECONDS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(20)
+}
+
+async fn dbus_eventloop(mut rx: UnboundedReceiver<Message>) {
+    let kreadconfig = kreadconfig();
+    let kwriteconfig = kwriteconfig();
+    let health_check_enabled = env::var("FCITX5_OSK_KWIN_LAUNCHER_HEALTH_CHECK_ENABLED")
         .map(|s| !s.eq_ignore_ascii_case("off"))
         .unwrap_or(true);
+    // restart the kwin input method if there is no register event within 3 health check intervals
+    let health_check_timeout_duration = Duration::from_secs(health_check_seconds() * 3);
+
+    let mut kwin_input_method = Default::default();
+    let mut last_register = Instant::now();
+    while let Some(message) = rx.recv().await {
+        let mut need_restart = false;
+        match message {
+            Message::RegisterKwinInputMethod(kim) => {
+                if kim != kwin_input_method {
+                    tracing::info!(
+                        "kwin input method is changed from [{kwin_input_method}] to [{kim}]"
+                    );
+                    kwin_input_method = kim;
+                }
+                last_register = Instant::now();
+            }
+            Message::RestartKwinInputMethod => {
+                need_restart = true;
+            }
+            Message::HealthCheck => {
+                if health_check_enabled && last_register.elapsed() > health_check_timeout_duration {
+                    need_restart = true;
+                }
+            }
+        }
+        if need_restart
+            && !kwin_input_method.is_empty()
+            && let Err(e) = kwin::restart_input_method(
+                kreadconfig.as_ref(),
+                kwriteconfig.as_ref(),
+                Some(&kwin_input_method),
+                None,
+            )
+            .await
+        {
+            tracing::error!("restart input method error: {e:#?}");
+        }
+    }
+}
+
+async fn run_dbus_server(args: &Args) -> Result<()> {
+    async fn health_check(tx: UnboundedSender<Message>) -> Result<()> {
+        let health_check_duration = Duration::from_secs(health_check_seconds());
+        let mut tick = time::interval(health_check_duration);
+        loop {
+            tick.tick().await;
+            tx.send(Message::HealthCheck)?;
+        }
+    }
+
+    let _log_guard = fcitx5_osk_common::log::init_log(&[], args.log_timestamp)?;
+
+    let (mut shutdown_flag, signal_handle) = fcitx5_osk_common::signal::shutdown_flag();
+    tokio::spawn(signal_handle);
+
+    let connection = Connection::session().await?;
+
+    let (tx, rx) = mpsc::unbounded_channel();
+
+    let fcitx5_osk_kwin_launcher_service = Fcitx5OskKwinLauncherService::new(tx.clone());
+    let fdo_services = FdoServices::new_with(&connection).await?;
+
+    fcitx5_osk_kwin_launcher_service.start(&connection).await?;
+
+    tokio::select! {
+        _ = dbus_eventloop(rx) => {
+            tracing::error!("dbus_eventloop returns abnormally");
+        }
+        res = health_check(tx.clone()) => {
+            tracing::error!("health_check returns abnormally: {res:#?}");
+        }
+        res = watch_lockscreen_state(&fdo_services, tx.clone()) => {
+            tracing::error!("watch_lockscreen_state exits abnormally: {res:#?}");
+        }
+        _ = shutdown_flag.wait_for_shutdown() => {
+            tracing::info!("dbus server is shutting down");
+        }
+    }
+
+    Ok(())
+}
+
+async fn run(args: &Args) -> Result<()> {
+    async fn health_check(
+        proxy: Fcitx5OskKwinLauncherControllerServiceProxy<'_>,
+        kwin_input_method: &str,
+    ) {
+        let health_check_duration = Duration::from_secs(health_check_seconds());
+        let mut tick = time::interval(health_check_duration);
+        loop {
+            tick.tick().await;
+            if let Err(e) = proxy.register_kwin_input_method(kwin_input_method).await {
+                tracing::error!("failed to register kwin input method: {e:#?}");
+            }
+        }
+    }
+
+    let kreadconfig = kreadconfig();
+    let _log_guard = fcitx5_osk_common::log::init_log(&[], args.log_timestamp)?;
 
     let (mut shutdown_flag, signal_handle) = fcitx5_osk_common::signal::shutdown_flag();
     tokio::spawn(signal_handle);
@@ -353,13 +469,13 @@ async fn run(args: &Args) -> Result<()> {
     };
     let wayland_display = env::var("WAYLAND_DISPLAY").unwrap_or_default();
 
-    let cur_input_method = match kwin::cur_input_method(args.kreadconfig.as_ref()).await {
+    let cur_input_method = match kwin::cur_input_method(kreadconfig.as_ref()).await {
         Ok(p) => p,
         Err(e) => {
             tracing::error!(
                 "Unable to get current input method, a empty string will be used: {e:#?}"
             );
-            "Invalid Path".to_string()
+            String::new()
         }
     };
 
@@ -374,10 +490,12 @@ async fn run(args: &Args) -> Result<()> {
     let connection = Connection::session().await?;
 
     let services = Fcitx5OskServices::new().await?;
+    let fcitx5_osk_kwin_launcher_controller_service =
+        Fcitx5OskKwinLauncherControllerServiceProxy::new(&connection).await?;
     let kwin_services = KwinServices::new_with(&connection).await?;
     let fdo_services = FdoServices::new_with(&connection).await?;
     let lockscreen_active = fdo_services.screen_saver().get_active().await?;
-    tracing::debug!("first check of lockscreen active: {lockscreen_active}");
+    tracing::debug!("lockscreen active: {lockscreen_active}");
     let (fcitx5_socket, fcitx5_osk_socket) = if lockscreen_active {
         (None, socket)
     } else {
@@ -420,6 +538,9 @@ async fn run(args: &Args) -> Result<()> {
 
     // only the latest match rule will work in zbus::receive_signal. so I create two connections.
     tokio::select! {
+        _ = health_check(fcitx5_osk_kwin_launcher_controller_service, &cur_input_method) => {
+            tracing::error!("health_check returns abnormally");
+        }
         res = {
             let mut shutdown_flag = shutdown_flag.clone();
             async move {
@@ -438,14 +559,7 @@ async fn run(args: &Args) -> Result<()> {
                 tracing::info!("watch_fcitx5 exits");
             }
         }
-        res = watch_lockscreen_state(&fdo_services, lockscreen_active) => {
-            if let Err(e) = res {
-                tracing::error!("watch_lockscreen_state exits abnormally: {e:#?}");
-            } else {
-                tracing::info!("the state of lockscreen is changed");
-            }
-        }
-        res = watch_kwin_virtual_keyboard(&services, &kwin_services, lockscreen_active, tablet_mode_check) => {
+        res = watch_kwin_virtual_keyboard(&services, &kwin_services, lockscreen_active) => {
             if let Err(e) = res {
                 tracing::error!("watch_kwin_virtual_keyboard exits abnormally: {e:#?}");
             } else {
@@ -464,60 +578,8 @@ async fn run(args: &Args) -> Result<()> {
         let _ = fcitx5_osk_handler.await;
     }
 
-    // restart InputMethod
-    let restart_res = kwin::restart_input_method(
-        args.kreadconfig.as_ref(),
-        args.kwriteconfig.as_ref(),
-        Some(&cur_input_method),
-        args.next_input_method.as_ref(),
-    )
-    .await;
-    tracing::info!(
-        "shutdown fcitx5-osk result: {:?}, restart InputMethod result: {:?}",
-        shutdown_res,
-        restart_res,
-    );
+    tracing::info!("shutdown fcitx5-osk result: {:?}", shutdown_res,);
 
-    // wait a moment for letting fcitx5-osk to shutdown gracefully.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    Ok(())
-}
-
-/// Run in a daemon mode and start a worker process for doing things, so kwin won't be blocked when it's terminating
-/// the `InputMethod` process.
-async fn daemon() -> Result<()> {
-    let exec = env::current_exe()?;
-    let mut args: Vec<_> = env::args().collect();
-    if let Some(arg) = args.get_mut(0) {
-        *arg = "--worker".to_string();
-    } else {
-        args.push("--worker".to_string());
-    }
-
-    let (mut shutdown_flag, signal_handle) = fcitx5_osk_common::signal::shutdown_flag();
-    tokio::spawn(signal_handle);
-
-    let mut child = Command::new(exec).args(args).stdin(Stdio::null()).spawn()?;
-    tokio::select! {
-        res = child.wait() => {
-            match res {
-                Ok(code) => {
-                    tracing::warn!("the worker exit with code: {code}");
-                },
-                Err(e) => {
-                    tracing::warn!("failed waiting the worker to exit: {e:#?}");
-                }
-            }
-        }
-        _ = shutdown_flag.wait_for_shutdown() => {
-            if let Some(pid) = child.id() {
-                cvt::cvt(unsafe { libc::kill(pid as i32, libc::SIGTERM) }).map(drop)?;
-            } else {
-                child.kill().await?;
-            }
-        }
-    }
     Ok(())
 }
 
@@ -574,7 +636,7 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
 
     // only the latest match rule will work in zbus::receive_signal. so I create two connections.
     tokio::select! {
-        res = watch_kwin_virtual_keyboard(&services, &kwin_services, true, true) => {
+        res = watch_kwin_virtual_keyboard(&services, &kwin_services, true) => {
             if let Err(e) = res {
                 tracing::error!("watch_kwin_virtual_keyboard exits abnormally: {e:#?}");
             } else {
@@ -596,38 +658,21 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
     // There is no need to restart in sddm
     tracing::info!("shutdown fcitx5-osk result: {:?}", shutdown_res,);
 
-    // wait a moment for letting fcitx5-osk to shutdown gracefully.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
     Ok(())
 }
 
 #[tokio::main]
 pub async fn main() {
     let args = Args::parse();
-    let res = if args.switch_only {
-        if args.next_input_method.is_some() {
-            kwin::restart_input_method(
-                args.kreadconfig.as_ref(),
-                args.kwriteconfig.as_ref(),
-                None,
-                args.next_input_method.as_ref(),
-            )
-            .await
-        } else {
-            Ok(())
-        }
-    } else if args.worker {
-        if args.sddm {
-            run_in_sddm(&args).await
-        } else {
-            run(&args).await
-        }
+    let res = if args.sddm {
+        run_in_sddm(&args).await
+    } else if args.dbus_server {
+        run_dbus_server(&args).await
     } else {
-        daemon().await
+        run(&args).await
     };
     if let Err(e) = res {
-        eprintln!("worker[{}] run command failed: {e:#?}", args.worker);
+        eprintln!("run command failed: {e:#?}");
         process::exit(1);
     }
 }

@@ -1079,15 +1079,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
-name = "cvt"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2ae9bf77fbf2d39ef573205d554d87e86c12f1994e9ea335b0651b9b278bcf1"
-dependencies = [
- "cfg-if",
-]
-
-[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1445,11 +1436,9 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
- "cvt",
  "fcitx5-osk-common",
  "futures-util",
  "getset",
- "libc",
  "serde",
  "tokio",
  "tracing",

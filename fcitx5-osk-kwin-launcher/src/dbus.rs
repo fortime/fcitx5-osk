@@ -114,4 +114,73 @@ pub mod client {
             Ok(Self { screen_saver })
         }
     }
+
+    #[zbus::proxy(
+        default_service = "fyi.fortime.Fcitx5Osk.KwinLauncher",
+        default_path = "/fyi/fortime/Fcitx5Osk/KwinLauncher/Controller",
+        interface = "fyi.fortime.Fcitx5Osk.KwinLauncher.Controller1"
+    )]
+    pub trait Fcitx5OskKwinLauncherControllerService {
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        async fn register_kwin_input_method(&self, kwin_input_method: &str) -> ZbusResult<()>;
+    }
 }
+
+pub mod server {
+    use anyhow::Result;
+    use tokio::sync::mpsc::UnboundedSender;
+    use zbus::{
+        Connection,
+        fdo::{Error as ZbusFdoError, Result as ZbusFdoResult},
+    };
+
+    use crate::Message;
+
+    pub struct Fcitx5OskKwinLauncherService {
+        tx: UnboundedSender<Message>,
+    }
+
+    impl Fcitx5OskKwinLauncherService {
+        pub fn new(tx: UnboundedSender<Message>) -> Self {
+            Self { tx }
+        }
+
+        fn send(&self, message: Message) -> ZbusFdoResult<()> {
+            self.tx.send(message).map_err(|_| {
+                ZbusFdoError::Failed(
+                    "The internal channel of fcitx5-osk-kwin-launcher has been closed, unable to handle the request"
+                    .to_string(),
+                )
+            })
+        }
+
+        pub async fn start(self, conn: &Connection) -> Result<()> {
+            conn.object_server()
+                .at(super::CONTROLLER_OBJECT_PATH, self)
+                .await?;
+            conn.request_name(super::SERVICE_NAME).await?;
+
+            Ok(())
+        }
+    }
+
+    #[zbus::interface(name = "fyi.fortime.Fcitx5Osk.KwinLauncher.Controller1")]
+    impl Fcitx5OskKwinLauncherService {
+        // zbus::interface doesn't support type alias in the response
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        async fn register_kwin_input_method(
+            &self,
+            kwin_input_method: String,
+        ) -> zbus::fdo::Result<()> {
+            self.send(Message::RegisterKwinInputMethod(kwin_input_method))
+        }
+
+        #[tracing::instrument(level = "debug", skip(self), err, ret)]
+        async fn restart_kwin_input_method(&self) -> zbus::fdo::Result<()> {
+            self.send(Message::RestartKwinInputMethod)
+        }
+    }
+}
+
+pub const SERVICE_NAME: &str = "fyi.fortime.Fcitx5Osk.KwinLauncher";
+pub const CONTROLLER_OBJECT_PATH: &str = "/fyi/fortime/Fcitx5Osk/KwinLauncher/Controller";

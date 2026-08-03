@@ -53,8 +53,6 @@ wayland-protocols-wlr = { version = "0.3.5", default-features = false, features 
 tempfile = "3.25.0"
 evdev = { version = "0.13.1", features = ["tokio"] }
 rand = "0.9.1"
-cvt = "0.1.2"
-libc = "0.2.172"
 num-traits = "0.2.19"
 reqwest = { version = "0.13.2", features = ["json"] }
 base64 = "0.22.1"

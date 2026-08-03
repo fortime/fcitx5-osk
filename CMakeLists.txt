@@ -46,8 +46,8 @@ configure_file(${CMAKE_SOURCE_DIR}/pkg/share/applications/fyi.fortime.Fcitx5Osk.
     ${CMAKE_BINARY_DIR}/share/applications/fyi.fortime.Fcitx5Osk.KwinLauncher.desktop
     @ONLY
 )
-configure_file(${CMAKE_SOURCE_DIR}/pkg/share/applications/fyi.fortime.Fcitx5Osk.KwinRestarter.desktop.in
-    ${CMAKE_BINARY_DIR}/share/applications/fyi.fortime.Fcitx5Osk.KwinRestarter.desktop
+configure_file(${CMAKE_SOURCE_DIR}/pkg/share/dbus-1/services/fyi.fortime.Fcitx5Osk.KwinLauncher.service.in
+    ${CMAKE_BINARY_DIR}/share/dbus-1/services/fyi.fortime.Fcitx5Osk.KwinLauncher.service
     @ONLY
 )
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/etc/xdg/fcitx5-osk/themes")
@@ -133,8 +133,12 @@ install(PROGRAMS
 # Install fcitx5-osk-kwin-launcher's data files
 install(FILES
         ${CMAKE_BINARY_DIR}/share/applications/fyi.fortime.Fcitx5Osk.KwinLauncher.desktop
-        ${CMAKE_BINARY_DIR}/share/applications/fyi.fortime.Fcitx5Osk.KwinRestarter.desktop
     DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+    COMPONENT Fcitx5OskKwinLauncher
+)
+install(FILES
+        ${CMAKE_BINARY_DIR}/share/dbus-1/services/fyi.fortime.Fcitx5Osk.KwinLauncher.service
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/dbus-1/services
     COMPONENT Fcitx5OskKwinLauncher
 )
 install(FILES
