@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Result;
-use getset::{Getters, MutGetters};
+use getset::{CopyGetters, Getters, MutGetters};
 use iced::{
     Element, Size, Task, Theme, Vector, futures::channel::mpsc::UnboundedSender, window::Id,
 };
@@ -37,7 +37,7 @@ pub use keyboard::{KeyEvent, KeyboardBackend, KeyboardEvent, KeyboardState};
 pub use layout::{LayoutEvent, LayoutState};
 pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerState};
 
-#[derive(Getters, MutGetters)]
+#[derive(CopyGetters, Getters, MutGetters)]
 pub struct State<WM> {
     config: ConfigState,
     #[getset(get_mut = "pub")]
@@ -52,6 +52,9 @@ pub struct State<WM> {
     theme: Theme,
     color_theme: u32,
     session_manual_mode: Option<bool>,
+    // record if the keyboard is opened by a force show
+    #[getset(get_copy = "pub", get_mut = "pub")]
+    force_show: bool,
 }
 
 impl<WM> State<WM> {
@@ -89,6 +92,7 @@ impl<WM> State<WM> {
             config: ConfigState::new(config_manager),
             store,
             session_manual_mode: None,
+            force_show: false,
         };
         state
             .detect_theme_enabled

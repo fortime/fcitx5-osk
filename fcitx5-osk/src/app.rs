@@ -418,10 +418,18 @@ where
             }
             Message::WindowManagerEvent(event) => {
                 let is_update_mode = matches!(event, WindowManagerEvent::UpdateMode(_));
+                let is_user_close_event = matches!(
+                    event,
+                    WindowManagerEvent::CloseKeyboard(CloseOpSource::UserAction)
+                );
                 task = task.chain(self.state.window_manager_mut().on_event(event));
                 if is_update_mode {
                     let mode = self.state.window_manager().mode();
                     self.fcitx5_osk_service_handle.set_mode(mode);
+                }
+                // reset the `force_show` flag if it is closed by the user
+                if is_user_close_event {
+                    *self.state.force_show_mut() = false;
                 }
             }
             Message::StoreEvent(event) => {
@@ -445,7 +453,9 @@ where
                     Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard => {
                         // Always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated
                         self.state.keyboard_mut().set_fcitx5_hidden();
-                        if !self.state.active_manual_mode() {
+                        // Ignore hide signal from fcitx5 if the keyboard's manual mode is on or the
+                        // keyboard is shown by a force show event
+                        if !self.state.active_manual_mode() && !self.state.force_show() {
                             // Close keyboard only when setting isn't shown
                             if !self.state.window_manager().is_setting_shown() {
                                 task = task.chain(
@@ -466,6 +476,9 @@ where
                 match event {
                     ImPanelEvent::Show(force) => {
                         if force || !self.state.active_manual_mode() {
+                            if force {
+                                *self.state.force_show_mut() = true;
+                            }
                             task = task.chain(self.state.window_manager_mut().open_keyboard());
                         }
                     }
@@ -473,6 +486,8 @@ where
                         // always set fcitx5 hidden, so we can make sure virtual keyboard mode of fcitx5 will be activated.
                         self.state.keyboard_mut().set_fcitx5_hidden();
                         if force || !self.state.active_manual_mode() {
+                            // reset the `force_show` flag if it is closed by the user
+                            *self.state.force_show_mut() = false;
                             // Unlike hiding request from Fcitx5, we always think that request from DbusController should be followed.
                             task = task.chain(
                                 self.state
