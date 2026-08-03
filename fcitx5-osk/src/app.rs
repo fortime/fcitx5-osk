@@ -1,6 +1,6 @@
 use std::{
     cell::RefCell,
-    future::{self, Future},
+    future::Future,
     os::fd::{AsRawFd, OwnedFd},
     rc::Rc,
     sync::{
@@ -683,22 +683,6 @@ async fn start_dbus_services(
         if tx.unbounded_send(Message::Nothing).is_err() {
             tracing::error!("failed to send message, shutdown may be stopped");
         }
-        let mut count = 0;
-        loop {
-            let _ = future::poll_fn(|cx| tx.poll_ready(cx)).await;
-            if tx.is_closed() {
-                tracing::info!("the mainloop of keyboard has exited.");
-                break;
-            }
-            count += 1;
-            if count > 4 {
-                break;
-            }
-            let _ = time::sleep(Duration::from_millis(500)).await;
-        }
-        // there is no way to have a graceful shutdown if the wayland socket is from kwin, kwin is
-        // running in a signal thread, when input method is shutting down, kwin can't handle other
-        // requests.
         tracing::info!("close the connection of dbus services");
         if let Err(e) = conn.close().await {
             tracing::warn!("failed to close the connection of dbus services: {:?}", e);
