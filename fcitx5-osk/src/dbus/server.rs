@@ -241,12 +241,12 @@ struct InnerFcitx5OskServiceState {
     visible_request: (i64, bool),
 }
 
-pub struct Fcitx5OskServiceClient {
+pub struct Fcitx5OskServiceHandle {
     state: Arc<Mutex<InnerFcitx5OskServiceState>>,
     tx: UnboundedSender<PropertyChangedSignal>,
 }
 
-impl Fcitx5OskServiceClient {
+impl Fcitx5OskServiceHandle {
     fn state(&self) -> Option<MutexGuard<'_, InnerFcitx5OskServiceState>> {
         match self.state.lock() {
             Ok(s) => Some(s),
@@ -340,7 +340,7 @@ impl Fcitx5OskService {
         }
     }
 
-    pub async fn start(self, conn: &Connection) -> Result<Fcitx5OskServiceClient, Error> {
+    pub async fn start(self, conn: &Connection) -> Result<Fcitx5OskServiceHandle, Error> {
         let state = self.state.clone();
 
         conn.object_server()
@@ -355,7 +355,7 @@ impl Fcitx5OskService {
 
         let (tx, rx) = mpsc::unbounded();
 
-        let client = Fcitx5OskServiceClient { state, tx };
+        let handle = Fcitx5OskServiceHandle { state, tx };
 
         tokio::spawn(async move {
             if let Err(e) = fcitx5_osk_service_event_loop(rx, fcitx5_osk_service_ref).await {
@@ -365,7 +365,7 @@ impl Fcitx5OskService {
             }
         });
 
-        Ok(client)
+        Ok(handle)
     }
 
     fn send<Event>(&self, event: Event) -> Result<(), Error>
