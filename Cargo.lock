@@ -1362,7 +1362,7 @@ dependencies = [
 
 [[package]]
 name = "fcitx5-osk"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1398,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "fcitx5-osk-common"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "console-subscriber",
@@ -1414,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "fcitx5-osk-key-helper"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "fcitx5-osk-kwin-launcher"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
