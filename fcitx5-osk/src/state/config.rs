@@ -13,7 +13,10 @@ use crate::{
     config::{Config, ConfigManager, IndicatorDisplay, Placement, QuickActionBarState},
     dbus::server::ImPanelEvent,
     layout::KLength,
-    state::{ImEvent, LayoutEvent, StateExtractor, StoreEvent, ThemeEvent, WindowManagerEvent},
+    state::{
+        ImEvent, KeyboardEvent, LayoutEvent, StateExtractor, StoreEvent, ThemeEvent,
+        WindowManagerEvent,
+    },
     window::WindowManagerMode,
 };
 
@@ -560,6 +563,17 @@ impl ConfigState {
                     should_display: default_should_display,
                 },
                 Field {
+                    name: "Allow Rotate Key",
+                    id: "rotate_key_enabled",
+                    typ: BoolDesc {
+                        cur_value: |state| state.config().rotate_key_enabled(),
+                        is_enabled: |_state| true,
+                        on_changed: |_, v| Message::from(UpdateConfigEvent::RotateKeyEnabled(v)),
+                    }
+                    .into(),
+                    should_display: default_should_display,
+                },
+                Field {
                     name: "Quick Action Bar",
                     id: "quick_action_bar_state",
                     typ: OwnedEnumDesc::<QuickActionBarState> {
@@ -739,6 +753,11 @@ impl ConfigState {
                 set_ignore_fcitx_show,
                 |_v| Message::Nothing
             },
+            @RotateKeyEnabled => {
+                config_eq!(rotate_key_enabled),
+                set_rotate_key_enabled,
+                |v| Message::from(KeyboardEvent::UpdateRotateKeyEnabled(v))
+            },
             @QuickActionBarState => {
                 config_eq!(quick_action_bar_state),
                 set_quick_action_bar_state,
@@ -864,6 +883,7 @@ pub enum UpdateConfigEvent {
     IgnoreFcitxShow(bool),
     QuickActionBarState(QuickActionBarState),
     CustomActions(Arc<Vec<String>>),
+    RotateKeyEnabled(bool),
 }
 
 impl From<UpdateConfigEvent> for Message {

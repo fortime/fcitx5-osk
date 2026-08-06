@@ -146,6 +146,11 @@ pub struct Config {
     #[getset(get = "pub")]
     #[serde(default)]
     custom_actions: Vec<String>,
+
+    /// Allow rotating keys
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    rotate_key_enabled: bool,
 }
 
 impl Config {

@@ -6,10 +6,11 @@ use iced::{
     Color, Element, Font, Length, Padding, Pixels, Size, Theme,
     advanced::svg::Handle as SvgHandle,
     alignment::{Horizontal, Vertical},
+    border::Radius,
     padding,
     widget::{
         Button, Column, Container, PickList, Row, Scrollable, Slider, Space, Svg, Text, Toggler,
-        button::{DEFAULT_PADDING, Style as ButtonStyle},
+        button::{self, DEFAULT_PADDING, Style as ButtonStyle},
         container::Style as ContainerStyle,
         scrollable::{Direction, Scrollbar},
         text::Shaping,
@@ -886,8 +887,17 @@ impl ToolbarLayout {
             custom_action_button("Reload", None, font_size, None)
                 .on_release_with(Some(|| StoreEvent::Load(true).into())),
         );
+
+        if let Some((idx, size)) = params.state.key_selection()
+            && size > 2
+        {
+            // show only there are more than two key selections
+            row = row.push(self.key_selection_element(unit, idx, size));
+        }
+
         row = row.push(self.combo_action_element(params, unit, font_size));
         row = row.push(self.repeat_action_element(params, unit, font_size));
+
         for custom_action in params.state.keyboard().custom_actions() {
             row = row.push(self.custom_action_element(font_size, &custom_action.0));
         }
@@ -1014,6 +1024,41 @@ impl ToolbarLayout {
         } else {
             widget::center_y_button_container(content).into()
         }
+    }
+
+    fn key_selection_element<'b>(
+        &self,
+        unit: KLength,
+        selected_idx: usize,
+        size: usize,
+    ) -> Element<'b, Message> {
+        let mut row = Row::new().spacing(unit).align_y(Vertical::Center);
+
+        for idx in 0..size {
+            let is_active = idx == selected_idx;
+
+            // Use custom styling variants based on whether the dot is active
+            let dot_style = if is_active {
+                button::primary
+            } else {
+                button::secondary
+            };
+
+            let dot = ExtButton::new(Container::new("").width(unit * 2).height(unit * 2))
+                .padding(0)
+                .style(move |theme, status| {
+                    let mut style = dot_style(theme, status);
+                    style.border.radius = Radius::new(unit.val());
+                    style
+                })
+                .on_release_with(Some(move || {
+                    KeyboardEvent::UpdateKeySelectionIdx(idx).into()
+                }));
+
+            row = row.push(dot);
+        }
+
+        widget::center_y_button_container(row).into()
     }
 
     fn custom_action_element<'b>(

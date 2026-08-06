@@ -301,21 +301,49 @@ impl Key {
         shift ^ caps_lock
     }
 
-    pub fn key_value(&self, shift: bool, caps_lock: bool) -> KeyValue {
-        let key_value = if Self::is_shifted(shift, caps_lock) {
-            self.raw.secondaries.first().unwrap_or(&self.raw.primary)
+    pub fn rotate(&self, cur: usize) -> RotatedKey<'_> {
+        let cur = cur % (self.raw.secondaries.len() + 1);
+        let (primary, secondaries) = if cur == 0 {
+            (&self.raw.primary, self.raw.secondaries.iter().collect())
         } else {
-            &self.raw.primary
+            let mut secondaries = vec![];
+            secondaries.extend(self.raw.secondaries[cur..].iter());
+            secondaries.push(&self.raw.primary);
+            secondaries.extend(self.raw.secondaries[..cur - 1].iter());
+            (&self.raw.secondaries[cur - 1], secondaries)
+        };
+        RotatedKey {
+            primary,
+            secondaries,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.raw.secondaries.len() + 1
+    }
+}
+
+pub struct RotatedKey<'a> {
+    primary: &'a KeyValue,
+    secondaries: Vec<&'a KeyValue>,
+}
+
+impl<'a> RotatedKey<'a> {
+    pub fn key_value(&self, shift: bool, caps_lock: bool) -> KeyValue {
+        let key_value = if Key::is_shifted(shift, caps_lock) {
+            self.secondaries.first().copied().unwrap_or(self.primary)
+        } else {
+            self.primary
         };
         key_value.clone()
     }
 
-    pub fn primary(&self) -> &KeyValue {
-        &self.raw.primary
+    pub fn primary(&self) -> &'a KeyValue {
+        self.primary
     }
 
-    pub fn secondaries(&self) -> &[KeyValue] {
-        &self.raw.secondaries
+    pub fn secondaries(&self) -> &[&'a KeyValue] {
+        &self.secondaries
     }
 }
 

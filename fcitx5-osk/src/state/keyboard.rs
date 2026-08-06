@@ -111,8 +111,10 @@ pub struct KeyboardState {
     keyboard_backend: KeyboardBackend,
     keyboard_backend_state: KeyboardBackendState,
     custom_actions: Vec<(Arc<str>, Rc<CustomAction>)>,
-    #[allow(unused)]
     tx: UnboundedSender<Message>,
+    key_selection_size: usize,
+    key_selection_idx: usize,
+    rotate_key_enabled: bool,
 }
 
 impl KeyboardState {
@@ -122,6 +124,7 @@ impl KeyboardState {
         store: &Store,
         keyboard_backend: KeyboardBackend,
         tx: UnboundedSender<Message>,
+        rotate_key_enabled: bool,
     ) -> Self {
         let mut res = Self {
             id: 0,
@@ -140,6 +143,9 @@ impl KeyboardState {
             keyboard_backend_state: Default::default(),
             custom_actions: Default::default(),
             tx,
+            key_selection_size: 0,
+            key_selection_idx: 0,
+            rotate_key_enabled,
         };
         res.update_key_area_layout(key_area_layout, store);
         // assets aren't loaded yet, don't load custom actions
@@ -166,6 +172,12 @@ impl KeyboardState {
             .map(|n| font::load(n))
             .unwrap_or_default();
         self.keyboard_backend_state = Default::default();
+
+        let key_selection_size = self.keys.values().map(|k| k.len()).max().unwrap_or(1);
+        if key_selection_size != self.key_selection_size {
+            self.key_selection_size = key_selection_size;
+            self.key_selection_idx = 0;
+        }
     }
 
     pub fn update_custom_actions(&mut self, custom_actions: &[String], store: &Store) {
@@ -176,6 +188,25 @@ impl KeyboardState {
             } else {
                 tracing::warn!("No custom action[{custom_action}] found");
             }
+        }
+    }
+
+    pub fn update_rotate_key_enabled(&mut self, rotate_key_enabled: bool) {
+        if self.rotate_key_enabled != rotate_key_enabled {
+            self.rotate_key_enabled = rotate_key_enabled;
+            self.key_selection_idx = 0;
+            // unset CapsLock
+            self.view_flags &= !(ModifierState::CapsLock as u32);
+        }
+    }
+
+    pub fn update_key_selection_idx(&mut self, idx: usize) {
+        if self.holding_key_state.is_none() && self.pressed_keys.is_empty() {
+            tracing::debug!("Update key selection idx to {idx}");
+            // switch only if there is no key pressed
+            self.key_selection_idx = idx % self.key_selection_size;
+        } else {
+            tracing::debug!("Ignore update key selection idx to {idx}");
         }
     }
 
@@ -256,6 +287,14 @@ impl KeyboardState {
             }
             KeyboardEvent::PushFrontCustomActionCandidate((serial, candidates)) => {
                 self.push_front_custom_action_candidates(serial, candidates)
+            }
+            KeyboardEvent::UpdateRotateKeyEnabled(enabled) => {
+                self.update_rotate_key_enabled(enabled);
+                Message::nothing()
+            }
+            KeyboardEvent::UpdateKeySelectionIdx(idx) => {
+                self.update_key_selection_idx(idx);
+                Message::nothing()
             }
         }
     }
@@ -362,6 +401,7 @@ impl KeyboardState {
                         let is_caps_lock_set = ModifierState::CapsLock.is_set(self.view_flags);
                         key_state.selected_key_value = holding_key_state
                             .key
+                            .rotate(self.key_selection_idx)
                             .key_value(is_shift_set, is_caps_lock_set);
                     }
                 }
@@ -384,6 +424,7 @@ impl KeyboardState {
         );
 
         let (content, press_cb, release_cb) = if let Some(key) = self.keys.get(&*key_name) {
+            let key = key.rotate(self.key_selection_idx);
             let is_shift_set = ModifierState::Shift.is_set(self.view_flags);
             let is_caps_lock_set = ModifierState::CapsLock.is_set(self.view_flags);
             let secondary_height = inner_height / 3;
@@ -401,11 +442,17 @@ impl KeyboardState {
             let secondary_key_values = key.secondaries();
             let (primary, secondary) = if is_shift_set ^ is_caps_lock_set {
                 (
-                    secondary_key_values.first().unwrap_or(primary_key_value),
-                    secondary_key_values.first().map(|_| primary_key_value),
+                    secondary_key_values
+                        .first()
+                        .copied()
+                        .unwrap_or(primary_key_value),
+                    secondary_key_values
+                        .first()
+                        .copied()
+                        .map(|_| primary_key_value),
                 )
             } else {
-                (primary_key_value, secondary_key_values.first())
+                (primary_key_value, secondary_key_values.first().copied())
             };
             let middle = Text::new(primary.symbol())
                 .shaping(Shaping::Advanced)
@@ -414,7 +461,7 @@ impl KeyboardState {
             let mut has_secondary = false;
             for secondary in secondary
                 .into_iter()
-                .chain(secondary_key_values.iter().skip(1))
+                .chain(secondary_key_values.iter().copied().skip(1))
             {
                 has_secondary = true;
                 let text = Text::new(secondary.symbol())
@@ -494,7 +541,7 @@ impl KeyboardState {
         let is_shift_set = ModifierState::Shift.is_set(self.view_flags);
         let is_caps_lock_set = ModifierState::CapsLock.is_set(self.view_flags);
 
-        let key = &holding_key_state.key;
+        let key = holding_key_state.key.rotate(self.key_selection_idx);
         let mut row = Row::new();
         let mut popup_key_area_width = KLength::default();
         if holding_key_state.secondary_shown {
@@ -653,6 +700,14 @@ impl KeyboardState {
             Message::nothing()
         }
     }
+
+    pub fn key_selection(&self) -> Option<(usize, usize)> {
+        if self.rotate_key_enabled {
+            Some((self.key_selection_idx, self.key_selection_size))
+        } else {
+            None
+        }
+    }
 }
 
 // call fcitx5
@@ -730,7 +785,17 @@ impl KeyboardState {
     ) -> Task<Message> {
         let modifier_state = to_modifier_state(&common.key_value);
         match modifier_state {
-            s @ ModifierState::CapsLock => self.view_flags ^= s as u32,
+            s @ ModifierState::CapsLock => {
+                if self.rotate_key_enabled {
+                    self.pressed_keys.remove(&common.key_name);
+                    self.holding_key_state
+                        .take_if(|s| s.name == common.key_name);
+                    self.update_key_selection_idx(self.key_selection_idx + 1);
+                    return Message::nothing();
+                } else {
+                    self.view_flags ^= s as u32
+                }
+            }
             s => self.view_flags &= !(s as u32),
         };
 
@@ -840,7 +905,7 @@ impl KeyboardState {
                 name: common.key_name.clone(),
                 key_widget_event,
                 key: key.clone(),
-                flags: Vec::with_capacity(key.secondaries().len()),
+                flags: Vec::with_capacity(key.len() - 1),
                 pressed_time,
                 secondary_shown: false,
             });
@@ -868,8 +933,9 @@ impl KeyboardState {
                 return;
             }
             holding_key_state.secondary_shown = true;
+            let key = holding_key_state.key.rotate(self.key_selection_idx);
             if !holding_key_state.flags.is_empty()
-                && let Some(first) = holding_key_state.key.secondaries().first()
+                && let Some(first) = key.secondaries().first().copied()
             {
                 // the popup key is selected, replace it with the first secondary
                 if let Some(key_state) = self.pressed_keys.get_mut(&common.key_name) {
@@ -974,6 +1040,8 @@ pub enum KeyboardEvent {
     ClickCustomAction(Arc<str>),
     // Push new candidates in the front, so new coming candidates can be shown immediately
     PushFrontCustomActionCandidate((u32, Vec<CustomActionCandidate>)),
+    UpdateRotateKeyEnabled(bool),
+    UpdateKeySelectionIdx(usize),
 }
 
 impl From<KeyboardEvent> for Message {

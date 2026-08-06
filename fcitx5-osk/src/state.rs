@@ -77,6 +77,7 @@ impl<WM> State<WM> {
                 &store,
                 keyboard_backend.clone(),
                 tx,
+                config.rotate_key_enabled(),
             ),
             im: ImState::new(keyboard_backend.clone()),
             window_manager: WindowManagerState::new(
@@ -339,6 +340,8 @@ pub trait StateExtractor {
     fn config_temp_text(&self, key: &str) -> Option<(&str, &str)>;
 
     fn session_manual_mode(&self) -> Option<bool>;
+
+    fn key_selection(&self) -> Option<(usize, usize)>;
 }
 
 impl<WM> StateExtractor for State<WM>
@@ -422,6 +425,10 @@ where
 
     fn session_manual_mode(&self) -> Option<bool> {
         self.session_manual_mode
+    }
+
+    fn key_selection(&self) -> Option<(usize, usize)> {
+        self.keyboard.key_selection()
     }
 }
 
