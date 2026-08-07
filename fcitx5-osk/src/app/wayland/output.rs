@@ -523,7 +523,15 @@ impl Dispatch<WlRegistry, ()> for OutputListener {
                         "Create a layer shell surface[{:?}] to monitor the change of geometry",
                         layer_shell_surface
                     );
-                    layer_shell_surface.set_anchor(Anchor::Top | Anchor::Left);
+                    // The size is left at the default 0x0, and set_size requires a
+                    // dimension left at 0 to be anchored to opposite edges, so anchoring
+                    // all four is mandatory here. Kwin tolerates Top | Left, but wlroots
+                    // based compositors raise invalid_size on commit, killing the
+                    // connection and aborting at startup. Anchoring all four edges also
+                    // makes the configure event report the usable area, which is what
+                    // logical_width/logical_height want.
+                    layer_shell_surface
+                        .set_anchor(Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right);
                     // Make events pass through the window
                     let region = state.compositer.create_region(qh, ());
                     surface.set_input_region(Some(&region));
