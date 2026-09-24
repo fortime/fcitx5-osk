@@ -108,6 +108,9 @@ pub struct KeyboardState {
     /// instead we set this flag, and tell fcitx5 to show virtual keyboard when there is any key
     /// pressing event.
     fcitx5_hidden: Fcitx5Hidden,
+    /// Hide from Fcitx after a modifier is injected as a real key can arrive
+    /// after the Show that was meant to cancel it.
+    suppress_fcitx_hide_until: Option<std::time::Instant>,
     keyboard_backend: KeyboardBackend,
     keyboard_backend_state: KeyboardBackendState,
     custom_actions: Vec<(Arc<str>, Rc<CustomAction>)>,
@@ -136,6 +139,7 @@ impl KeyboardState {
             popup_key_width_u: 0,
             popup_key_height_u: 0,
             fcitx5_hidden: Fcitx5Hidden::Unset,
+            suppress_fcitx_hide_until: None,
             keyboard_backend,
             keyboard_backend_state: Default::default(),
             custom_actions: Default::default(),
@@ -320,6 +324,16 @@ impl KeyboardState {
 
     pub fn set_fcitx5_hidden(&mut self) {
         self.fcitx5_hidden = Fcitx5Hidden::Set;
+    }
+
+    pub fn suppress_fcitx_hide(&mut self) {
+        self.suppress_fcitx_hide_until =
+            Some(std::time::Instant::now() + Duration::from_millis(1000));
+    }
+
+    pub fn fcitx_hide_suppressed(&self) -> bool {
+        self.suppress_fcitx_hide_until
+            .is_some_and(|until| std::time::Instant::now() < until)
     }
 
     #[tracing::instrument(skip(self))]
@@ -699,6 +713,7 @@ impl KeyboardState {
             && !contains
         {
             let key_name = common.key_name.clone();
+            self.suppress_fcitx_hide();
             let next = self
                 .keyboard_backend
                 .process_key_events(
@@ -777,6 +792,9 @@ impl KeyboardState {
                 };
             }
             let mut reqs = Vec::with_capacity(2);
+            if modifier_state != ModifierState::NoState {
+                self.suppress_fcitx_hide();
+            }
             if !pressed_event_sent {
                 // press event has been sent when it is not NoState/Shift/CapsLock
                 reqs.push(ProcessKeyEventRequest {

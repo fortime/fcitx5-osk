@@ -460,7 +460,9 @@ where
                         // keyboard is shown by a force show event
                         if !self.state.active_manual_mode() && !self.state.force_show() {
                             // Close keyboard only when setting isn't shown
-                            if !self.state.window_manager().is_setting_shown() {
+                            if !self.state.window_manager().is_setting_shown()
+                                && !self.state.keyboard().fcitx_hide_suppressed()
+                            {
                                 task = task.chain(
                                     self.state
                                         .window_manager_mut()
