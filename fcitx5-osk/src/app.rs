@@ -444,8 +444,11 @@ where
             Message::Fcitx5VirtualkeyboardImPanelEvent(event) => {
                 match event {
                     Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard => {
+                        // A show while the keyboard is already open cancels a pending Fcitx
+                        // hide. Ignore Fcitx Show only blocks a show that would open it.
+                        let opened = self.state.window_manager().is_keyboard_opened();
                         if !self.state.active_manual_mode()
-                            && !self.state.config().ignore_fcitx_show()
+                            && (opened || !self.state.config().ignore_fcitx_show())
                         {
                             task = task.chain(self.state.window_manager_mut().open_keyboard());
                         }

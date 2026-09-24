@@ -121,8 +121,10 @@ pub struct Config {
     #[serde(default)]
     manual_mode: bool,
 
-    /// Ignore `ShowVirtualKeyboard` call from fcitx5, fcitx5 will call the show method no matter
-    /// the `FocusIn` event is triggered by a touch event.
+    /// Ignore `ShowVirtualKeyboard` from fcitx5 while the keyboard is closed.
+    /// Fcitx sends show on every focus, including a mouse click. A show that
+    /// arrives while the keyboard is already open is still honored, so it can
+    /// cancel the hide Fcitx sends after a key.
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default)]
     ignore_fcitx_show: bool,
