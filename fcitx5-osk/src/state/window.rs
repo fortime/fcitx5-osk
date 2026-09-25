@@ -436,6 +436,10 @@ where
         self.layout.size()
     }
 
+    pub fn is_keyboard_opened(&self) -> bool {
+        self.keyboard_window_state.id().is_some()
+    }
+
     pub fn unit(&self) -> KLength {
         self.layout.unit()
     }
