@@ -318,8 +318,6 @@ pub trait StateExtractor {
 
     fn screen_size(&self) -> Size;
 
-    fn movable(&self, window_id: Id) -> bool;
-
     /// It is used to calculate a logical size which contains no fraction after transforming to a
     /// physical size
     #[allow(unused)]
@@ -383,10 +381,6 @@ where
 
     fn keyboard_window_size(&self) -> Size<KLength> {
         self.window_manager.keyboard_window_size()
-    }
-
-    fn movable(&self, window_id: Id) -> bool {
-        self.window_manager.movable(window_id)
     }
 
     fn scale_factor(&self) -> f32 {

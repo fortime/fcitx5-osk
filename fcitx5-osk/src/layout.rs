@@ -37,19 +37,17 @@ use std::{
 
 use crate::{
     app::{KeyboardNotification, Message},
-    config::{IndicatorDisplay, QuickActionBarState},
+    config::{IndicatorDisplay, Placement, QuickActionBarState},
     dbus::server::ImPanelEvent,
     font,
     state::{
         BoolDesc, CloseOpSource, DynamicEnumDesc, EnumDesc, Field, FieldType, ImEvent,
         KeyboardEvent, LayoutEvent, MultiSelectionDesc, OwnedEnumDesc, RangeDesc, StateExtractor,
-        StepDesc, StoreEvent, TextDesc, UpdateConfigEvent, ValueAndDescription, WindowEvent,
-        WindowManagerEvent,
+        StepDesc, StoreEvent, TextDesc, UpdateConfigEvent, ValueAndDescription, WindowManagerEvent,
     },
     store::IdAndConfigPath,
     widget::{
-        self, AdvancedMovableList, ButtonDummyCb, ExtButton, ExtPickList as _, Movable,
-        MovableList, Toggle, ToggleCondition,
+        self, AdvancedMovableList, ButtonDummyCb, ExtButton, ExtPickList as _, Movable, MovableList,
     },
     window::WindowManagerMode,
 };
@@ -787,28 +785,20 @@ impl ToolbarLayout {
             ));
         }
 
-        // padding
+        // padding, it is a drag handle in float mode, there is nothing else to press here
         let window_id = params.window_id;
-        let movable = state.movable(window_id);
-        row = row.push(
-            Toggle::new(
-                Movable::new(
-                    Column::new()
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .push(Text::new(" ")),
-                    move |delta| {
-                        state
-                            .new_position_message(window_id, delta)
-                            .unwrap_or(Message::Nothing)
-                    },
-                    movable,
-                )
-                .on_move_end(WindowEvent::SetMovable(window_id, false).into()),
-                ToggleCondition::LongPress(Duration::from_millis(1000)),
-            )
-            .on_toggle(WindowEvent::SetMovable(window_id, !movable).into()),
-        );
+        row = row.push(Movable::new(
+            Column::new()
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .push(Text::new(" ")),
+            move |delta| {
+                state
+                    .new_position_message(window_id, delta)
+                    .unwrap_or(Message::Nothing)
+            },
+            state.placement() == Placement::Float,
+        ));
 
         row = row.push(
             Row::new()
