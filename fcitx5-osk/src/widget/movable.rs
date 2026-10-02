@@ -2,10 +2,12 @@
 
 use std::{
     collections::HashSet,
+    env,
     fmt::{Debug, Formatter, Result as FmtResult},
     marker::PhantomData,
     rc::Rc,
     slice,
+    sync::OnceLock,
     time::{Duration, Instant},
 };
 
@@ -60,12 +62,46 @@ use crate::{
     },
 };
 
+/// Minimal interval between two move messages when the compositor rebases touch coordinates on
+/// the moved surface, the compositor needs time to apply the previous margin.
+const MOVE_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Minimal interval between two move messages when touch coordinates stay relative to the surface
+/// position at touch down, there is no feedback loop, so one move per frame is enough.
+const STALE_TOUCH_MOVE_INTERVAL: Duration = Duration::from_millis(16);
+
+/// Smithay based compositors (e.g. niri) keep reporting touch motion relative to where the
+/// surface was when the finger went down, even after the surface has been moved.
+fn touch_location_is_stale() -> bool {
+    static STALE: OnceLock<bool> = OnceLock::new();
+    *STALE.get_or_init(|| {
+        env::var("XDG_CURRENT_DESKTOP")
+            .map(|desktops| {
+                desktops
+                    .split(':')
+                    .any(|desktop| desktop.eq_ignore_ascii_case("niri"))
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// Touchscreens may drop a contact for a moment in the middle of a drag, a new touch within this
+/// time near the grab point continues the drag instead of pressing what is under the finger.
+const TOUCH_RESUME_TIMEOUT: Duration = Duration::from_millis(150);
+
+/// How far from the grab point a resuming touch may land.
+const TOUCH_RESUME_DISTANCE: f32 = 80.;
+
 /// Local state of the [`Movable`].
 #[derive(Default)]
 struct MovableState {
     prev_pointer: Option<(Option<TouchFinger>, Point)>,
     pointer: Option<(Option<TouchFinger>, Point)>,
     last: Option<Instant>,
+    /// The sum of deltas published since the pointer was pressed.
+    published: Vector,
+    /// When and where (the grab point) a touch drag was lifted, it may be resumed.
+    lifted: Option<(Instant, Point)>,
 }
 
 /// A widget works like MouseArea, Emit messages on mouse enter/leave events and finger move event.
@@ -224,8 +260,18 @@ where
                 return;
             };
             let state: &mut MovableState = tree.state.downcast_mut();
+            let now = Instant::now();
+            if state
+                .lifted
+                .take_if(|(lifted_at, _)| now.duration_since(*lifted_at) > TOUCH_RESUME_TIMEOUT)
+                .is_some()
+                && let Some(on_move_end) = self.on_move_end.clone()
+            {
+                shell.publish(on_move_end);
+            }
             if state.pointer.is_none() {
                 state.pointer = state.prev_pointer.take();
+                state.published = Vector::ZERO;
             } else {
                 state.prev_pointer.take();
             }
@@ -233,8 +279,29 @@ where
                 if state.pointer.is_some() {
                     return;
                 }
+                if let Some((_, grab)) = state.lifted.take() {
+                    if let Some(cur_position) = cur_position
+                        .filter(|p| p.distance(grab) <= TOUCH_RESUME_DISTANCE)
+                        .filter(|_| cur_pointer.is_some())
+                    {
+                        tracing::debug!(
+                            "drag: resumed at {:?}, grabbed at {:?}",
+                            cur_position,
+                            grab
+                        );
+                        state.pointer = Some((cur_pointer, cur_position));
+                        state.published = Vector::ZERO;
+                        state.last = None;
+                        shell.capture_event();
+                        return;
+                    }
+                    if let Some(on_move_end) = self.on_move_end.clone() {
+                        shell.publish(on_move_end);
+                    }
+                }
                 if let Some(cur_position) = cur_position.filter(|p| layout.bounds().contains(*p)) {
                     state.pointer = Some((cur_pointer, cur_position));
+                    state.published = Vector::ZERO;
                     if let Some(on_move_start) = self.on_move_start.clone() {
                         state.last = None;
                         shell.publish(on_move_start);
@@ -251,24 +318,48 @@ where
                 }) {
                     // update delta
                     if let Some(cur_position) = cur_position {
-                        let now = Instant::now();
+                        let stale = cur_pointer.is_some() && touch_location_is_stale();
+                        let interval = if stale {
+                            STALE_TOUCH_MOVE_INTERVAL
+                        } else {
+                            MOVE_INTERVAL
+                        };
                         // avoid jitter
                         state
                             .last
-                            .take_if(|last| now.duration_since(*last) > Duration::from_millis(50));
+                            .take_if(|last| now.duration_since(*last) >= interval);
                         if state.last.is_none() {
-                            shell.publish((self.on_move)(cur_position - *position));
+                            let total = cur_position - *position;
+                            // With stale touch locations, `total` is the whole finger travel
+                            // since press, only the part not yet applied is moved.
+                            let delta = if stale {
+                                total - state.published
+                            } else {
+                                total
+                            };
+                            tracing::trace!(
+                                "drag: pressed at {:?}, now at {:?}, stale touch: {}, delta {:?}",
+                                position,
+                                cur_position,
+                                stale,
+                                delta
+                            );
+                            state.published += delta;
+                            shell.publish((self.on_move)(delta));
                             state.last = Some(now);
                         }
                     }
                     shell.capture_event();
                 }
-            } else if let Some((_, _)) = state
+            } else if let Some((pointer, grab)) = state
                 .pointer
                 .take_if(|(pointer, _)| *pointer == cur_pointer)
             {
-                // on_move_end
-                if let Some(on_move_end) = self.on_move_end.clone() {
+                if pointer.is_some() {
+                    // on_move_end is delayed, the touch may be resumed
+                    tracing::debug!("drag: finger lifted, grabbed at {:?}", grab);
+                    state.lifted = Some((now, grab));
+                } else if let Some(on_move_end) = self.on_move_end.clone() {
                     shell.publish(on_move_end);
                 }
                 shell.capture_event();
