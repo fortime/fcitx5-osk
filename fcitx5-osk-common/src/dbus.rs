@@ -77,7 +77,7 @@ pub mod client {
         fn reopen_if_opened(&self) -> ZbusResult<()>;
 
         #[tracing::instrument(level = "debug", skip(self), err, ret)]
-        fn shutdown(&self) -> ZbusResult<()>;
+        fn force_shutdown(&self) -> ZbusResult<()>;
     }
 
     #[zbus::proxy(

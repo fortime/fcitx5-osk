@@ -9,7 +9,7 @@ use anyhow::{Context as _, Result};
 use app::Message;
 use clap::{Parser, Subcommand};
 use config::{Config, ConfigManager};
-use fcitx5_osk_common::dbus::client::Fcitx5OskControllerServiceProxy;
+use fcitx5_osk_common::{dbus::client::Fcitx5OskControllerServiceProxy, signal::ShutdownKind};
 use iced::Task;
 use window::{wayland, x11};
 use zbus::Connection;
@@ -180,7 +180,7 @@ fn run(args: Args) -> Result<()> {
                     keyboard_args.modifier_workaround,
                     shutdown_flag.clone(),
                 );
-                // make sure shutdown
+                // make sure to shutdown
                 shutdown_flag.shutdown();
                 res
             }
@@ -188,6 +188,14 @@ fn run(args: Args) -> Result<()> {
 
         if !handle.is_finished() {
             shutdown_flag.wait_for_shutdown_blocking();
+        }
+
+        if shutdown_flag.get() == ShutdownKind::FORCE {
+            // If it is shutdown by kwin, the eventloop of fcitx5_osk might be blocked by kwin,
+            // because kwin is waiting for killing the input method and doesn't handle those
+            // wayland requests. Here, we use a force shutdown to avoid deadlock.
+            tracing::warn!("Force shutdown");
+            process::exit(0);
         }
 
         let mut count = 0;
