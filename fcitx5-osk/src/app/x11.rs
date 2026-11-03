@@ -112,7 +112,7 @@ impl X11Keyboard {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
-        if self.shutdown_flag.get() {
+        if self.shutdown_flag.get().is_shutting_down() {
             self.output_context.close();
         }
 

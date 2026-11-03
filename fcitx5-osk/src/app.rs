@@ -377,7 +377,7 @@ where
     }
 
     pub fn update(&mut self, message: Message) -> Task<WM::Message> {
-        if self.shutdown_flag.get() {
+        if self.shutdown_flag.get().is_shutting_down() {
             tracing::warn!("message[{:?}] is ignored after shutdown", message);
             if !self.shutdown_sent {
                 self.shutdown_sent = true;
@@ -613,7 +613,7 @@ async fn detect_theme(
 
     let mut ctx = None;
 
-    'outer: while !shutdown_flag.get() {
+    'outer: while !shutdown_flag.get().is_shutting_down() {
         'inner: {
             if !detect_theme_enabled.load(Ordering::SeqCst) {
                 break 'inner;
@@ -685,10 +685,6 @@ async fn start_dbus_services(
         // trigger shutdown check
         if tx.unbounded_send(Message::Nothing).is_err() {
             tracing::error!("failed to send message, shutdown may be stopped");
-        }
-        tracing::info!("close the connection of dbus services");
-        if let Err(e) = conn.close().await {
-            tracing::warn!("failed to close the connection of dbus services: {:?}", e);
         }
     });
     Ok(fcitx5_osk_service_handle)

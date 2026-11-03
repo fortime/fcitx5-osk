@@ -93,7 +93,7 @@ async fn watch_fcitx5_osk(
     loop {
         match owner {
             None => {
-                if started || shutdown_flag.get() {
+                if started || shutdown_flag.get().is_shutting_down() {
                     // exited and using WAYLAND_SOCKET, socket can't be reused, so launcher should
                     // be restarted.
                     break;
@@ -167,7 +167,7 @@ async fn watch_fcitx5(
                 if started {
                     // fcitx5 exits
                     return Ok(());
-                } else if !shutdown_flag.get() {
+                } else if !shutdown_flag.get().is_shutting_down() {
                     // Start service
                     let res = dbus_proxy
                         .start_service_by_name(service_name.clone(), 0)
@@ -573,7 +573,7 @@ async fn run(args: &Args) -> Result<()> {
     let mut shutdown_res = None;
     if !fcitx5_osk_exited.load(Ordering::Relaxed) {
         // shutdown fcitx5-osk
-        shutdown_res = Some(services.controller().shutdown().await);
+        shutdown_res = Some(services.controller().force_shutdown().await);
         // wait fcitx5-osk to shutdown
         let _ = fcitx5_osk_handler.await;
     }
@@ -650,7 +650,7 @@ async fn run_in_sddm(args: &Args) -> Result<()> {
     let mut shutdown_res = None;
     if !fcitx5_osk_exited.load(Ordering::Relaxed) {
         // shutdown fcitx5-osk
-        shutdown_res = Some(services.controller().shutdown().await);
+        shutdown_res = Some(services.controller().force_shutdown().await);
         // wait fcitx5-osk to shutdown
         let _ = fcitx5_osk_handler.await;
     }

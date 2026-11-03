@@ -553,6 +553,12 @@ impl Fcitx5OskService {
         self.shutdown_flag.shutdown();
         Ok(())
     }
+
+    #[tracing::instrument(level = "debug", skip(self), err, ret)]
+    async fn force_shutdown(&mut self) -> Result<(), Error> {
+        self.shutdown_flag.force_shutdown();
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]
