@@ -3,7 +3,7 @@ use std::{
     pin::Pin,
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicU8, Ordering},
     },
     task::{Context, Poll},
 };
@@ -52,8 +52,41 @@ pub async fn try_default_signals() -> Result<Signals> {
     .await
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ShutdownKind {
+    NOT = 0,
+    NORMAL = 1,
+    /// Only make sense when it is running under wayland
+    FORCE = 2,
+
+    UNKNOWN = 255,
+}
+
+impl ShutdownKind {
+    pub fn is_shutting_down(&self) -> bool {
+        match self {
+            ShutdownKind::NOT => false,
+            ShutdownKind::NORMAL => true,
+            ShutdownKind::FORCE => true,
+            ShutdownKind::UNKNOWN => false,
+        }
+    }
+}
+
+impl From<u8> for ShutdownKind {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => ShutdownKind::NOT,
+            1 => ShutdownKind::NORMAL,
+            2 => ShutdownKind::FORCE,
+            _ => ShutdownKind::UNKNOWN,
+        }
+    }
+}
+
 pub struct ShutdownFlagState {
-    flag: AtomicBool,
+    flag: AtomicU8,
     cvar: (Mutex<bool>, Condvar),
     tx: Sender<bool>,
 }
@@ -69,7 +102,7 @@ impl ShutdownFlag {
         let (tx, rx) = watch::channel(false);
         Self {
             state: Arc::new(ShutdownFlagState {
-                flag: AtomicBool::new(false),
+                flag: AtomicU8::new(ShutdownKind::NOT as u8),
                 cvar: (Mutex::new(false), Condvar::new()),
                 tx,
             }),
@@ -77,23 +110,42 @@ impl ShutdownFlag {
         }
     }
 
-    pub fn get(&self) -> bool {
-        self.state.flag.load(Ordering::Relaxed)
+    pub fn get(&self) -> ShutdownKind {
+        self.state.flag.load(Ordering::Relaxed).into()
+    }
+
+    fn shutdown_with_kind(&self, kind: ShutdownKind) {
+        if self
+            .state
+            .flag
+            .compare_exchange(
+                ShutdownKind::NOT as u8,
+                kind as u8,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            if self.state.tx.send(true).is_err() {
+                tracing::error!("failed to send shutdown flag");
+            }
+            let mut guard = self
+                .state
+                .cvar
+                .0
+                .lock()
+                .expect("shutdown flag lock is poisoned");
+            *guard = true;
+            self.state.cvar.1.notify_all();
+        }
     }
 
     pub fn shutdown(&self) {
-        self.state.flag.store(true, Ordering::Relaxed);
-        if self.state.tx.send(true).is_err() {
-            tracing::error!("failed to send shutdown flag");
-        }
-        let mut guard = self
-            .state
-            .cvar
-            .0
-            .lock()
-            .expect("shutdown flag lock is poisoned");
-        *guard = true;
-        self.state.cvar.1.notify_all();
+        self.shutdown_with_kind(ShutdownKind::NORMAL);
+    }
+
+    pub fn force_shutdown(&self) {
+        self.shutdown_with_kind(ShutdownKind::FORCE);
     }
 
     pub async fn wait_for_shutdown(&mut self) {
