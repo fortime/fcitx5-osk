@@ -379,17 +379,32 @@ async fn dbus_eventloop(mut rx: UnboundedReceiver<Message>) {
                 }
             }
         }
-        if need_restart
-            && !kwin_input_method.is_empty()
-            && let Err(e) = kwin::restart_input_method(
+        if need_restart && !kwin_input_method.is_empty() {
+            // shutdown the keyboard first to avoid deadlock
+            match Fcitx5OskServices::new().await {
+                Ok(services) => {
+                    if let Err(e) = services.controller().force_shutdown().await {
+                        tracing::error!("unable to shutdown the keyboard: {e:?}");
+                    } else {
+                        tracing::debug!("shutting down the keyboard");
+                        // sleep a while
+                        time::sleep(Duration::from_millis(200)).await;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("unable to create Fcitx5OskServices: {e:?}");
+                }
+            };
+            if let Err(e) = kwin::restart_input_method(
                 kreadconfig.as_ref(),
                 kwriteconfig.as_ref(),
                 Some(&kwin_input_method),
                 None,
             )
             .await
-        {
-            tracing::error!("restart input method error: {e:#?}");
+            {
+                tracing::error!("restart input method error: {e:#?}");
+            }
         }
     }
 }
