@@ -120,16 +120,18 @@ impl Drop for InputMethodContext {
 
 mod v1 {
     use std::{
-        future::Future,
-        sync::{
-            Arc, Mutex, MutexGuard,
-            atomic::{AtomicU32, Ordering},
-        },
+        future::{self, Future},
+        sync::{Arc, Mutex, MutexGuard},
+        time::{Duration, Instant},
     };
 
     use anyhow::{Context, Result};
-    use iced::futures::channel::mpsc::UnboundedSender;
-    use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, event_created_child};
+    use iced::futures::channel::mpsc::{self, UnboundedSender};
+    use tokio::time;
+    use wayland_client::{
+        Connection, Dispatch, Proxy, QueueHandle, WEnum, event_created_child,
+        protocol::wl_keyboard::{Event as WlKeyboardEvent, KeyState, WlKeyboard},
+    };
     use wayland_protocols::wp::input_method::zv1::client::{
         zwp_input_method_context_v1::ZwpInputMethodContextV1,
         zwp_input_method_v1::{self, Event as ZwpInputMethodV1Event, ZwpInputMethodV1},
@@ -157,16 +159,65 @@ mod v1 {
         const IM_NAME: &str = "wayland-im-v1";
     }
 
+    #[derive(Debug)]
+    struct InputMethodContext {
+        zwp_input_method_context: ZwpInputMethodContextV1,
+        serial: u32,
+        mods_depressed: u32,
+        mods_latched: u32,
+        mods_locked: u32,
+        group: u32,
+    }
+
+    impl InputMethodContext {
+        fn next_serial(&mut self) -> u32 {
+            let serial = self.serial;
+            self.serial = self.serial.wrapping_add(1);
+            serial
+        }
+    }
+
+    /// Among a sequence of Wayland messages, there are `Activate` and `Deactivate` events for the
+    /// Wayland input method context. If we grab the keyboard when `activate` is received and
+    /// release it when `deactivate` is received, a Wayland protocol error occurs, reporting that
+    /// the keyboard object does not exist.
+    ///
+    /// This is because the context was already destroyed when the keyboard is grabbed. And the
+    /// keyboard won't be created at the server side. I think this is a limitation of
+    /// input-method-v1.
+    ///
+    /// Here is a not perfect workaround. It might cause memory leak. We will only release a
+    /// keyboard which lasts longer than 100ms.
+    #[derive(Debug)]
+    struct Keyboard {
+        kb: WlKeyboard,
+        created_at: Instant,
+    }
+
+    impl Keyboard {
+        fn new(kb: WlKeyboard) -> Self {
+            Self {
+                kb,
+                created_at: Instant::now(),
+            }
+        }
+
+        fn release(&mut self) {
+            if self.created_at.elapsed() > Duration::from_millis(100) {
+                self.kb.release();
+            }
+        }
+    }
+
     /// WaylandInputMethodV1Client implements IFcitx5VirtualKeyboardBackendService only, so it
     /// doesn't need to be `Clone`.
     #[derive(Debug)]
     pub struct WaylandInputMethodV1Client {
-        serial: AtomicU32,
-        input_method_context: Arc<Mutex<Option<ZwpInputMethodContextV1>>>,
+        input_method_context: Arc<Mutex<Option<InputMethodContext>>>,
     }
 
     impl WaylandInputMethodV1Client {
-        fn input_method_context(&self) -> MutexGuard<'_, Option<ZwpInputMethodContextV1>> {
+        fn input_method_context(&self) -> MutexGuard<'_, Option<InputMethodContext>> {
             self.input_method_context
                 .lock()
                 .expect("wayland input method context v1 is poisoned")
@@ -226,8 +277,8 @@ mod v1 {
             is_release: bool,
             time: u32,
         ) -> ZbusResult<()> {
-            let guard = self.input_method_context();
-            let Some(input_method_context) = guard.as_ref() else {
+            let mut guard = self.input_method_context();
+            let Some(input_method_context) = guard.as_mut() else {
                 return Err(ZbusError::Failure(
                     "there is no wayland input method context v1 ".to_string(),
                 ));
@@ -242,20 +293,46 @@ mod v1 {
             } else {
                 None
             };
-            let serial = self.serial.fetch_add(1, Ordering::Relaxed);
+
+            // Since KWin 6.8, we can only use `key` and `modifiers` after we grab the keyboard.
+            let serial = input_method_context.next_serial();
             if let Some(modifier_mask) = modifier_mask {
-                // this is a simple implementation, no key modifier combo
-                if is_release {
-                    input_method_context.modifiers(serial, 0, 0, 0, 0);
-                } else {
-                    input_method_context.modifiers(serial, modifier_mask, 0, 0, 0);
+                // Shift is pressed
+                if input_method_context.mods_depressed & modifier_mask == 0 {
+                    if is_release {
+                        input_method_context.zwp_input_method_context.modifiers(
+                            serial,
+                            input_method_context.mods_depressed,
+                            input_method_context.mods_latched,
+                            input_method_context.mods_locked,
+                            input_method_context.group,
+                        );
+                    } else {
+                        input_method_context.zwp_input_method_context.modifiers(
+                            serial,
+                            input_method_context.mods_depressed | modifier_mask,
+                            input_method_context.mods_latched,
+                            input_method_context.mods_locked,
+                            input_method_context.group,
+                        );
+                    }
                 }
             } else {
                 let key_state = if is_release { 0 } else { 1 };
                 if keycode != 0 {
-                    input_method_context.key(serial, time, keycode - 8, key_state);
+                    input_method_context.zwp_input_method_context.key(
+                        serial,
+                        time,
+                        keycode - 8,
+                        key_state,
+                    );
                 } else {
-                    input_method_context.keysym(serial, time, keyval, key_state, state);
+                    // After KWin 6.8, it finally can handle maybe all keysyms. But actually the
+                    // state won't be used, and we can't use other modifier keys to generate key
+                    // combo.
+                    input_method_context
+                        .zwp_input_method_context
+                        .keysym(serial, time, keyval, key_state, state);
                 }
             }
             Ok(())
@@ -283,17 +360,127 @@ mod v1 {
         }
     }
 
+    struct RepeatKey {
+        time: u32,
+        key: u32,
+        next: Instant,
+        interval: Duration,
+        pressed: bool,
+    }
+
     struct WaylandInputMethodV1Server {
-        #[allow(unused)]
         tx: UnboundedSender<WaylandMessage>,
-        input_method_context: Arc<Mutex<Option<ZwpInputMethodContextV1>>>,
+        input_method_context: Arc<Mutex<Option<InputMethodContext>>>,
+        // time, key, deplay, rate, repeat
+        repeat_tx: UnboundedSender<Option<RepeatKey>>,
+        /// grab the keyboard so that we can use `input_method_context.key` and
+        /// `input_method_context.modifiers`
+        keyboard: Option<Keyboard>,
+        /// the rate of repeating keys in characters per second
+        keyboard_repeat_rate: u32,
+        /// delay in milliseconds since key down until repeating starts
+        keyboard_repeat_delay: u32,
     }
 
     impl WaylandInputMethodV1Server {
-        fn input_method_context(&self) -> MutexGuard<'_, Option<ZwpInputMethodContextV1>> {
+        fn new(
+            tx: UnboundedSender<WaylandMessage>,
+            input_method_context: Arc<Mutex<Option<InputMethodContext>>>,
+        ) -> Self {
+            let (repeat_tx, mut repeat_rx) = mpsc::unbounded::<Option<RepeatKey>>();
+
+            tokio::spawn({
+                let input_method_context = input_method_context.clone();
+                async move {
+                    let mut cur_repeat_key: Option<RepeatKey> = None;
+                    let mut next_repeat_time = None;
+                    loop {
+                        tokio::select! {
+                            () = sleep_until(next_repeat_time) => {
+                                if let Some(repeat_key) = &mut cur_repeat_key {
+                                    let mut guard = input_method_context
+                                        .lock()
+                                        .expect("input method context is poisoned");
+                                    let Some(input_method_context) = guard.as_mut() else {
+                                        tracing::error!("No input context, skip repeating key[{}]", repeat_key.key);
+                                        next_repeat_time = None;
+                                        continue;
+                                    };
+                                    let serial = input_method_context.next_serial();
+                                    input_method_context.zwp_input_method_context.key(
+                                        serial,
+                                        repeat_key.time,
+                                        repeat_key.key,
+                                        KeyState::Pressed as u32,
+                                    );
+                                    repeat_key.next += repeat_key.interval;
+                                    repeat_key.time += repeat_key.interval.as_millis() as u32;
+                                    next_repeat_time = Some(repeat_key.next);
+                                }
+                            },
+                            repeat_key = repeat_rx.recv() => match repeat_key {
+                                Ok(repeat_key) => match repeat_key {
+                                    Some(repeat_key) => {
+                                        if repeat_key.pressed {
+                                            tracing::debug!(
+                                                "repeat key, time[{:?}], key[{}], next[{:?}], interval[{:?}]",
+                                                repeat_key.time,
+                                                repeat_key.key,
+                                                repeat_key.next,
+                                                repeat_key.interval,
+                                            );
+                                            next_repeat_time = Some(repeat_key.next);
+                                            cur_repeat_key = Some(repeat_key);
+                                        } else {
+                                            cur_repeat_key.take_if(|c| c.key == repeat_key.key);
+                                            if cur_repeat_key.is_none() {
+                                                next_repeat_time = None;
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        cur_repeat_key.take();
+                                        next_repeat_time = None;
+                                    }
+                                },
+                                Err(_) => {
+                                    tracing::info!("repeat_tx is dropped, quit background");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            Self {
+                tx,
+                input_method_context,
+                repeat_tx,
+                keyboard: None,
+                keyboard_repeat_rate: 0,
+                keyboard_repeat_delay: 0,
+            }
+        }
+
+        fn input_method_context(&self) -> MutexGuard<'_, Option<InputMethodContext>> {
             self.input_method_context
                 .lock()
-                .expect("wayland input method context v1 is poisoned")
+                .expect("input method context is poisoned")
+        }
+
+        fn input_method_context_and_keyboard(
+            &mut self,
+        ) -> (
+            MutexGuard<'_, Option<InputMethodContext>>,
+            &'_ mut Option<Keyboard>,
+        ) {
+            (
+                self.input_method_context
+                    .lock()
+                    .expect("input method context is poisoned"),
+                &mut self.keyboard,
+            )
         }
     }
 
@@ -301,7 +488,7 @@ mod v1 {
         fn drop(&mut self) {
             if let Some(context) = self.input_method_context().take() {
                 tracing::debug!("destroy zwp_input_method_context_v1 during drop");
-                context.destroy();
+                context.zwp_input_method_context.destroy();
             }
         }
     }
@@ -325,27 +512,64 @@ mod v1 {
             event: <ZwpInputMethodV1 as Proxy>::Event,
             _data: &(),
             _conn: &Connection,
-            _qhandle: &QueueHandle<Self>,
+            qhandle: &QueueHandle<Self>,
         ) {
             let res = match event {
                 ZwpInputMethodV1Event::Activate { id } => {
-                    tracing::debug!("wayland input method v1 activate");
-                    let mut guard = state.input_method_context();
-                    let old = guard.replace(id);
-                    if let Some(old) = old {
-                        old.destroy();
+                    tracing::debug!(
+                        "wayland input method context[{:?}] activate",
+                        id.id().protocol_id()
+                    );
+                    let (mut guard, keyboard) = state.input_method_context_and_keyboard();
+
+                    // release the old keyboard then grab a new one
+                    if let Some(mut keyboard) = keyboard.take() {
+                        keyboard.release();
                     }
+                    *keyboard = Some(Keyboard::new(id.grab_keyboard(qhandle, ())));
+
+                    let old = guard.replace(InputMethodContext {
+                        zwp_input_method_context: id,
+                        serial: 0,
+                        mods_depressed: 0,
+                        mods_latched: 0,
+                        mods_locked: 0,
+                        group: 0,
+                    });
+                    if let Some(old) = old {
+                        old.zwp_input_method_context.destroy();
+                    }
+                    drop(guard);
+
+                    // reset repeat info
+                    state.keyboard_repeat_rate = 0;
+                    state.keyboard_repeat_delay = 0;
+                    let _ = state.repeat_tx.unbounded_send(None);
                     state.tx.unbounded_send(WaylandMessage::from(Message::from(
                         ImPanelEvent::Show(true),
                     )))
                 }
                 ZwpInputMethodV1Event::Deactivate { context } => {
-                    tracing::debug!("wayland input method v1 deactivate");
+                    tracing::debug!(
+                        "wayland input method context[{:?}] deactivate",
+                        context.id().protocol_id()
+                    );
                     let mut guard = state.input_method_context();
-                    if guard.as_ref() == Some(&context) {
+                    if guard
+                        .as_ref()
+                        .filter(|imc| imc.zwp_input_method_context == context)
+                        .is_some()
+                    {
+                        tracing::debug!("remove wayland input method context");
                         guard.take();
+                        drop(guard);
+                        if let Some(mut keyboard) = state.keyboard.take() {
+                            keyboard.release();
+                        }
                     }
                     context.destroy();
+                    tracing::debug!("wayland input method context is destroyed");
+                    let _ = state.repeat_tx.unbounded_send(None);
                     // Hide the window. In Kwin, if the virtual keyboard button is clicked in
                     // kscreenlock, a activate signal will be sent, the window will show again.
                     state
@@ -362,6 +586,118 @@ mod v1 {
         event_created_child!(WaylandInputMethodV1Server, ZwpInputMethodV1, [
             zwp_input_method_v1::EVT_ACTIVATE_OPCODE => (ZwpInputMethodContextV1, ()),
         ]);
+    }
+
+    impl Dispatch<WlKeyboard, ()> for WaylandInputMethodV1Server {
+        fn event(
+            state: &mut Self,
+            _proxy: &WlKeyboard,
+            event: <WlKeyboard as Proxy>::Event,
+            _data: &(),
+            _conn: &Connection,
+            _qhandle: &QueueHandle<Self>,
+        ) {
+            match event {
+                WlKeyboardEvent::Key {
+                    serial: _serial,
+                    time,
+                    key,
+                    state: key_state,
+                } => {
+                    tracing::debug!("keyboard key event: {event:?}");
+                    let mut guard = state.input_method_context();
+                    let Some(input_method_context) = guard.as_mut() else {
+                        tracing::error!("No input context, skip event[{event:?}]");
+                        return;
+                    };
+                    let mut need_repeat = false;
+                    let key_state = match key_state {
+                        WEnum::Value(KeyState::Released) => {
+                            need_repeat = state.keyboard_repeat_rate > 0;
+                            KeyState::Released
+                        }
+                        WEnum::Value(KeyState::Pressed) => KeyState::Pressed,
+                        WEnum::Value(KeyState::Repeated) => {
+                            // stop repeating
+                            let _ = state.repeat_tx.unbounded_send(None);
+                            KeyState::Pressed
+                        }
+                        _ => {
+                            tracing::error!("Invalid key state: {key_state:?}");
+                            return;
+                        }
+                    };
+                    let serial = input_method_context.next_serial();
+                    input_method_context.zwp_input_method_context.key(
+                        serial,
+                        time,
+                        key,
+                        key_state as u32,
+                    );
+                    if state.keyboard_repeat_rate > 0 {
+                        let _ = state.repeat_tx.unbounded_send(Some(RepeatKey {
+                            time: time + state.keyboard_repeat_delay,
+                            key,
+                            next: Instant::now()
+                                + Duration::from_millis(state.keyboard_repeat_delay as u64),
+                            interval: Duration::from_millis(
+                                (1000 / state.keyboard_repeat_rate as u64).min(1),
+                            ),
+                            pressed: need_repeat,
+                        }));
+                    }
+                }
+                WlKeyboardEvent::Modifiers {
+                    serial: _serial,
+                    mods_depressed,
+                    mods_latched,
+                    mods_locked,
+                    group,
+                } => {
+                    tracing::debug!("keyboard modifiers event: {event:?}");
+                    let mut guard = state.input_method_context();
+                    let Some(input_method_context) = guard.as_mut() else {
+                        tracing::error!("No input context, skip event[{event:?}]");
+                        return;
+                    };
+                    let serial = input_method_context.next_serial();
+                    input_method_context.mods_depressed = mods_depressed;
+                    input_method_context.mods_latched = mods_latched;
+                    input_method_context.mods_locked = mods_locked;
+                    input_method_context.group = group;
+                    input_method_context.zwp_input_method_context.modifiers(
+                        serial,
+                        mods_depressed,
+                        mods_latched,
+                        mods_locked,
+                        group,
+                    );
+                }
+                WlKeyboardEvent::RepeatInfo { rate, delay } => {
+                    tracing::info!("Update keyboard repeat rate[{rate}], repeat delay[{delay}]");
+                    if rate >= 0 && delay >= 0 {
+                        let changed = state.keyboard_repeat_rate != rate as u32
+                            || state.keyboard_repeat_delay != delay as u32;
+                        state.keyboard_repeat_rate = rate as u32;
+                        state.keyboard_repeat_delay = delay as u32;
+                        if changed {
+                            let _ = state.repeat_tx.unbounded_send(None);
+                        }
+                    }
+                }
+                _ => {
+                    tracing::info!("Ignore wl_keyboard event: {event:?}");
+                }
+            }
+        }
+    }
+
+    async fn sleep_until(t: Option<Instant>) {
+        if let Some(t) = t {
+            time::sleep(t.duration_since(Instant::now())).await;
+        } else {
+            future::pending().await
+        }
     }
 
     pub fn new(
@@ -384,18 +720,13 @@ mod v1 {
             .context("failed to bind ZwpInputMethodV1")?;
 
         let client = WaylandInputMethodV1Client {
-            serial: AtomicU32::new(0),
             input_method_context: input_method_context.clone(),
         };
-        let mut server = WaylandInputMethodV1Server {
-            tx,
-            input_method_context,
-        };
+        let mut server = WaylandInputMethodV1Server::new(tx, input_method_context);
         Ok((client, async move {
             // we should not use blocking_dispatch here. because layershellev uses blocking_dispatch, if we use blocking_dispatch it will freeze the eventloop of layershellev
             loop {
-                std::future::poll_fn(|cx| event_queue.poll_dispatch_pending(cx, &mut server))
-                    .await?;
+                future::poll_fn(|cx| event_queue.poll_dispatch_pending(cx, &mut server)).await?;
             }
         }))
     }
