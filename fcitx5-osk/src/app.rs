@@ -447,10 +447,14 @@ where
                         // A show while the keyboard is already open cancels a pending Fcitx
                         // hide. Ignore Fcitx Show only blocks a show that would open it.
                         let opened = self.state.window_manager().is_keyboard_opened();
-                        if !self.state.active_manual_mode()
-                            && (opened || !self.state.config().ignore_fcitx_show())
-                        {
+                        let manual_mode = self.state.active_manual_mode();
+                        let ignore_fcitx_show = self.state.config().ignore_fcitx_show();
+                        if !manual_mode && (opened || !ignore_fcitx_show) {
                             task = task.chain(self.state.window_manager_mut().open_keyboard());
+                        } else {
+                            tracing::debug!(
+                                "Ignore Fcitx5VirtualkeyboardImPanelEvent::ShowVirtualKeyboard: opened[{opened}], manual_mode[{manual_mode}], ignore_fcitx_show[{ignore_fcitx_show}]"
+                            );
                         }
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard => {
@@ -458,7 +462,9 @@ where
                         self.state.keyboard_mut().set_fcitx5_hidden();
                         // Ignore hide signal from fcitx5 if the keyboard's manual mode is on or the
                         // keyboard is shown by a force show event
-                        if !self.state.active_manual_mode() && !self.state.force_show() {
+                        let manual_mode = self.state.active_manual_mode();
+                        let force_show = self.state.force_show();
+                        if !manual_mode && !force_show {
                             // Close keyboard only when setting isn't shown
                             if !self.state.window_manager().is_setting_shown() {
                                 task = task.chain(
@@ -467,6 +473,10 @@ where
                                         .close_keyboard(CloseOpSource::Fcitx5),
                                 );
                             }
+                        } else {
+                            tracing::debug!(
+                                "Ignore Fcitx5VirtualkeyboardImPanelEvent::HideVirtualKeyboard: manual_mode[{manual_mode}], force_show[{force_show}]"
+                            );
                         }
                     }
                     Fcitx5VirtualkeyboardImPanelEvent::UpdateCandidateArea(state) => {
@@ -478,11 +488,16 @@ where
             Message::ImPanelEvent(event) => {
                 match event {
                     ImPanelEvent::Show(force) => {
-                        if force || !self.state.active_manual_mode() {
+                        let manual_mode = self.state.active_manual_mode();
+                        if force || !manual_mode {
                             if force {
                                 *self.state.force_show_mut() = true;
                             }
                             task = task.chain(self.state.window_manager_mut().open_keyboard());
+                        } else {
+                            tracing::debug!(
+                                "Ignore ImPanelEvent::Show({force}): manual_mode[{manual_mode}]"
+                            );
                         }
                     }
                     ImPanelEvent::Hide(force) => {
