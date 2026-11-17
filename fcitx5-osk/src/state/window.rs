@@ -305,6 +305,7 @@ pub enum WindowEvent {
     Closed(Id),
     Move(Id, Point),
     SetMovable(Id, bool),
+    EnableFcitx5VirtualKeyboard,
 }
 
 impl From<WindowEvent> for Message {
@@ -337,6 +338,7 @@ pub struct WindowManagerState<WM> {
     keyboard_backend: KeyboardBackend,
     wm: WM,
     hide_delay: Duration,
+    enable_fcitx5_virtual_keyboard_delay: Duration,
 }
 
 impl<WM> WindowManagerState<WM> {
@@ -366,6 +368,7 @@ impl<WM> WindowManagerState<WM> {
             keyboard_backend,
             wm,
             hide_delay: *config.hide_delay(),
+            enable_fcitx5_virtual_keyboard_delay: *config.enable_fcitx5_virtual_keyboard_delay(),
         }
     }
 
@@ -913,6 +916,12 @@ where
                         {
                             task = task.chain(t);
                         }
+                        task = task.chain(
+                            Task::future(time::sleep(self.enable_fcitx5_virtual_keyboard_delay))
+                                .map(move |_| {
+                                    Message::from(WindowEvent::EnableFcitx5VirtualKeyboard).into()
+                                }),
+                        );
                     }
                     WindowType::Indicator => {
                         self.indicator_window_state
@@ -1007,6 +1016,19 @@ where
                     window_state.set_movable(&self.wm, movable);
                 }
                 Message::from_nothing()
+            }
+            WindowEvent::EnableFcitx5VirtualKeyboard => {
+                let opened = self.keyboard_window_state.opened_id().is_some();
+                let no_inflight_close_reqs =
+                    self.keyboard_window_state.inflight_close_reqs.is_empty();
+                if opened && no_inflight_close_reqs {
+                    self.fcitx5_show().map_task()
+                } else {
+                    tracing::debug!(
+                        "Ignore WindowEvent::EnableFcitx5VirtualKeyboard: opened[{opened}], no_inflight_close_reqs[{no_inflight_close_reqs}]"
+                    );
+                    Message::from_nothing()
+                }
             }
         }
     }
