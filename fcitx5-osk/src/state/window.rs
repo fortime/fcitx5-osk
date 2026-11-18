@@ -894,9 +894,6 @@ where
                     WindowType::Keyboard => {
                         self.keyboard_window_state
                             .set_opened(&mut self.wm, portrait);
-                        if self.keyboard_window_state.inflight_close_reqs.is_empty() {
-                            task = task.chain(self.fcitx5_show().map_task());
-                        }
                         match self.indicator_display() {
                             IndicatorDisplay::Auto | IndicatorDisplay::AlwaysOff => {
                                 if self.indicator_window_state.id().is_some() {
@@ -956,7 +953,7 @@ where
                         window_state.close(&mut self.wm, source)
                     } else {
                         tracing::debug!(
-                            "Window[{}] close req uuid[{req_uuid}] not found match",
+                            "Window[{}] close req uuid[{req_uuid}] not found",
                             window_state.name
                         );
                         Message::from_nothing()
