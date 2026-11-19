@@ -93,7 +93,7 @@ impl Fcitx5VirtualkeyboardImPanelService {
     }
 }
 
-#[zbus::interface(name = "org.fcitx.Fcitx5.VirtualKeyboard1")]
+#[zbus::interface(name = "org.fcitx.Fcitx5.VirtualKeyboard1", spawn = false)]
 impl Fcitx5VirtualkeyboardImPanelService {
     const SERVICE_NAME: &'static str = "org.fcitx.Fcitx5.VirtualKeyboard";
     const OBJECT_PATH: &'static str = "/org/fcitx/virtualkeyboard/impanel";
