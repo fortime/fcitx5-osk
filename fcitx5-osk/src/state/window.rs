@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, rc::Rc, time::Duration};
+use std::{collections::HashSet, marker::PhantomData, rc::Rc, time::Duration};
 
 use iced::{
     Element, Font, Point, Size, Task,
@@ -6,6 +6,7 @@ use iced::{
     window::Id,
 };
 use tokio::time;
+use uuid::Uuid;
 
 use crate::{
     app::{self, MapTask, Message},
@@ -15,12 +16,6 @@ use crate::{
     widget::{Movable, Toggle, ToggleCondition},
     window::{SyncOutputResponse, WindowManager, WindowManagerMode, WindowSettings},
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct WindowStateSnapshot {
-    id: Id,
-    close_req_token: u16,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseOpSource {
@@ -59,7 +54,7 @@ struct WindowState<WM> {
     name: String,
     id: Option<Id>,
     state: InnerWindowState,
-    close_req_token: u16,
+    inflight_close_reqs: HashSet<Uuid>,
     positions: (Option<Point>, Option<Point>),
     movable: bool,
     phantom: PhantomData<WM>,
@@ -71,7 +66,7 @@ impl<WM> WindowState<WM> {
             name: name.to_string(),
             id: Default::default(),
             state: Default::default(),
-            close_req_token: Default::default(),
+            inflight_close_reqs: Default::default(),
             positions: Default::default(),
             movable: Default::default(),
             phantom: PhantomData,
@@ -82,23 +77,23 @@ impl<WM> WindowState<WM> {
         self.id
     }
 
-    fn snapshot(&self) -> Option<WindowStateSnapshot> {
-        self.id.map(|id| WindowStateSnapshot {
-            id,
-            close_req_token: self.close_req_token,
-        })
-    }
-
-    fn inc_close_req_token(&mut self) {
-        self.close_req_token = self.close_req_token.wrapping_add(1);
+    fn clear_inflight_close_reqs(&mut self) {
+        tracing::debug!("Clear inflight close reqs: {:?}", self.inflight_close_reqs,);
+        self.inflight_close_reqs.clear();
     }
 
     fn close_with_delay(&mut self, delay: Duration, source: CloseOpSource) -> Task<Message> {
-        if let Some(snapshot) = self.snapshot() {
-            tracing::debug!("Waiting to close window[{}]: {:?}", self.name, snapshot);
-            Task::future(time::sleep(delay)).map(move |_| {
-                WindowEvent::ClosingWindow(snapshot.id, Some(snapshot), source).into()
-            })
+        if let Some(id) = self.id {
+            let req_uuid = Uuid::new_v4();
+            tracing::debug!(
+                "Waiting to close window[{}/{id:?}], req_uuid[{req_uuid}]",
+                self.name
+            );
+            if !self.inflight_close_reqs.insert(req_uuid) {
+                tracing::warn!("Duplicated close req id: {req_uuid}");
+            }
+            Task::future(time::sleep(delay))
+                .map(move |_| WindowEvent::ClosingWindow(id, source, req_uuid).into())
         } else {
             tracing::debug!("Window[{}] is already closed", self.name);
             Message::nothing()
@@ -175,8 +170,8 @@ where
     ) -> Task<WM::Message> {
         if let Some(id) = self.id {
             tracing::warn!("Window[{}/{}] is already shown", self.name, id);
-            // disable all pending close requests.
-            self.inc_close_req_token();
+            // clear all inflight close requests
+            self.clear_inflight_close_reqs();
             WM::nothing()
         } else {
             if settings.placement() == Placement::Float {
@@ -199,29 +194,9 @@ where
                 tracing::debug!("Opening window[{}]: {:?}", self.name, id);
                 self.id = id;
                 self.state = InnerWindowState::Init;
-                self.close_req_token = 0;
+                self.clear_inflight_close_reqs();
             }
             task
-        }
-    }
-
-    fn close_checked(
-        &mut self,
-        wm: &mut WM,
-        last: WindowStateSnapshot,
-        source: CloseOpSource,
-    ) -> Task<WM::Message> {
-        let snapshot = self.snapshot();
-        if snapshot == Some(last) {
-            self.close(wm, source)
-        } else {
-            tracing::debug!(
-                "Window[{}] state snapshot doesn't match, last: {:?}, current: {:?}",
-                self.name,
-                snapshot,
-                last
-            );
-            WM::nothing()
         }
     }
 
@@ -326,10 +301,11 @@ where
 #[derive(Clone, Debug)]
 pub enum WindowEvent {
     Opened(Id, Size),
-    ClosingWindow(Id, Option<WindowStateSnapshot>, CloseOpSource),
+    ClosingWindow(Id, CloseOpSource, Uuid),
     Closed(Id),
     Move(Id, Point),
     SetMovable(Id, bool),
+    EnableFcitx5VirtualKeyboard,
 }
 
 impl From<WindowEvent> for Message {
@@ -362,6 +338,7 @@ pub struct WindowManagerState<WM> {
     keyboard_backend: KeyboardBackend,
     wm: WM,
     hide_delay: Duration,
+    enable_fcitx5_virtual_keyboard_delay: Duration,
 }
 
 impl<WM> WindowManagerState<WM> {
@@ -391,6 +368,7 @@ impl<WM> WindowManagerState<WM> {
             keyboard_backend,
             wm,
             hide_delay: *config.hide_delay(),
+            enable_fcitx5_virtual_keyboard_delay: *config.enable_fcitx5_virtual_keyboard_delay(),
         }
     }
 
@@ -582,8 +560,8 @@ where
                     self.set_to_be_opened(WindowMask::Indicator, false);
                     task
                 } else {
-                    // manually increase close_req_token
-                    self.indicator_window_state.inc_close_req_token();
+                    // clear all inflight close requests
+                    self.indicator_window_state.clear_inflight_close_reqs();
                     Message::from_nothing()
                 }
             }
@@ -638,8 +616,8 @@ where
             //self.to_be_opened_flag |= WindowMask::Keyboard as u16;
             // TODO I have forgotten why this case is needed
         } else {
-            // manually increase close_req_token
-            self.keyboard_window_state.inc_close_req_token();
+            // clear all inflight close requests
+            self.keyboard_window_state.clear_inflight_close_reqs();
         }
         task
     }
@@ -916,7 +894,6 @@ where
                     WindowType::Keyboard => {
                         self.keyboard_window_state
                             .set_opened(&mut self.wm, portrait);
-                        task = task.chain(self.fcitx5_show().map_task());
                         match self.indicator_display() {
                             IndicatorDisplay::Auto | IndicatorDisplay::AlwaysOff => {
                                 if self.indicator_window_state.id().is_some() {
@@ -936,6 +913,12 @@ where
                         {
                             task = task.chain(t);
                         }
+                        task = task.chain(
+                            Task::future(time::sleep(self.enable_fcitx5_virtual_keyboard_delay))
+                                .map(move |_| {
+                                    Message::from(WindowEvent::EnableFcitx5VirtualKeyboard).into()
+                                }),
+                        );
                     }
                     WindowType::Indicator => {
                         self.indicator_window_state
@@ -948,7 +931,7 @@ where
                 }
                 task
             }
-            WindowEvent::ClosingWindow(id, snapshot, source) => {
+            WindowEvent::ClosingWindow(id, source, req_uuid) => {
                 tracing::debug!("Window is to be closed: {id}");
                 let window_state = match self.window_type(id) {
                     WindowType::Keyboard => {
@@ -966,10 +949,14 @@ where
                     WindowType::Unknown => None,
                 };
                 if let Some(window_state) = window_state {
-                    if let Some(snapshot) = snapshot {
-                        window_state.close_checked(&mut self.wm, snapshot, source)
-                    } else {
+                    if window_state.inflight_close_reqs.remove(&req_uuid) {
                         window_state.close(&mut self.wm, source)
+                    } else {
+                        tracing::debug!(
+                            "Window[{}] close req uuid[{req_uuid}] not found",
+                            window_state.name
+                        );
+                        Message::from_nothing()
                     }
                 } else {
                     Message::from_nothing()
@@ -1026,6 +1013,19 @@ where
                     window_state.set_movable(&self.wm, movable);
                 }
                 Message::from_nothing()
+            }
+            WindowEvent::EnableFcitx5VirtualKeyboard => {
+                let opened = self.keyboard_window_state.opened_id().is_some();
+                let no_inflight_close_reqs =
+                    self.keyboard_window_state.inflight_close_reqs.is_empty();
+                if opened && no_inflight_close_reqs {
+                    self.fcitx5_show().map_task()
+                } else {
+                    tracing::debug!(
+                        "Ignore WindowEvent::EnableFcitx5VirtualKeyboard: opened[{opened}], no_inflight_close_reqs[{no_inflight_close_reqs}]"
+                    );
+                    Message::from_nothing()
+                }
             }
         }
     }

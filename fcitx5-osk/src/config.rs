@@ -116,6 +116,14 @@ pub struct Config {
     #[serde(with = "humantime_serde", default = "default_hide_delay")]
     hide_delay: Duration,
 
+    /// How long will the fcitx5 virtual keyboard be enabled after the keyboard is shown.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(
+        with = "humantime_serde",
+        default = "default_enable_fcitx5_virtual_keyboard_delay"
+    )]
+    enable_fcitx5_virtual_keyboard_delay: Duration,
+
     /// Show or hide only by the user.
     #[getset(get_copy = "pub", set = "pub")]
     #[serde(default)]
@@ -198,6 +206,10 @@ fn default_holding_timeout() -> Duration {
 
 fn default_hide_delay() -> Duration {
     Duration::from_millis(1000)
+}
+
+fn default_enable_fcitx5_virtual_keyboard_delay() -> Duration {
+    Duration::from_millis(200)
 }
 
 fn default_theme() -> String {
