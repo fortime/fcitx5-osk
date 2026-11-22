@@ -38,7 +38,7 @@ tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 xkeysym = "0.2.1"
 zbus = { version = "5.2.0", features = ["tokio"], default-features = false }
 zvariant = "5.1.0"
-iced_layershell = "0.16.0"
+iced_layershell = "0.19.1"
 iced_futures = "0.14.0"
 iced_graphics = "0.14.0"
 humantime-serde = "1.1.1"
