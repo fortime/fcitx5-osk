@@ -42,7 +42,7 @@ iced_layershell = "0.16.0"
 iced_futures = "0.14.0"
 iced_graphics = "0.14.0"
 humantime-serde = "1.1.1"
-x11rb = { version = "0.13.1", default-features = false, features = ["dl-libxcb"] }
+x11rb = { version = "0.14.0", default-features = false, features = ["dl-libxcb"] }
 strum = { version = "0.27.1", features = ["derive"] }
 console-subscriber = "0.5.0"
 futures-util = "0.3.31"
