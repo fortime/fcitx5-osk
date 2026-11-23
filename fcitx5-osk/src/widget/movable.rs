@@ -657,8 +657,8 @@ impl<'a, 'b, Id, Message> MovableListShimMut<'a, 'b, Id, Message> {
         if self.horizontal {
             let mut max_idx = 0;
             let x_bound = position.x - dragged_slot_bounds.width / 2.;
-            for idx in 1..self.ids.len() {
-                if self.ids[idx].is_some() {
+            for (idx, id) in self.ids.iter().enumerate().skip(1) {
+                if id.is_some() {
                     let slot_bounds = layout.child(idx).bounds();
                     if x_bound < slot_bounds.x {
                         return Some(idx - 1);
@@ -670,8 +670,8 @@ impl<'a, 'b, Id, Message> MovableListShimMut<'a, 'b, Id, Message> {
         } else {
             let mut max_idx = 0;
             let y_bound = position.y - dragged_slot_bounds.height / 2.;
-            for idx in 1..self.ids.len() {
-                if self.ids[idx].is_some() {
+            for (idx, id) in self.ids.iter().enumerate().skip(1) {
+                if id.is_some() {
                     let slot_bounds = layout.child(idx).bounds();
                     if y_bound < slot_bounds.y {
                         return Some(idx - 1);
@@ -816,6 +816,7 @@ where
     fn seal(&mut self) {
         let mut idx = self.children.len();
         let len = self.children.len() + self.raw_children.len();
+        #[allow(clippy::explicit_counter_loop)]
         for raw_child in self.raw_children.drain(..) {
             if let Some((id, element)) = raw_child {
                 let mut element = element.map(MovableListInnerMessage::OuterMessage);

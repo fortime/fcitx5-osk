@@ -479,15 +479,12 @@ fn listen(output_context: OutputContext) -> Result<impl FnOnce() -> Result<()>> 
                     atom,
                     time: _,
                     state,
-                }) => {
-                    if atom == atoms.RESOURCE_MANAGER {
-                        tracing::debug!("Property[RESOURCE_MANAGER] changed, state: {:?}", state,);
-                        // reload database
-                        database = resource_manager::new_from_default(&conn)?;
-                        let scale_factor =
-                            get_scale_factor(&conn, default_screen, &database, &atoms)?;
-                        output_context.update_scale_factor(scale_factor);
-                    }
+                }) if atom == atoms.RESOURCE_MANAGER => {
+                    tracing::debug!("Property[RESOURCE_MANAGER] changed, state: {:?}", state,);
+                    // reload database
+                    database = resource_manager::new_from_default(&conn)?;
+                    let scale_factor = get_scale_factor(&conn, default_screen, &database, &atoms)?;
+                    output_context.update_scale_factor(scale_factor);
                 }
                 _ => {}
             }

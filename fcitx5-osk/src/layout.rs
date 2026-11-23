@@ -697,7 +697,9 @@ impl ToolbarLayout {
         } else {
             (consumed, Length::Fixed(max_width.val()))
         };
+
         let mut index = state.cursor();
+        #[allow(clippy::explicit_counter_loop)]
         for candidate in &candidate_list[..consumed] {
             candidate_row = candidate_row.push(
                 candidate_btn(candidate, font, font_size, max_width)

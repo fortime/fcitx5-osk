@@ -689,19 +689,18 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for OutputListener {
                 }
                 proxy.ack_configure(serial);
             }
-            LayerShellSurfaceEvent::Closed => {
+            LayerShellSurfaceEvent::Closed
                 if state
                     .geometry_states
                     .iter()
-                    .any(|s| s.output_name == output_name && s.layer_shell_surface == *proxy)
-                {
-                    // Client will only destroy layer shell surface after it is removed from state. So
-                    // this is closed from the server side.
-                    tracing::error!(
-                        "The layer shell surface of output[{}] is closed from the server side, the change of geometry on this output won't work",
-                        output_name
-                    );
-                }
+                    .any(|s| s.output_name == output_name && s.layer_shell_surface == *proxy) =>
+            {
+                // Client will only destroy layer shell surface after it is removed from state. So
+                // this is closed from the server side.
+                tracing::error!(
+                    "The layer shell surface of output[{}] is closed from the server side, the change of geometry on this output won't work",
+                    output_name
+                );
             }
             _ => {}
         }
@@ -765,9 +764,7 @@ fn listen(output_context: &OutputContext) -> Result<impl Future<Output = Result<
     };
     Ok(async move {
         // we should not use blocking_dispatch here. because layershellev uses blocking_dispatch, if we use blocking_dispatch it will freeze the eventloop of layershellev
-        loop {
-            std::future::poll_fn(|cx| event_queue.poll_dispatch_pending(cx, &mut output_listener))
-                .await?;
-        }
+        std::future::poll_fn(|cx| event_queue.poll_dispatch_pending(cx, &mut output_listener))
+            .await?;
     })
 }

@@ -16,5 +16,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 zbus.workspace = true
 zvariant.workspace = true
-tempfile.workspace = true
+tempfile = { workspace = true, optional = true }
 console-subscriber = { workspace = true, optional = true }
+
+[features]
+console-subscriber = ["dep:tempfile", "dep:console-subscriber"]

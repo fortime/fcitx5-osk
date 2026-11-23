@@ -393,10 +393,7 @@ mod v1 {
         };
         Ok((client, async move {
             // we should not use blocking_dispatch here. because layershellev uses blocking_dispatch, if we use blocking_dispatch it will freeze the eventloop of layershellev
-            loop {
-                std::future::poll_fn(|cx| event_queue.poll_dispatch_pending(cx, &mut server))
-                    .await?;
-            }
+            std::future::poll_fn(|cx| event_queue.poll_dispatch_pending(cx, &mut server)).await?;
         }))
     }
 }
