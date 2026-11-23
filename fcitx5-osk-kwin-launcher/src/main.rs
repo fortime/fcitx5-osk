@@ -1,5 +1,5 @@
 use std::{
-    env,
+    env, future,
     os::fd::{FromRawFd, OwnedFd},
     path::PathBuf,
     process,
@@ -542,12 +542,10 @@ async fn run(args: &Args) -> Result<()> {
             tracing::error!("health_check returns abnormally");
         }
         res = {
-            let mut shutdown_flag = shutdown_flag.clone();
             async move {
                 if lockscreen_active {
-                    // there is no need to watch_fcitx5 in lockscreen mode, wait shutting down.
-                    shutdown_flag.wait_for_shutdown().await;
-                    Ok(())
+                    // there is no need to watch_fcitx5 in lockscreen mode
+                    future::pending().await
                 } else {
                     watch_fcitx5_fut.await
                 }
