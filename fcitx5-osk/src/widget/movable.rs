@@ -64,8 +64,10 @@ use crate::{
 #[derive(Default)]
 struct MovableState {
     prev_pointer: Option<(Option<TouchFinger>, Point)>,
+    // The position of the pointer in the window, after each movement, the position of the pointer
+    // will be the same.
     pointer: Option<(Option<TouchFinger>, Point)>,
-    last: Option<Instant>,
+    pending_delta: Option<Vector>,
 }
 
 /// A widget works like MouseArea, Emit messages on mouse enter/leave events and finger move event.
@@ -171,6 +173,16 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
+        let state: &mut MovableState = tree.state.downcast_mut();
+        if self.movable && matches!(event, Event::Window(WindowEvent::RedrawRequested(_))) {
+            if let Some(delta) = state.pending_delta.take()
+                && delta != Vector::ZERO
+            {
+                shell.publish((self.on_move)(delta));
+            }
+            return;
+        }
+
         let params = match *event {
             Event::Mouse(MouseEvent::ButtonPressed(MouseButton::Left)) => {
                 Some((true, false, None, cursor.position()))
@@ -195,8 +207,9 @@ where
         };
 
         if !self.movable {
+            state.pointer = None;
+            state.pending_delta = None;
             if let Some((pressed, moved, cur_pointer, cur_position)) = params {
-                let state: &mut MovableState = tree.state.downcast_mut();
                 if pressed {
                     if let Some(cur_position) =
                         cur_position.filter(|p| layout.bounds().contains(*p))
@@ -223,7 +236,6 @@ where
             let Some((pressed, moved, cur_pointer, cur_position)) = params else {
                 return;
             };
-            let state: &mut MovableState = tree.state.downcast_mut();
             if state.pointer.is_none() {
                 state.pointer = state.prev_pointer.take();
             } else {
@@ -235,8 +247,8 @@ where
                 }
                 if let Some(cur_position) = cur_position.filter(|p| layout.bounds().contains(*p)) {
                     state.pointer = Some((cur_pointer, cur_position));
+                    state.pending_delta = None;
                     if let Some(on_move_start) = self.on_move_start.clone() {
-                        state.last = None;
                         shell.publish(on_move_start);
                     }
                     shell.capture_event();
@@ -249,16 +261,11 @@ where
                         None
                     }
                 }) {
-                    // update delta
                     if let Some(cur_position) = cur_position {
-                        let now = Instant::now();
-                        // avoid jitter
-                        state
-                            .last
-                            .take_if(|last| now.duration_since(*last) > Duration::from_millis(50));
-                        if state.last.is_none() {
-                            shell.publish((self.on_move)(cur_position - *position));
-                            state.last = Some(now);
+                        let delta = cur_position - *position;
+                        state.pending_delta = Some(delta);
+                        if delta != Vector::ZERO {
+                            shell.request_redraw();
                         }
                     }
                     shell.capture_event();
@@ -267,7 +274,15 @@ where
                 .pointer
                 .take_if(|(pointer, _)| *pointer == cur_pointer)
             {
-                // on_move_end
+                // Flush motion that arrived after the last redraw before ending the drag.
+                // A canceled touch discards the pending motion.
+                let pending = state.pending_delta.take();
+                if !matches!(event, Event::Touch(TouchEvent::FingerLost { .. }))
+                    && let Some(delta) = pending
+                    && delta != Vector::ZERO
+                {
+                    shell.publish((self.on_move)(delta));
+                }
                 if let Some(on_move_end) = self.on_move_end.clone() {
                     shell.publish(on_move_end);
                 }
