@@ -33,7 +33,7 @@ prepare() {
   cargo fetch --target "$(rustc -vV | sed -n 's|host: ||p')"
 }
 
-build () {
+build() {
   cmake \
       -D CMAKE_INSTALL_PREFIX=/usr \
       -D DBUS_CONFIG_PARENT_DIR=/usr/share \
