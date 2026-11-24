@@ -137,7 +137,7 @@ impl WaylandKeyboard {
     }
 
     pub fn update(&mut self, message: WaylandMessage) -> Task<WaylandMessage> {
-        if self.shutdown_flag.get() {
+        if self.shutdown_flag.get().is_shutting_down() {
             self.input_method_context.close();
             self.output_context.close();
         }
