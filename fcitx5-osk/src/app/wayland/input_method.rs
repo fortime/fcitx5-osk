@@ -371,7 +371,6 @@ mod v1 {
     struct WaylandInputMethodV1Server {
         tx: UnboundedSender<WaylandMessage>,
         input_method_context: Arc<Mutex<Option<InputMethodContext>>>,
-        // time, key, deplay, rate, repeat
         repeat_tx: UnboundedSender<Option<RepeatKey>>,
         /// grab the keyboard so that we can use `input_method_context.key` and
         /// `input_method_context.modifiers`
